@@ -468,7 +468,15 @@ POST /places/{brand}/{slug}/settings/revert/{id}  the `before` of that change ma
 POST /places/{brand}/{slug}/withdraw|restore  → 200 as GET; the settings are kept
 POST /places                                  {brand, slug} → 201 as GET; 409 {"error":
                                               "exists"} once registered (by hand or an edit)
+PUT  /places/{brand}/{slug}/gmb               {gmb_id: n | null} → 200 as GET (with gmb_id); 404
+                                              unknown place; 409 {"error": "gmb_taken"}
+GET  /gmbs                                    {"<gmb_id>": {brand, location}} for every
+                                              place with a gmb_id (Work read)
 ```
+
+- **A place says which GMB it is the landing of** (`places.gmb_id`, the conductor's `gmbs.id`,
+  held as opaque; unique among places, nullable). Not journaled in `place_changes` (that holds
+  settings); the change is published as `places`.
 
 - **Checked as kitstart reads them, refused instead of dropped.** kitstart drops a field it
   cannot read so a page never fails on one; the panel names it in a 422 so the editor sees
@@ -485,7 +493,7 @@ POST /places                                  {brand, slug} → 201 as GET; 409 
   calls, `by = cli`, patching over what is there when its transaction begins.
 - **History is append-only, places never deleted**: triggers refuse any UPDATE or DELETE of
   `place_changes`, a DELETE of `places` or `place_settings` (cleared is `{}`), and any UPDATE
-  of `places` but `withdrawn`.
+  of `places` but `withdrawn` and `gmb_id`.
 
 ## Pricing
 

@@ -277,6 +277,7 @@ fn refused(e: PlaceError) -> eyre::Report {
 		}
 		PlaceError::NotFound => eyre::eyre!("no such change of this place"),
 		PlaceError::Conflict => eyre::eyre!("the settings changed meanwhile; run it again"),
+		PlaceError::GmbTaken => eyre::eyre!("the GMB is linked to another place"),
 		PlaceError::Internal(e) => e,
 	}
 }

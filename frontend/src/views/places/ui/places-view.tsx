@@ -1,5 +1,5 @@
 import { Settled, Skeleton } from "@evinvest/uikit";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { fetchFunnelByLocation } from "@/entities/funnel";
 import { type PlaceKey, fetchPlaces } from "@/entities/place";
@@ -8,6 +8,7 @@ import { may, useMe } from "@/entities/session";
 import { AddPlaceButton } from "@/features/add-place";
 import { type Period, rangeOf } from "@/features/funnel-filters";
 import { useT } from "@/shared/i18n";
+import { replaceQuery, useQuery } from "@/shared/lib/router";
 import { useLastNonNull } from "@/shared/lib/use-last-non-null";
 import { useResource } from "@/shared/lib/use-resource";
 import { EmptyState } from "@/shared/ui/empty-state";
@@ -32,7 +33,12 @@ export function PlacesView() {
   // Fixed when the screen opens: a range that moved mid-render would refetch in a loop.
   const [range] = useState(() => rangeOf(WINDOW_DAYS, new Date()));
   const [version, setVersion] = useState(0);
-  const [open, setOpen] = useState<PlaceKey | null>(null);
+  // The open place lives in the URL (`?brand=&location=`), so another service can link to it.
+  const params = useQuery();
+  const brand = params.get("brand");
+  const location = params.get("location");
+  const open = useMemo<PlaceKey | null>(() => (brand && location ? { brand, slug: location } : null), [brand, location]);
+  const setOpen = (key: PlaceKey | null) => replaceQuery(key ? new URLSearchParams({ brand: key.brand, location: key.slug }) : new URLSearchParams());
   // Title and form stay put while the sheet slides away.
   const shown = useLastNonNull(open);
   const refresh = () => setVersion((v) => v + 1);
