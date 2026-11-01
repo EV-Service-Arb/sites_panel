@@ -1,5 +1,5 @@
 //! A place's live settings over HTTP (`panel::place`): the editor's routes under `/api/v1`
-//! behind the sign-in, and the sites' read under `/api/internal`, which has no session.
+//! behind the conductor's assertion, and the sites' read under `/api/internal`, which has none.
 //!
 //! ```text
 //! GET  /api/v1/places/{brand}/{slug}/settings                 {brand, slug, withdrawn, settings,
@@ -48,29 +48,25 @@ use uuid::Uuid;
 
 use crate::{
 	api::ApiError,
+	gate::Caller,
 	http::{ApiRoute, Section},
-	signin::{Caller, Freshness},
 };
 
-/// The editor's routes. A write asks concierge afresh: a permission revoked a moment ago
-/// must not still move a phone number.
 pub(crate) fn routes() -> Vec<ApiRoute> {
-	use Freshness::{Cached, Fresh};
 	use Method as M;
 	let work = Some(Section::Work);
 	vec![
-		ApiRoute::new(M::GET, "/places/{brand}/{slug}/settings", work, Cached, settings),
-		ApiRoute::new(M::GET, "/places/{brand}/{slug}/settings/history", work, Cached, history),
-		ApiRoute::new(M::POST, "/places", work, Fresh, register),
-		ApiRoute::new(M::PUT, "/places/{brand}/{slug}/settings", work, Fresh, set),
-		ApiRoute::new(M::POST, "/places/{brand}/{slug}/settings/revert/{id}", work, Fresh, revert),
-		ApiRoute::new(M::POST, "/places/{brand}/{slug}/withdraw", work, Fresh, withdraw),
-		ApiRoute::new(M::POST, "/places/{brand}/{slug}/restore", work, Fresh, restore),
+		ApiRoute::new(M::GET, "/places/{brand}/{slug}/settings", work, settings),
+		ApiRoute::new(M::GET, "/places/{brand}/{slug}/settings/history", work, history),
+		ApiRoute::new(M::POST, "/places", work, register),
+		ApiRoute::new(M::PUT, "/places/{brand}/{slug}/settings", work, set),
+		ApiRoute::new(M::POST, "/places/{brand}/{slug}/settings/revert/{id}", work, revert),
+		ApiRoute::new(M::POST, "/places/{brand}/{slug}/withdraw", work, withdraw),
+		ApiRoute::new(M::POST, "/places/{brand}/{slug}/restore", work, restore),
 	]
 }
 
-/// The sites' reads — a place's settings, a brand's pricing and experiments — mounted whether or not signing
-/// in is configured. Bounded like ingest, with one budget for both (the same sites call both);
+/// The sites' reads — a place's settings, a brand's pricing and experiments. Bounded like ingest, with one budget for both (the same sites call both);
 /// a site answered 503 serves its baked place, so shedding costs a site nothing. The pricing
 /// route is answered `{}` instead of a 503: its contract has no 5xx.
 pub fn internal() -> Router<Panel> {
@@ -149,7 +145,6 @@ fn admin(caller: &Caller) -> Result<(), ApiError> {
 	if caller.permissions.may(Places::Edit) { Ok(()) } else { Err(ApiError::Forbidden) }
 }
 
-/// Who the history names: the user's email, their id when concierge gave none.
 /// Who a history names: the user's email, their id when concierge gave none. One rule for a
 /// place's, a price list's and an experiment's changes.
 pub(crate) fn editor(caller: &Caller) -> Editor {

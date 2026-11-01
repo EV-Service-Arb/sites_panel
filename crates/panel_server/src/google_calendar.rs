@@ -1,7 +1,7 @@
 //! The `google_calendar` booking adapter: a brand owner's Google Calendar, pulled
 //! (`events.list` with a sync token; Google appointment schedules send no webhooks), its
 //! appointment bookings read as [`BookingEvent`]s for [`panel::Panel::ingest_bookings`]. And
-//! the CLI's one-off consent (`panel booking google-authorize <brand>`) that yields the
+//! the CLI's one-off consent (`sites_panel booking google-authorize <brand>`) that yields the
 //! owner's refresh token.
 //!
 //! ```text
@@ -29,6 +29,7 @@
 
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use eyre::WrapErr;
 use jiff::{SignedDuration, Timestamp};
 use panel::{
@@ -37,9 +38,22 @@ use panel::{
 };
 use panel_core::{ids::BrandId, phone};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, watch};
 use uuid::Uuid;
 use zeroize::Zeroizing;
+
+/// 256 random bits, base64url: a state, a PKCE verifier.
+fn random_token() -> eyre::Result<String> {
+	let mut raw = Zeroizing::new([0u8; 32]);
+	getrandom::fill(raw.as_mut_slice()).map_err(|e| eyre::eyre!("the OS random source failed: {e}"))?;
+	Ok(URL_SAFE_NO_PAD.encode(raw.as_slice()))
+}
+
+/// The S256 code challenge of a PKCE verifier.
+fn pkce_challenge(verifier: &str) -> String {
+	URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()))
+}
 
 pub const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 pub const API_BASE: &str = "https://www.googleapis.com/calendar/v3";
@@ -421,11 +435,11 @@ pub async fn authorize(client_id: &str, client_secret: &str, port: u16, token_ur
 		.await
 		.wrap_err_with(|| format!("listening on 127.0.0.1:{port}"))?;
 	let redirect_uri = format!("http://127.0.0.1:{}/", listener.local_addr()?.port());
-	let state = panel::session::random_token()?;
-	let verifier = Zeroizing::new(panel::session::random_token()?);
+	let state = random_token()?;
+	let verifier = Zeroizing::new(random_token()?);
 	println!(
 		"Open this URL as the brand's calendar owner and allow read access:\n\n{}\n",
-		consent_url(client_id, &redirect_uri, &state, &panel::session::pkce_challenge(&verifier))?
+		consent_url(client_id, &redirect_uri, &state, &pkce_challenge(&verifier))?
 	);
 	let code = tokio::time::timeout(Duration::from_secs(600), async {
 		loop {

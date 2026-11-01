@@ -101,7 +101,6 @@ fn pricing_changed(brand: &BrandId, at: Timestamp) -> crate::live::Change {
 		topic: crate::live::Topic::Pricing,
 		brand: Some(brand.clone()),
 		id: None,
-		user: None,
 		at,
 	}
 }

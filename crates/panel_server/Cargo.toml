@@ -1,6 +1,6 @@
 [package]
 name = "panel_server"
-description = "The Service-Arb panel service: the `panel` binary, its CLI and the HTTP ingest"
+description = "The Service-Arb sites service: the `sites_panel` binary, its CLI and its HTTP"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -11,30 +11,33 @@ readme.workspace = true
 [lib]
 path = "src/lib.rs"
 
-# The binary keeps the name the image, the flake and the docs know it by.
 [[bin]]
-name = "panel"
+name = "sites_panel"
 path = "src/main.rs"
 
+[features]
+# The router called as the conductor calls it, for this crate's tests.
+testing = ["panel/testing", "sa_auth/catalog", "tower/util"]
+
 [dependencies]
-axum = { workspace = true, features = ["ws"] }
+axum.workspace = true
 base64.workspace = true
 clap.workspace = true
 color-eyre.workspace = true
 ev_lib = { workspace = true, features = ["settings", "error_monitoring"] }
 eyre.workspace = true
+futures.workspace = true
+getrandom.workspace = true
 http-body-util.workspace = true
-hyper-util.workspace = true
 jiff.workspace = true
 panel.workspace = true
 panel_contracts.workspace = true
 panel_core.workspace = true
 reqwest.workspace = true
-sa_auth = { workspace = true, features = ["catalog"] }
+sa_auth.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
-subtle.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tonic.workspace = true
@@ -48,9 +51,9 @@ uuid = { workspace = true, features = ["serde"] }
 zeroize.workspace = true
 
 [dev-dependencies]
-futures.workspace = true
 panel = { workspace = true, features = ["testing"] }
 panel_contracts = { workspace = true, features = ["testing"] }
+panel_server = { workspace = true, features = ["testing"] }
 sqlx.workspace = true
 tower = { workspace = true, features = ["util"] }
 

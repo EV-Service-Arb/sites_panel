@@ -1,5 +1,5 @@
 //! A brand's experiments over HTTP (`panel::experiment`): the screens' routes under `/api/v1`
-//! behind the sign-in, and the sites' read under `/api/internal`, which has no session.
+//! behind the conductor's assertion, and the sites' read under `/api/internal`, which has none.
 //!
 //! ```text
 //! GET /api/v1/experiments?brand                    {experiments: [Item]}: one brand's, or every brand's
@@ -38,20 +38,19 @@ use serde_json::{Map, Value, json};
 
 use crate::{
 	api::ApiError,
+	gate::Caller,
 	http::{ApiRoute, Section},
 	places::editor,
-	signin::{Caller, Freshness},
 };
 
 /// How long a site's read may take before it is answered with no overrides.
 const LIVE_WITHIN: Duration = Duration::from_millis(2500);
 
-/// The screens' read, and a change, which asks concierge afresh as a place's does.
 pub(crate) fn routes() -> Vec<ApiRoute> {
 	let analysis = Some(Section::Analysis);
 	vec![
-		ApiRoute::new(Method::GET, "/experiments", analysis, Freshness::Cached, list),
-		ApiRoute::new(Method::PUT, "/experiments/{brand}/{key}", analysis, Freshness::Fresh, configure),
+		ApiRoute::new(Method::GET, "/experiments", analysis, list),
+		ApiRoute::new(Method::PUT, "/experiments/{brand}/{key}", analysis, configure),
 	]
 }
 

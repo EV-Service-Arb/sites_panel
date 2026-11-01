@@ -1,5 +1,5 @@
 //! Booking over HTTP (`panel::booking`): an operator's routes under `/api/v1`, and the
-//! providers' webhooks under `/api/hooks/booking`, which have no session — a provider's
+//! providers' webhooks under `/api/hooks/booking`, which take no assertion — a provider's
 //! signature, checked by its adapter, is what lets one in.
 //!
 //! ```text
@@ -40,20 +40,19 @@ use uuid::Uuid;
 
 use crate::{
 	api::{ApiError, ApiResult, body},
+	gate::Caller,
 	http::{ApiRoute, Section},
-	signin::{Caller, Freshness},
 };
 
 /// The operator's booking routes.
 pub(crate) fn routes() -> Vec<ApiRoute> {
-	use Freshness::Cached;
 	use Method as M;
 	let work = Some(Section::Work);
 	vec![
-		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/booking", work, Cached, slot),
-		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/booking/status", work, Cached, close),
-		ApiRoute::new(M::GET, "/bookings/unmatched", work, Cached, unmatched),
-		ApiRoute::new(M::POST, "/bookings/{id}/attach", work, Cached, attach),
+		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/booking", work, slot),
+		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/booking/status", work, close),
+		ApiRoute::new(M::GET, "/bookings/unmatched", work, unmatched),
+		ApiRoute::new(M::POST, "/bookings/{id}/attach", work, attach),
 	]
 }
 
@@ -70,7 +69,7 @@ pub struct Hooks {
 	pub sources: PushSources,
 }
 
-/// `POST /api/hooks/booking/{provider}/{brand}`: mounted without a session. Bounded on its own
+/// `POST /api/hooks/booking/{provider}/{brand}`: mounted without an assertion. Bounded on its own
 /// budget; the edge rate-limits `/api/hooks` per client IP.
 pub fn hooks(panel: Panel, sources: PushSources) -> Router {
 	let layers = ServiceBuilder::new()

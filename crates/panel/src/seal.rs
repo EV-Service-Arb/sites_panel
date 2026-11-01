@@ -1,9 +1,9 @@
 //! Encryption at rest for what the database must not hold in the clear: an event's PII and
-//! a source's HMAC secret.
+//! the notes rendered from it.
 //!
 //! XChaCha20-Poly1305 with a random 24-byte nonce per seal, so there is no nonce
 //! bookkeeping to get wrong (the same construction as banking's signer `key_vault`). What a
-//! blob belongs to — the event id, the key id — is bound as associated data, so a blob
+//! blob belongs to — the event id, the note's rule and event — is bound as associated data, so a blob
 //! copied onto another row does not open there.
 //!
 //! This protects a stolen dump or backup. It does not protect against the running
@@ -47,7 +47,7 @@ impl DataKey {
 		Ok(Self { key: Zeroizing::new(key) })
 	}
 
-	/// A fresh random key, as `panel gen-data-key` prints it.
+	/// A fresh random key, as `sites_panel gen-data-key` prints it.
 	pub fn generate_hex() -> Result<String, SealError> {
 		let mut key = Zeroizing::new([0u8; 32]);
 		getrandom::fill(key.as_mut_slice()).map_err(|_| SealError::Random)?;
@@ -73,12 +73,6 @@ impl DataKey {
 		let mut mac = <Hmac<Sha256> as hmac::KeyInit>::new_from_slice(derived.as_slice()).expect("HMAC accepts any key length");
 		mac.update(canonical);
 		mac.finalize().into_bytes().into()
-	}
-
-	/// The key the Telegram buttons' callback data is signed with
-	/// (`panel_core::notify::callback_data`).
-	pub fn telegram_callback_key(&self) -> Zeroizing<[u8; 32]> {
-		self.derive(b"sa-panel/tg-callback-key/v1")
 	}
 
 	/// A key for one purpose, named by `label`, that says nothing of this one or the others.
@@ -129,14 +123,9 @@ pub fn pii_aad(event_id: uuid::Uuid) -> Vec<u8> {
 	[b"sa-panel/pii/v1/".as_slice(), event_id.as_bytes()].concat()
 }
 
-/// Associated data of a source's HMAC secret.
-pub fn source_secret_aad(key_id: &str) -> Vec<u8> {
-	[b"sa-panel/source-secret/v1/".as_slice(), key_id.as_bytes()].concat()
-}
-
-/// Associated data of a queued Telegram message's text.
-pub fn telegram_text_aad(rule: &str, event_id: uuid::Uuid, chat_id: i64) -> Vec<u8> {
-	[b"sa-panel/tg-text/v1/".as_slice(), rule.as_bytes(), b"/", event_id.as_bytes(), &chat_id.to_be_bytes()].concat()
+/// Associated data of a note's texts.
+pub fn note_aad(rule: &str, event_id: uuid::Uuid) -> Vec<u8> {
+	[b"sa-panel/note/v1/".as_slice(), rule.as_bytes(), b"/", event_id.as_bytes()].concat()
 }
 
 #[cfg(test)]

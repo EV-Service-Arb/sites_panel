@@ -1,16 +1,14 @@
-//! The operator API, `/api/v1`, for the panel's front end. JSON in and out; every request has
-//! passed the sign-in gate (`signin::gate`), so a [`Caller`] is in its extensions. What an action
+//! The operator API, `/api/v1`, for the sites' front end through the conductor. JSON in and out;
+//! every request has passed the assertion gate (`gate::user`), so a [`Caller`] is in its extensions. What an action
 //! means is the engine's (`panel::operator`); this only translates and asks the caller's
 //! permissions.
 //!
 //! Timestamps are RFC 3339 strings, money is minor units of its currency.
 
-use std::collections::BTreeSet;
-
 use axum::{
 	Extension, Json,
 	extract::{Path, Query, State, rejection::JsonRejection},
-	http::{HeaderMap, HeaderValue, Method, StatusCode, header},
+	http::{HeaderMap, Method, StatusCode},
 	response::{IntoResponse, Response},
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -29,11 +27,12 @@ use panel_core::{
 use sa_auth::{Leads, Pii as SeesPii, SourceKind};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
+use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::{
+	gate::Caller,
 	http::{ApiRoute, Section},
-	signin::{Caller, Freshness},
 };
 
 /// The longest span the funnel sums over.
@@ -79,27 +78,22 @@ pub(crate) fn recorded(replayed: bool, v: Value) -> Response {
 }
 
 pub(crate) fn routes() -> Vec<ApiRoute> {
-	use Freshness::{Cached, Fresh};
 	use Method as M;
 	let work = Some(Section::Work);
-	let admin = Some(Section::Admin);
 	vec![
-		ApiRoute::new(M::GET, "/me", None, Cached, me),
-		ApiRoute::new(M::GET, "/leads", work, Cached, leads),
-		ApiRoute::new(M::POST, "/leads", work, Cached, create_lead),
-		ApiRoute::new(M::GET, "/leads/counts", work, Cached, lead_counts),
-		ApiRoute::new(M::GET, "/leads/{brand}/{lead}", work, Cached, lead),
-		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/stage", work, Cached, stage),
-		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/messaged", work, Cached, messaged),
-		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/calls/attempt", work, Cached, attempt_call),
-		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/calls/{attempt}/outcome", work, Cached, call_outcome),
-		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/payments", work, Cached, payment),
-		ApiRoute::new(M::GET, "/funnel", Some(Section::Analysis), Cached, funnel),
-		ApiRoute::new(M::GET, "/places", work, Cached, places),
-		ApiRoute::new(M::GET, "/sources", admin, Cached, sources),
-		// A key must not be minted or revoked on a permission revoked a moment ago.
-		ApiRoute::new(M::POST, "/sources", admin, Fresh, add_source),
-		ApiRoute::new(M::DELETE, "/sources/{key_id}", admin, Fresh, revoke_source),
+		ApiRoute::new(M::GET, "/me", None, me),
+		ApiRoute::new(M::GET, "/leads", work, leads),
+		ApiRoute::new(M::POST, "/leads", work, create_lead),
+		ApiRoute::new(M::GET, "/leads/counts", work, lead_counts),
+		ApiRoute::new(M::GET, "/leads/{brand}/{lead}", work, lead),
+		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/stage", work, stage),
+		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/messaged", work, messaged),
+		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/no_answer", work, no_answer),
+		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/calls/attempt", work, attempt_call),
+		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/calls/{attempt}/outcome", work, call_outcome),
+		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/payments", work, payment),
+		ApiRoute::new(M::GET, "/funnel", Some(Section::Analysis), funnel),
+		ApiRoute::new(M::GET, "/places", work, places),
 	]
 }
 
@@ -222,8 +216,20 @@ fn day_start(d: Date) -> ApiResult<Timestamp> {
 
 // ── /me ─────────────────────────────────────────────────────────────────────────────────
 
-async fn me(Extension(caller): Extension<Caller>) -> Json<Caller> {
-	Json(caller)
+/// `GET /me`.
+#[derive(Serialize, TS)]
+pub struct Me {
+	/// The concierge user id: what a user's own marks are kept under.
+	sub: Uuid,
+	#[ts(type = "Array<Permission>")]
+	permissions: Vec<String>,
+}
+
+async fn me(Extension(caller): Extension<Caller>) -> Json<Me> {
+	Json(Me {
+		sub: caller.user_id,
+		permissions: caller.permissions.iter().map(str::to_owned).collect(),
+	})
 }
 
 // ── leads ───────────────────────────────────────────────────────────────────────────────
@@ -560,6 +566,16 @@ struct MessagedBody {
 	channel: String,
 }
 
+/// A call nobody answered (`call.attempted` + `call.logged{no_answer}`): the Telegram button's
+/// action, so its Idempotency-Key is required — a press repeated records nothing twice.
+async fn no_answer(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Path((brand, lead)): Path<(String, String)>, headers: HeaderMap) -> ApiResult<Response> {
+	allow(caller.permissions.may(Leads::Edit))?;
+	let key = idempotency_key(&headers)?.ok_or_else(|| ApiError::BadRequest("Idempotency-Key is required".into()))?;
+	let (brand, lead) = ids(&brand, &lead)?;
+	let done = panel.no_answer_once(Actor(caller.user_id), &brand, &lead, Timestamp::now(), &key).await?;
+	Ok(recorded(done.replayed, json!({ "event_id": done.value.raw().to_string() })))
+}
+
 /// The customer wrote on a messenger, as the operator saw it (`lead.messaged` from the panel).
 async fn messaged(
 	State(panel): State<Panel>,
@@ -789,75 +805,6 @@ async fn lead_counts(State(panel): State<Panel>, q: Result<Query<CountsQuery>, a
 	let total: u64 = counts.stages.iter().map(|(_, n)| n).sum();
 	let stages: serde_json::Map<String, Value> = counts.stages.into_iter().map(|(stage, n)| (stage.as_str().to_owned(), json!(n))).collect();
 	Ok(Json(json!({ "stages": stages, "overdue": counts.overdue, "total": total })))
-}
-
-// ── sources (admin) ─────────────────────────────────────────────────────────────────────
-
-#[derive(Serialize)]
-struct SourceDto {
-	key_id: String,
-	kind: &'static str,
-	brands: Vec<String>,
-	created_at: String,
-	revoked_at: Option<String>,
-}
-
-async fn sources(State(panel): State<Panel>) -> ApiResult<Json<Value>> {
-	let sources: Vec<SourceDto> = panel
-		.store()
-		.sources()
-		.await?
-		.into_iter()
-		.map(|s| SourceDto {
-			key_id: s.grant.key_id,
-			kind: s.grant.kind.as_str(),
-			brands: s.grant.brands.iter().map(|b| b.as_str().to_owned()).collect(),
-			created_at: s.created_at.to_string(),
-			revoked_at: s.revoked_at.map(|t| t.to_string()),
-		})
-		.collect();
-	Ok(Json(json!({ "sources": sources })))
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct AddSource {
-	key_id: String,
-	kind: String,
-	brands: Vec<String>,
-}
-
-async fn add_source(State(panel): State<Panel>, Extension(caller): Extension<Caller>, b: Result<Json<AddSource>, JsonRejection>) -> ApiResult<Response> {
-	let b = body(b)?;
-	let kind: SourceKind = b.kind.parse().map_err(Invalid::from)?;
-	// The panel's own events carry no key (`key_id` NULL): a key of kind panel would only let
-	// something outside pass its writes off as typed in by hand.
-	if !kind.keyed() {
-		return Err(ApiError::BadRequest(format!("a key of kind {kind} is not issued: the panel writes without one")));
-	}
-	let brands = b.brands.iter().map(|b| BrandId::parse(b)).collect::<Result<BTreeSet<_>, _>>()?;
-	if !panel_core::ids::is_slug(&b.key_id) {
-		return Err(ApiError::BadRequest("key_id is a lowercase slug of 1–64 of [a-z0-9_-]".into()));
-	}
-	if brands.is_empty() {
-		return Err(ApiError::BadRequest("a source writes for at least one brand".into()));
-	}
-	let Some(added) = panel.add_source(&b.key_id, kind, brands).await? else {
-		return Err(ApiError::Conflict(format!("a source {} exists already", b.key_id)));
-	};
-	tracing::info!(user_id = %caller.user_id, key_id = added.key_id, kind = %kind, "source added from the panel");
-	// Shown once: the answer is the only place the secret ever is.
-	let mut res = created(json!({ "key_id": added.key_id, "secret": added.secret.as_str() }));
-	res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
-	Ok(res)
-}
-
-async fn revoke_source(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Path(key_id): Path<String>) -> ApiResult<StatusCode> {
-	if !panel.revoke_source(&key_id).await? {
-		return Err(ApiError::NotFound);
-	}
-	tracing::info!(user_id = %caller.user_id, key_id, "source revoked from the panel");
-	Ok(StatusCode::NO_CONTENT)
 }
 
 #[cfg(test)]

@@ -1,5 +1,5 @@
 //! A brand's pricing over HTTP (`panel::pricing`): the editor's routes under `/api/v1` behind
-//! the sign-in, and the sites' read under `/api/internal`, which has no session.
+//! the conductor's assertion, and the sites' read under `/api/internal`, which has none.
 //!
 //! ```text
 //! GET    /api/v1/pricing                            {items: [Item]}: every brand the panel knows
@@ -42,26 +42,24 @@ use serde_json::{Value, json};
 
 use crate::{
 	api::ApiError,
+	gate::Caller,
 	http::{ApiRoute, Section},
 	places::editor,
-	signin::{Caller, Freshness},
 };
 
 /// How long the sites' read may take before they are answered `{}`: kitstart gives up at 3 s.
 const LIVE_WITHIN: Duration = Duration::from_millis(2500);
 
-/// The editor's routes; a write asks concierge afresh, as a place's does.
 pub(crate) fn routes() -> Vec<ApiRoute> {
-	use Freshness::{Cached, Fresh};
 	use Method as M;
 	let work = Some(Section::Work);
 	vec![
-		ApiRoute::new(M::GET, "/pricing", work, Cached, list),
-		ApiRoute::new(M::GET, "/pricing/{brand}", work, Cached, item),
-		ApiRoute::new(M::GET, "/pricing/{brand}/changes", work, Cached, changes),
-		ApiRoute::new(M::POST, "/pricing/{brand}/preview", work, Cached, preview),
-		ApiRoute::new(M::PUT, "/pricing/{brand}", work, Fresh, set),
-		ApiRoute::new(M::DELETE, "/pricing/{brand}", work, Fresh, remove),
+		ApiRoute::new(M::GET, "/pricing", work, list),
+		ApiRoute::new(M::GET, "/pricing/{brand}", work, item),
+		ApiRoute::new(M::GET, "/pricing/{brand}/changes", work, changes),
+		ApiRoute::new(M::POST, "/pricing/{brand}/preview", work, preview),
+		ApiRoute::new(M::PUT, "/pricing/{brand}", work, set),
+		ApiRoute::new(M::DELETE, "/pricing/{brand}", work, remove),
 	]
 }
 

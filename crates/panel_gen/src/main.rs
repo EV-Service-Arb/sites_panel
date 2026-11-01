@@ -11,20 +11,12 @@ use panel_core::{
 	lead::Stage,
 	pricing,
 };
-use panel_server::{
-	access::AccessRequestDto,
-	api::{CURRENCIES, IDEMPOTENCY_KEY},
-	signin::Caller,
-};
-use sa_auth::{Catalog, SourceKind};
+use panel_server::api::{CURRENCIES, IDEMPOTENCY_KEY, Me};
+use sa_auth::{Catalog, Service};
 
 fn main() {
 	let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../frontend/src");
-	let [permissions, aliases] = Catalog::collect("sa", 0).ts();
-	Ts::write(
-		&root.join("entities/session/model/generated.ts"),
-		&[Ts::types::<Caller>(), Ts::types::<AccessRequestDto>(), permissions, aliases],
-	);
+	let catalog = Catalog::collect("sa", 0);
 	Ts::write(
 		&root.join("entities/lead/model/generated.ts"),
 		&[
@@ -84,21 +76,6 @@ fn main() {
 		],
 	);
 	Ts::write(
-		&root.join("entities/source/model/generated.ts"),
-		&[
-			Ts::Union {
-				name: "SOURCE_KINDS",
-				ty: "SourceKind",
-				items: SourceKind::ALL.map(SourceKind::as_str).into(),
-			},
-			Ts::Union {
-				name: "KEYED_SOURCE_KINDS",
-				ty: "KeyedSourceKind",
-				items: SourceKind::ALL.into_iter().filter(|k| k.keyed()).map(SourceKind::as_str).collect(),
-			},
-		],
-	);
-	Ts::write(
 		&root.join("shared/config/generated.ts"),
 		&[
 			Ts::Union {
@@ -120,9 +97,22 @@ fn main() {
 	);
 	Ts::write(
 		&root.join("shared/api/generated.ts"),
-		&[Ts::Const {
-			name: "IDEMPOTENCY_HEADER",
-			value: IDEMPOTENCY_KEY,
-		}],
+		&[
+			Ts::Const {
+				name: "IDEMPOTENCY_HEADER",
+				value: IDEMPOTENCY_KEY,
+			},
+			Ts::Union {
+				name: "PERMISSIONS",
+				ty: "Permission",
+				items: catalog
+					.permissions
+					.iter()
+					.filter(|p| p.starts_with(Service::Sites.prefix()))
+					.map(|p| &*p.clone().leak()) // Ts::Union takes &'static str; one-shot generator
+					.collect(),
+			},
+			Ts::types::<Me>(),
+		],
 	);
 }

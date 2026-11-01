@@ -1,5 +1,5 @@
-//! What changed, told to whoever is watching: the bus the server's `/api/v1/live` sockets
-//! listen on.
+//! What changed, told to whoever is watching: the bus the conductor's change feed
+//! (`/api/conductor/changes`) reads.
 //!
 //! The panel runs as one process (one pod, one SQLite writer), so the bus is in-process: a
 //! `tokio::sync::broadcast` channel. Every write that a screen reads publishes here, from the
@@ -8,34 +8,26 @@
 //!
 //! ```text
 //! Panel::journal        every event journaled and projected: ingest, the operator's actions,
-//!                       the Telegram buttons, a landing's experiments,
+//!                       a landing's experiments,
 //!                       an admin's experiment settings, the booking adapters
 //!                                                   → leads | lead | experiments | bookings
 //! Panel::rebuild_…      the projections replaced whole                 → resync
 //! place::edit, register a place's settings, withdrawn, registered      → places
 //! pricing               a brand's model saved or removed, its locales  → pricing
-//! add_source, revoke    the signing keys                               → sources
-//! telegram              linked, unlinked, blocked, rules               → telegram (its user only)
 //! invoices              a row stored, read from banking, dropped, paid or ended → invoices
-//! sessions closed       logout, a sign-in replacing one, a refusal     → the sockets of that session end
 //! ```
 //!
 //! Publishing never waits and never fails a write: with nobody subscribed the message is
 //! simply dropped, and a subscriber that falls behind by more than the channel holds is told
 //! so ([`broadcast::error::RecvError::Lagged`]) instead of the channel growing.
 //!
-//! A command run in another process (`panel place set`, `panel source add`, a rebuild from the
-//! CLI) publishes on its own bus, which nobody listens to: the server's sockets do not see it.
-
-use std::time::Duration;
+//! A command run in another process (`sites_panel place set`, a rebuild from the CLI)
+//! publishes on its own bus, which nobody listens to: the feed does not see it.
 
 use jiff::Timestamp;
 use panel_core::{fact::Fact, ids::BrandId, lead::Recorded};
-use sa_auth::{Analysis, PermissionSet, Sources, Work};
+use sa_auth::{Analysis, Work};
 use tokio::sync::broadcast;
-use uuid::Uuid;
-
-use crate::session::SessionKey;
 
 /// How many messages a subscriber may fall behind before it is told to read everything
 /// afresh. A batch of ingest is at most 500 events; most moments carry a handful.
@@ -52,12 +44,8 @@ pub enum Topic {
 	Places,
 	/// A brand's pricing: its model saved or removed, or its locales.
 	Pricing,
-	/// The signing keys: admins only, as `GET /sources` is.
-	Sources,
 	/// A brand's experiments: what its landing declared, or what an admin set over it.
 	Experiments,
-	/// One user's Telegram link and rules: that user only.
-	Telegram,
 	/// The providers' bookings without a lead: one came, changed, or was joined to a lead.
 	Bookings,
 	/// The invoices asked of banking: one issued, read, dropped, paid or ended.
@@ -71,9 +59,7 @@ impl Topic {
 			Self::Lead => "lead",
 			Self::Places => "places",
 			Self::Pricing => "pricing",
-			Self::Sources => "sources",
 			Self::Experiments => "experiments",
-			Self::Telegram => "telegram",
 			Self::Bookings => "bookings",
 			Self::Invoices => "invoices",
 		}
@@ -87,22 +73,17 @@ pub struct Change {
 	pub brand: Option<BrandId>,
 	/// The lead, or the place's slug; `None` when the topic has no single subject.
 	pub id: Option<String>,
-	/// Whose it is, for [`Topic::Telegram`]; `None` for everything else.
-	pub user: Option<Uuid>,
 	/// When it was committed (the writer's clock).
 	pub at: Timestamp,
 }
 
 impl Change {
-	/// Whether `user`, holding `permissions`, may be told of it: exactly when they may read
-	/// what changed, for every brand (no permission is narrower than the whole panel); a
-	/// Telegram link is its own user's.
-	pub fn visible_to(&self, user: Uuid, permissions: &PermissionSet) -> bool {
+	/// The permission of the section that reads what changed: whoever holds it may be told,
+	/// for every brand (no permission is narrower than the whole of a section).
+	pub fn permission(&self) -> &'static str {
 		match self.topic {
-			Topic::Leads | Topic::Lead | Topic::Places | Topic::Pricing | Topic::Bookings | Topic::Invoices => permissions.may(Work::Read),
-			Topic::Experiments => permissions.may(Analysis::Read),
-			Topic::Sources => permissions.may(Sources::Manage),
-			Topic::Telegram => self.user == Some(user),
+			Topic::Leads | Topic::Lead | Topic::Places | Topic::Pricing | Topic::Bookings | Topic::Invoices => Work::Read.as_str(),
+			Topic::Experiments => Analysis::Read.as_str(),
 		}
 	}
 
@@ -135,7 +116,6 @@ impl Change {
 			topic,
 			brand: Some(event.subject.brand_id.clone()),
 			id,
-			user: None,
 			at,
 		})
 	}
@@ -151,7 +131,6 @@ impl Change {
 			topic: Topic::Lead,
 			brand: Some(event.subject.brand_id.clone()),
 			id: Some(l.as_str().to_owned()),
-			user: None,
 			at,
 		};
 		match &event.fact {
@@ -162,7 +141,6 @@ impl Change {
 						topic: Topic::Bookings,
 						brand: Some(event.subject.brand_id.clone()),
 						id: None,
-						user: None,
 						at,
 					});
 				}
@@ -173,24 +151,13 @@ impl Change {
 	}
 }
 
-/// Which sessions have ended, so the sockets they opened close at once rather than at their
-/// next check.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Ended {
-	/// Every session of the user (a sign-out).
-	User(Uuid),
-	/// One session.
-	Session(SessionKey),
-}
-
 /// What travels on the bus.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Signal {
 	Changed(Change),
 	/// Too much changed to say what: read everything again.
 	Resync,
-	SessionsEnded(Ended),
-	/// The process is stopping.
+	/// The process is stopping: the feed ends, so the graceful shutdown is not held open.
 	GoingAway,
 }
 
@@ -228,50 +195,24 @@ impl Bus {
 	pub fn changed(&self, change: Change) {
 		self.publish(Signal::Changed(change));
 	}
-
-	/// Waits until every subscriber has let go, or `within` has passed: at shutdown, so the
-	/// sockets' close frames go out before the process ends.
-	pub async fn drained(&self, within: Duration) {
-		let deadline = tokio::time::Instant::now() + within;
-		while self.tx.receiver_count() > 0 && tokio::time::Instant::now() < deadline {
-			// A broadcast sender cannot be awaited for its receivers to go; they go within
-			// moments of `GoingAway`, so a short poll is enough.
-			tokio::time::sleep(Duration::from_millis(20)).await;
-		}
-	}
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
 
-	fn change(topic: Topic, user: Option<Uuid>) -> Change {
-		Change {
+	#[test]
+	fn each_topic_is_told_under_the_permission_of_its_read() {
+		let change = |topic| Change {
 			topic,
 			brand: None,
 			id: None,
-			user,
 			at: Timestamp::UNIX_EPOCH,
+		};
+		for topic in [Topic::Leads, Topic::Lead, Topic::Places, Topic::Pricing, Topic::Bookings, Topic::Invoices] {
+			assert_eq!(change(topic).permission(), "sa:sites:work:read", "{topic:?}");
 		}
-	}
-
-	#[test]
-	fn who_is_told() {
-		let (ann, bob) = (Uuid::from_u128(1), Uuid::from_u128(2));
-		let operator: PermissionSet = sa_auth::SA_OPERATOR.members.iter().copied().collect();
-		let admin: PermissionSet = sa_auth::SA_ADMIN.members.iter().copied().collect();
-		let work_only: PermissionSet = [Work::Read.as_str()].into_iter().collect();
-		for topic in [Topic::Leads, Topic::Lead, Topic::Places, Topic::Pricing, Topic::Experiments, Topic::Bookings, Topic::Invoices] {
-			assert!(change(topic, None).visible_to(ann, &operator), "{topic:?}");
-			assert!(change(topic, None).visible_to(ann, &admin), "{topic:?}");
-		}
-		assert!(!change(Topic::Experiments, None).visible_to(ann, &work_only), "an analyst's read");
-		assert!(change(Topic::Invoices, None).visible_to(ann, &work_only), "the Work section's read");
-		assert!(!change(Topic::Sources, None).visible_to(ann, &operator), "an admin's read");
-		assert!(change(Topic::Sources, None).visible_to(ann, &admin));
-		assert!(change(Topic::Telegram, Some(ann)).visible_to(ann, &operator));
-		assert!(!change(Topic::Telegram, Some(ann)).visible_to(bob, &admin), "another user's link, admin or not");
-		assert!(!change(Topic::Telegram, None).visible_to(ann, &admin), "nobody's");
+		assert_eq!(change(Topic::Experiments).permission(), "sa:sites:analysis:read");
 	}
 
 	#[tokio::test]
@@ -281,8 +222,6 @@ mod tests {
 		let mut rx = bus.subscribe();
 		bus.publish(Signal::Resync);
 		assert_eq!(rx.recv().await.unwrap(), Signal::Resync);
-		drop(rx);
-		bus.drained(Duration::from_secs(1)).await;
 	}
 
 	#[tokio::test]

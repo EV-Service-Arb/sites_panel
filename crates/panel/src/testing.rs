@@ -1,4 +1,5 @@
-//! For tests only (feature `testing`): a throwaway database per test, and signed batches.
+//! For tests only (feature `testing`): a throwaway database per test, batches as a source
+//! writes them, and the conductor's assertions under a test key.
 //!
 //! Each test gets its own SQLite file in the system's temp directory, removed when the
 //! [`TestDb`] is dropped: no server, nothing to set up, so the database tests run everywhere
@@ -8,7 +9,8 @@
 use std::path::{Path, PathBuf};
 
 use jiff::Timestamp;
-use panel_core::signature;
+use panel_core::{event::KeyGrant, ids::BrandId};
+use sa_auth::{Assertion, Keys, Principal, Service, Signer, Source, SourceKind, User};
 use serde_json::{Value, json};
 use sqlx::sqlite::SqlitePoolOptions;
 use uuid::Uuid;
@@ -73,28 +75,9 @@ pub async fn panel(db: &TestDb) -> Panel {
 	Panel::new(db.store().await, key)
 }
 
-/// A request as a source sends it: the body, and the headers' values.
-pub struct Signed {
-	pub key_id: String,
-	pub timestamp: String,
-	pub signature: String,
-	pub body: Vec<u8>,
-}
-
-impl Signed {
-	pub fn batch(&self) -> crate::SignedBatch<'_> {
-		crate::SignedBatch {
-			key_id: &self.key_id,
-			timestamp: &self.timestamp,
-			signature: &self.signature,
-			body: &self.body,
-		}
-	}
-}
-
-/// `{"events": events}`, signed at `at` with `secret`, as a source sends it: each event's
-/// `source.id` set to the key id, which is what a source is called.
-pub fn sign(key_id: &str, secret: &str, events: &[Value], at: Timestamp) -> Signed {
+/// `{"events": events}`, as a source sends it: each event's `source.id` set to the key id,
+/// which is what a source is called.
+pub fn batch(key_id: &str, events: &[Value]) -> Vec<u8> {
 	let events: Vec<Value> = events
 		.iter()
 		.cloned()
@@ -105,30 +88,74 @@ pub fn sign(key_id: &str, secret: &str, events: &[Value], at: Timestamp) -> Sign
 			e
 		})
 		.collect();
-	sign_verbatim(key_id, secret, &events, at)
+	batch_verbatim(&events)
 }
 
-/// [`sign`], leaving the events exactly as given.
-pub fn sign_verbatim(key_id: &str, secret: &str, events: &[Value], at: Timestamp) -> Signed {
-	let body = serde_json::to_vec(&json!({ "events": events })).expect("JSON");
-	let timestamp = at.as_second().to_string();
-	Signed {
+/// [`batch`], leaving the events exactly as given.
+pub fn batch_verbatim(events: &[Value]) -> Vec<u8> {
+	serde_json::to_vec(&json!({ "events": events })).expect("JSON")
+}
+
+/// What the conductor's assertion says a key may write.
+pub fn grant(key_id: &str, kind: SourceKind, brands: &[&str]) -> KeyGrant {
+	KeyGrant {
 		key_id: key_id.to_owned(),
-		signature: signature::sign(secret.as_bytes(), &timestamp, &body),
-		timestamp,
-		body,
+		kind,
+		brands: brands.iter().map(|b| BrandId::parse(b).expect("a brand id")).collect(),
 	}
 }
 
-/// A `GET` signed as a source signs a batch: what a bot sends to look a lead up by its ref
-/// (`GET /api/ingest/v1/leads/by-ref/…`), the MAC over `GET <path>` in place of a body.
-pub fn sign_get(key_id: &str, secret: &str, path: &str, at: Timestamp) -> Signed {
-	let timestamp = at.as_second().to_string();
-	Signed {
-		key_id: key_id.to_owned(),
-		signature: signature::sign(secret.as_bytes(), &timestamp, format!("GET {path}").as_bytes()),
-		timestamp,
-		body: Vec::new(),
+/// The conductor, as far as sites sees it: a signing key, and the assertions it makes.
+pub struct Conductor {
+	signer: Signer,
+}
+
+impl Conductor {
+	/// A fresh key under `kid`.
+	pub fn new(kid: &str) -> Self {
+		use base64::Engine;
+		let mut seed = [0u8; 32];
+		getrandom::fill(&mut seed).expect("random");
+		let signer = format!("{kid}:{}", base64::engine::general_purpose::STANDARD.encode(seed)).parse().expect("a signing key");
+		Self { signer }
+	}
+
+	/// What sites is configured with to trust this conductor (`PANEL_ASSERTION_KEYS`).
+	pub fn keys(&self) -> Keys {
+		self.signer.public().parse().expect("its own public key")
+	}
+
+	pub fn sign(&self, aud: Service, principal: Principal, method: &str, path: &str) -> String {
+		self.signer.sign(&Assertion {
+			aud,
+			principal,
+			method: method.to_owned(),
+			path: path.to_owned(),
+			exp: Timestamp::now().as_second() + sa_auth::TTL,
+		})
+	}
+
+	/// A signed-in user `sub` holding `permissions` (the `sa:sites:` ones are kept), for one request.
+	pub fn user(&self, sub: Uuid, permissions: &sa_auth::PermissionSet, method: &str, path: &str) -> String {
+		let user = User {
+			sub: sub.to_string(),
+			email: format!("{}@example.com", sub.simple()),
+			email_verified: true,
+			name: "Olga".to_owned(),
+			permissions: permissions.iter().filter(|p| p.starts_with(Service::Sites.prefix())).collect(),
+		};
+		self.sign(Service::Sites, Principal::User(user), method, path)
+	}
+
+	/// A source key the conductor checked the MAC of, over `body`.
+	pub fn source(&self, key_id: &str, kind: SourceKind, brands: &[&str], method: &str, path: &str, body: &[u8]) -> String {
+		let source = Source::new(key_id.to_owned(), kind, brands.iter().map(|b| (*b).to_owned()).collect(), body);
+		self.sign(Service::Sites, Principal::Source(source), method, path)
+	}
+
+	/// The conductor itself, reading for its hubs.
+	pub fn conductor(&self, method: &str, path: &str) -> String {
+		self.sign(Service::Sites, Principal::Conductor, method, path)
 	}
 }
 

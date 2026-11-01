@@ -2,11 +2,8 @@
 //! proto3-JSON (protojson) serde impls. The well-known types (`Struct`, `Timestamp`) come
 //! from `pbjson-types`, whose serde follows the same mapping.
 //!
-//! `contracts/proto/concierge/v1/*.proto` (vendored from concierge, see its README) → tonic
-//! clients and servers for the sign-in: the panel is a relying party of concierge.
-//!
 //! `contracts/proto/scope/v1/*.proto` (vendored from banking, see its README) → tonic clients
-//! for the invoices the panel issues through banking's ScopeLedger. The servers are built only
+//! for the invoices issued through banking's ScopeLedger. The servers are built only
 //! under the `testing` feature, for the tests' stand-in ledger: production only calls out.
 //!
 //! The protos are parsed by protox, in Rust, rather than by `protoc`: the build then needs
@@ -22,7 +19,6 @@ use prost::Message;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let proto_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../contracts/proto");
 	sa(&proto_root)?;
-	concierge(&proto_root)?;
 	scope(&proto_root)?;
 	Ok(())
 }
@@ -51,13 +47,6 @@ fn sa(proto_root: &Path) -> Result<(), Box<dyn std::error::Error>> {
 		.compile_fds(descriptors)?;
 
 	pbjson_build::Builder::new().register_descriptors(&encoded)?.build(&[".sa"])?;
-	Ok(())
-}
-
-fn concierge(proto_root: &Path) -> Result<(), Box<dyn std::error::Error>> {
-	let protos = protos_in(&proto_root.join("concierge/v1"))?;
-	let descriptors = protox::compile(&protos, [proto_root])?;
-	tonic_prost_build::configure().build_client(true).build_server(true).compile_fds(descriptors)?;
 	Ok(())
 }
 

@@ -1,30 +1,26 @@
-//! The panel service: the HTTP surface over the engine's [`panel::Panel`] — ingest, the
-//! sign-in through concierge, the operator API — and the Telegram bot. The binary
-//! (`panel`) adds the CLI and the process bootstrap.
+//! sites_panel: the HTTP surface over the engine's [`panel::Panel`] — ingest, the operator API
+//! and the conductor's reads, each under the conductor's assertion — and the work `serve` runs
+//! beside it. The binary (`sites_panel`) adds the CLI and the process bootstrap.
 //!
 //! A library target too, so tests can serve the real router in-process.
 
-pub mod access;
 pub mod api;
 pub mod booking;
 pub mod capture;
-pub mod concierge;
-pub mod cookies;
+pub mod conductor;
 pub mod experiments;
-pub mod forward;
+pub mod gate;
 pub mod google_calendar;
 pub mod http;
 pub mod invoices;
-pub mod live;
 pub mod places;
 pub mod pricing;
 pub mod scope_ledger;
-pub mod signin;
-pub mod telegram;
-pub mod web;
+#[cfg(feature = "testing")]
+pub mod testing;
 
 /// Where `serve` listens unless told otherwise; the image binds the same port on 0.0.0.0.
-pub const DEFAULT_BIND: &str = "127.0.0.1:59120";
+pub const DEFAULT_BIND: &str = "127.0.0.1:59121";
 
 /// Reports an error to Sentry and logs it — as a warning: the tracing layer would send an
 /// error-level event to Sentry a second time.

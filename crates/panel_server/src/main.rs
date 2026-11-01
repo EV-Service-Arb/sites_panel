@@ -6,7 +6,7 @@
 
 mod settings;
 
-use std::{collections::BTreeSet, net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc};
 
 use clap::{Parser, Subcommand};
 use ev_lib::error_monitoring;
@@ -17,7 +17,6 @@ use panel::{
 	pricing::{PricingError, PricingView},
 	seal::DataKey,
 	store::Store,
-	telegram::Notifier,
 };
 use panel_core::{
 	ids::{BrandId, LocationId},
@@ -26,19 +25,18 @@ use panel_core::{
 use panel_server::{
 	DEFAULT_BIND,
 	capture::{self, CaptureApi},
-	concierge::{Concierge, DevIdentity},
-	google_calendar, http,
+	conductor, google_calendar, http,
 	scope_ledger::{self, ScopeLedger},
-	signin::{SignIn, SignInConfig},
-	telegram::{self, BotApi, BotName},
-	web::{self, Files},
 };
-use sa_auth::{Catalog, SourceKind};
 
 use crate::settings::Settings;
 
 #[derive(Parser)]
-#[command(name = "panel", version, about = "The Service-Arb panel: sa.funnel.v1 ingest, the event journal and the funnel projections")]
+#[command(
+	name = "sites_panel",
+	version,
+	about = "The Service-Arb sites: sa.funnel.v1 ingest, the event journal, the funnel projections, places, pricing, experiments, booking and invoices"
+)]
 struct Cli {
 	#[command(subcommand)]
 	cmd: Cmd,
@@ -57,9 +55,6 @@ enum Cmd {
 	/// Rebuild leads, calls and payments from the journal, judging every event against the
 	/// registry as it is now.
 	RebuildProjections,
-	/// The sources that may write events, and their keys.
-	#[command(subcommand)]
-	Source(SourceCmd),
 	/// A place's live settings, what the sites lay over their baked config.
 	#[command(subcommand)]
 	Place(PlaceCmd),
@@ -152,27 +147,6 @@ enum PricingCmd {
 	Locales { brand: String, locales: String },
 }
 
-#[derive(Subcommand)]
-enum SourceCmd {
-	/// Register a source; prints its secret, once.
-	Add {
-		/// Lowercase slug, e.g. aquafix-site.
-		key_id: String,
-		/// site | review_archive | gbp | posthog | sheet | telephony | bot (panel and booking are
-		/// the panel's own, with no key; bot is a messenger bot, docs/BOT-API.md)
-		#[arg(long)]
-		kind: String,
-		/// A brand it may write for; repeat for several.
-		#[arg(long = "brand", required = true)]
-		brands: Vec<String>,
-	},
-	List,
-	/// Refuse its key from now on; what it wrote stays.
-	Revoke {
-		key_id: String,
-	},
-}
-
 // Sentry must be initialised before the async runtime starts, hence no #[tokio::main].
 fn main() -> eyre::Result<()> {
 	color_eyre::install()?;
@@ -187,15 +161,6 @@ fn main() -> eyre::Result<()> {
 	}
 	// Exits 78 (EX_CONFIG) on a bad environment, before anything else is built.
 	let settings = ev_lib::settings::or_exit(Settings::from_env());
-	// Refused like a bad environment, whatever the command: in production, or off loopback,
-	// it would let anyone in.
-	let dev_sign_in = match settings.dev_sign_in() {
-		Ok(d) => d,
-		Err(e) => {
-			eprintln!("{e:#}");
-			std::process::exit(ev_lib::settings::EX_CONFIG);
-		}
-	};
 
 	// Held for the life of main: dropping it flushes. A no-op without SENTRY_DSN.
 	let _sentry = error_monitoring::init(&error_monitoring::Config {
@@ -213,7 +178,7 @@ fn main() -> eyre::Result<()> {
 		.enable_all()
 		.build()
 		.wrap_err("building the tokio runtime")?
-		.block_on(run(cli, settings, dev_sign_in))
+		.block_on(run(cli, settings))
 }
 
 /// Logs go to stderr, so a CLI command's stdout stays its output.
@@ -229,7 +194,7 @@ fn init_tracing() -> eyre::Result<()> {
 	Ok(())
 }
 
-async fn run(cli: Cli, settings: Settings, dev_sign_in: Option<settings::DevSignIn>) -> eyre::Result<()> {
+async fn run(cli: Cli, settings: Settings) -> eyre::Result<()> {
 	let connect = || async { eyre::Ok(Panel::new(Store::open(settings.db_path()?).await?, settings.data_key()?).with_posthog_project(settings.posthog_project()?)) };
 	match cli.cmd {
 		Cmd::Migrate => {
@@ -237,23 +202,15 @@ async fn run(cli: Cli, settings: Settings, dev_sign_in: Option<settings::DevSign
 			Ok(())
 		}
 		Cmd::Serve { bind } => {
-			let sign_in = match dev_sign_in {
-				Some(dev) => Some(Identity::Dev(dev)),
-				None => settings.sign_in()?.map(Identity::Concierge),
-			};
-			let telegram = settings.telegram()?;
-			let front_end = Edge { files: settings.web()? };
+			let keys = settings.assertion_keys()?;
+			let locale = settings.locale()?;
+			let mfe = settings.mfe_dir()?;
 			let capture = settings.capture()?.map(|c| CaptureApi::new(&c.host, &c.key)).transpose()?;
 			let google = google(&settings)?;
 			let ledger = settings.scope_ledger()?.map(|c| ScopeLedger::connect(&c)).transpose()?.map(Arc::new);
-			let sign_in = match (sign_in, settings.forward()?) {
-				(Some(identity), forward) => Some((identity, forward)),
-				(None, None) => None,
-				(None, Some(_)) => eyre::bail!("the forward vouches for signed-in callers: it needs the sign-in configured"),
-			};
 			let panel = connect().await?.with_capture(capture.is_some());
 			let peers = Peers { capture, google, ledger };
-			serve(panel, sign_in, telegram, peers, front_end, bind).await
+			serve(panel, keys, locale, peers, mfe, bind).await
 		}
 		Cmd::RebuildProjections => {
 			let r = connect().await?.rebuild_projections().await?;
@@ -263,7 +220,6 @@ async fn run(cli: Cli, settings: Settings, dev_sign_in: Option<settings::DevSign
 			);
 			Ok(())
 		}
-		Cmd::Source(cmd) => source(&connect().await?, cmd).await,
 		Cmd::Place(cmd) => place(&connect().await?, cmd).await,
 		Cmd::Pricing(cmd) => pricing(&connect().await?, cmd).await,
 		Cmd::Booking(BookingCmd::GoogleAuthorize { brand, port }) => {
@@ -307,32 +263,6 @@ async fn run(cli: Cli, settings: Settings, dev_sign_in: Option<settings::DevSign
 		}
 		Cmd::GenDataKey => {
 			println!("{}", DataKey::generate_hex()?);
-			Ok(())
-		}
-	}
-}
-
-async fn source(panel: &Panel, cmd: SourceCmd) -> eyre::Result<()> {
-	match cmd {
-		SourceCmd::Add { key_id, kind, brands } => {
-			let kind: SourceKind = kind.parse()?;
-			let brands = brands.iter().map(|b| BrandId::parse(b)).collect::<Result<BTreeSet<_>, _>>()?;
-			let Some(added) = panel.add_source(&key_id, kind, brands).await? else {
-				eyre::bail!("a source {key_id} exists already");
-			};
-			println!("key id: {}\nsecret: {}\n(shown once; the source signs with it)", added.key_id, *added.secret);
-			Ok(())
-		}
-		SourceCmd::List => {
-			for s in panel.store().sources().await? {
-				let brands: Vec<&str> = s.grant.brands.iter().map(BrandId::as_str).collect();
-				let state = s.revoked_at.map_or_else(|| "active".to_owned(), |at| format!("revoked {at}"));
-				println!("{:<24} {:<14} {:<32} {state}", s.grant.key_id, s.grant.kind, brands.join(","));
-			}
-			Ok(())
-		}
-		SourceCmd::Revoke { key_id } => {
-			eyre::ensure!(panel.revoke_source(&key_id).await?, "no active source {key_id}");
 			Ok(())
 		}
 	}
@@ -503,12 +433,6 @@ fn google(settings: &Settings) -> eyre::Result<Option<(google_calendar::GoogleCa
 	Ok(Some((api, every)))
 }
 
-/// What the origin serves besides the panel's own API.
-struct Edge {
-	/// The front end's export (`PANEL_WEB_DIR`).
-	files: Option<Files>,
-}
-
 /// The services `serve` calls out to, each when configured.
 struct Peers {
 	/// PostHog (`POSTHOG_*`).
@@ -519,175 +443,71 @@ struct Peers {
 	ledger: Option<Arc<ScopeLedger>>,
 }
 
-/// Who signs people in.
-enum Identity {
-	Concierge(settings::SignInSettings),
-	/// `PANEL_DEV_SIGN_IN`, already refused outside development and off loopback.
-	Dev(settings::DevSignIn),
-}
-
-async fn serve(
-	panel: Panel,
-	sign_in: Option<(Identity, Option<panel_server::forward::Upstreams>)>,
-	telegram: Option<settings::TelegramSettings>,
-	peers: Peers,
-	front_end: Edge,
-	bind: SocketAddr,
-) -> eyre::Result<()> {
-	let sign_in = match sign_in {
-		Some((Identity::Concierge(s), forward)) => {
-			tracing::info!(panel_origin = s.panel_origin, "signing in through concierge");
-			let concierge = Concierge::new(&s.concierge_grpc, &s.client_secret)?;
-			// Before serving: a user's permissions name what this catalog defines.
-			concierge
-				.publish_catalog(&Catalog::collect("sa", s.build_epoch))
-				.await
-				.wrap_err_with(|| format!("publishing the sa catalog (version {}) to concierge", s.build_epoch))?;
-			tracing::info!(version = s.build_epoch, "sa catalog published to concierge");
-			let config = SignInConfig {
-				panel_origin: s.panel_origin,
-				concierge_origin: s.concierge_origin,
-			};
-			Some((concierge, config, forward))
-		}
-		Some((Identity::Dev(d), forward)) => {
-			let who = DevIdentity {
-				permissions: d.permissions,
-				email: d.email,
-			};
-			tracing::warn!(
-				permissions = ?who.permissions,
-				email = who.email,
-				user_id = %who.user_id(),
-				panel_origin = d.panel_origin,
-				"DEV SIGN-IN ON (PANEL_DEV_SIGN_IN): /auth/login signs anyone in as this user, no concierge — development only"
-			);
-			let config = SignInConfig {
-				concierge_origin: d.panel_origin.clone(),
-				panel_origin: d.panel_origin,
-			};
-			Some((Concierge::dev(who), config, forward))
-		}
-		None => None,
-	};
+/// The HTTP server and the work beside it, all in this one future: the work stops when the
+/// server has.
+async fn serve(panel: Panel, keys: sa_auth::Keys, locale: panel_core::notify::Locale, peers: Peers, mfe: Option<std::path::PathBuf>, bind: SocketAddr) -> eyre::Result<()> {
 	let (stop, stopped) = tokio::sync::watch::channel(false);
 	let bus = panel.bus().clone();
-	let mut bot_work = None;
-	// Held, and awaited at shutdown, like the bot's.
-	let capture_work = match peers.capture {
-		Some(api) => {
-			tracing::info!(?api, "sending lead events to posthog");
-			Some(tokio::spawn(capture::run(panel.clone(), api, stopped.clone())))
-		}
-		None => {
-			tracing::warn!("POSTHOG_PROJECT_API_KEY unset: nothing is sent to PostHog");
-			None
-		}
-	};
-	// Held, and awaited at shutdown, like the sender's.
-	let booking_work = match peers.google {
-		Some((api, every)) => {
-			let brands: Vec<String> = api.brands().iter().map(|b| b.as_str().to_owned()).collect();
-			tracing::info!(?brands, minutes = every.as_mins(), "google calendar booking pull on; brands without a refresh token are off");
-			Some(tokio::spawn(google_calendar::run(panel.clone(), api, every, stopped.clone())))
-		}
-		None => {
-			tracing::warn!("GOOGLE_OAUTH_CLIENT_* or every GOOGLE_CALENDAR_REFRESH_TOKEN_<BRAND> unset: no Google Calendar bookings pulled");
-			None
-		}
-	};
-	// Held, and awaited at shutdown, like the others.
-	let invoice_work = match &peers.ledger {
-		Some(ledger) => {
-			tracing::info!(?ledger, "invoices on: issued through banking's ScopeLedger, payments confirmed from its money events");
-			Some(tokio::spawn(scope_ledger::run(panel.clone(), ledger.clone(), stopped.clone())))
-		}
-		None => {
-			tracing::warn!("SCOPE_LEDGER_* unset: no invoices, /api/v1/invoices answers 503");
-			None
-		}
-	};
-	let app = match sign_in {
-		Some((concierge, config, forward)) => {
-			let bot = match telegram {
-				Some(tg) => {
-					let name = BotName::on(tg.username);
-					let notifier = Notifier {
-						panel: panel.clone(),
-						bot: BotApi::new(telegram::API_BASE, &tg.token)?,
-						concierge: concierge.clone(),
-						locale: tg.locale,
-						cabinet: config.concierge_origin.parse().wrap_err("the concierge origin is not a URL")?,
-					};
-					tracing::info!("telegram notifications on");
-					// Held, and awaited at shutdown: the poller gives its lease back on the way out.
-					bot_work = Some(tokio::spawn(telegram::run(notifier, name.clone(), stopped)));
-					name
-				}
-				None => {
-					tracing::warn!("TELEGRAM_BOT_TOKEN unset: Telegram notifications off");
-					BotName::off()
-				}
-			};
-			let sign_in = SignIn::new(panel, concierge, config);
-			let app = http::app_with_telegram(sign_in.clone(), http::Limits::default(), bot);
-			match forward {
-				Some(upstreams) => app.merge(panel_server::forward::Forward::new(sign_in, upstreams).routes()),
-				None => {
-					tracing::warn!("forward not configured: no /api/review_archive, /review_archive/mfe or /playbook_mcp");
-					app
-				}
+	let capture_work = async {
+		match peers.capture {
+			Some(api) => {
+				tracing::info!(?api, "sending lead events to posthog");
+				capture::run(panel.clone(), api, stopped.clone()).await;
 			}
-		}
-		None => {
-			tracing::warn!("sign-in not configured: serving ingest only, no /auth, no /api/v1");
-			if telegram.is_some() {
-				tracing::warn!("Telegram notifications off: they need the sign-in, to link users and confirm their access");
-			}
-			http::router(panel)
+			None => tracing::warn!("POSTHOG_PROJECT_API_KEY unset: nothing is sent to PostHog"),
 		}
 	};
+	let booking_work = async {
+		match peers.google {
+			Some((api, every)) => {
+				let brands: Vec<String> = api.brands().iter().map(|b| b.as_str().to_owned()).collect();
+				tracing::info!(?brands, minutes = every.as_mins(), "google calendar booking pull on; brands without a refresh token are off");
+				google_calendar::run(panel.clone(), api, every, stopped.clone()).await;
+			}
+			None => tracing::warn!("GOOGLE_OAUTH_CLIENT_* or every GOOGLE_CALENDAR_REFRESH_TOKEN_<BRAND> unset: no Google Calendar bookings pulled"),
+		}
+	};
+	let invoice_work = async {
+		match &peers.ledger {
+			Some(ledger) => {
+				tracing::info!(?ledger, "invoices on: issued through banking's ScopeLedger, payments confirmed from its money events");
+				scope_ledger::run(panel.clone(), ledger.clone(), stopped.clone()).await;
+			}
+			None => tracing::warn!("SCOPE_LEDGER_* unset: no invoices, /api/v1/invoices answers 503"),
+		}
+	};
+	let notify_work = conductor::fan_out(panel.clone(), locale, stopped.clone());
+	if mfe.is_none() {
+		tracing::warn!("PANEL_MFE_DIR unset: no front end bundle at /mfe");
+	}
+	let sites = http::Sites {
+		panel: panel.clone(),
+		keys,
+		locale,
+		hooks: panel::booking::PushSources::default(),
+		mfe,
+	};
+	let app = http::router(sites, http::Limits::default());
 	// The invoice routes find the ledger here; without it they answer 503.
-	let app = match peers.ledger {
+	let app = match peers.ledger.clone() {
 		Some(ledger) => app.layer(axum::Extension(ledger)),
 		None => app,
 	};
-	let app = match front_end.files {
-		Some(files) => web::serve(app, files),
-		None => {
-			tracing::warn!("PANEL_WEB_DIR unset: serving the API alone, no front end");
-			app
-		}
-	};
 	let listener = tokio::net::TcpListener::bind(bind).await.wrap_err_with(|| format!("binding {bind}"))?;
 	tracing::info!(%bind, "serving");
-	let served = axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await.wrap_err("HTTP server");
-	// The live sockets outlive the graceful shutdown (an upgraded connection is no longer the
-	// server's): told to close, and given a moment for their close frames to go out.
-	bus.publish(panel::live::Signal::GoingAway);
-	bus.drained(std::time::Duration::from_secs(2)).await;
-	// Nobody may be listening any more: the bot is simply not running then.
-	let _sent = stop.send(true);
-	if let Some(work) = bot_work
-		&& let Err(e) = work.await
-	{
-		panel_server::report(&eyre::eyre!(e), "the telegram worker panicked");
-	}
-	if let Some(work) = capture_work
-		&& let Err(e) = work.await
-	{
-		panel_server::report(&eyre::eyre!(e), "the posthog sender panicked");
-	}
-	if let Some(work) = booking_work
-		&& let Err(e) = work.await
-	{
-		panel_server::report(&eyre::eyre!(e), "the google calendar sync panicked");
-	}
-	if let Some(work) = invoice_work
-		&& let Err(e) = work.await
-	{
-		panel_server::report(&eyre::eyre!(e), "the invoice confirmation panicked");
-	}
+	let server = async {
+		// The change feed is a response that never ends: it is told to end before the graceful
+		// shutdown waits for every response to.
+		let shutdown = async move {
+			shutdown_signal().await;
+			bus.publish(panel::live::Signal::GoingAway);
+		};
+		let served = axum::serve(listener, app).with_graceful_shutdown(shutdown).await.wrap_err("HTTP server");
+		// Nobody may be listening any more: the work has stopped then.
+		let _workers_gone = stop.send(true);
+		served
+	};
+	let (served, ..) = tokio::join!(server, capture_work, booking_work, invoice_work, notify_work);
 	served
 }
 

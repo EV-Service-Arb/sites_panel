@@ -10,19 +10,16 @@
 //! Postgres needed advisory locks for, the single writer gives for nothing. A lone statement
 //! outside a transaction is atomic by itself and waits on `busy_timeout` the same way.
 
-pub mod access;
 pub mod bookings;
 pub mod events;
 pub mod experiments;
 pub mod invoices;
+pub mod notifications;
 pub mod places;
 pub mod posthog;
 pub mod pricing;
 pub mod projections;
 pub mod reads;
-pub mod sessions;
-pub mod sources;
-pub mod telegram;
 
 use std::{path::Path, time::Duration};
 

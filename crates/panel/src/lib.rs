@@ -1,36 +1,34 @@
-//! The panel's engine: a signed batch in, each event checked, journaled and projected.
+//! The sites' engine: a batch in under the key the conductor authenticated, each event checked,
+//! journaled and projected.
 //!
 //! ```text
-//! batch ─ signature (source's key) ─┬─ event ─ envelope ─ key may write it? ─ registry ─┐
-//!                                   ├─ event …                                          │
-//!                                   └─ …        one transaction per event: journal ─────┴─ projections
+//! batch ─ grant (the key's kind, brands) ─┬─ event ─ envelope ─ key may write it? ─ registry ─┐
+//!                                         ├─ event …                                          │
+//!                                         └─ …        one transaction per event: journal ─────┴─ projections
 //! ```
 //!
 //! [`Panel`] is the facade the server talks to; [`wire`] turns protojson into the domain of
 //! `panel_core`; [`store`] is SQLite; [`seal`] encrypts what must not sit in the clear.
 //! [`operator`] is what a signed-in user does and reads, as events through the same journal;
-//! [`session`] is signing in through concierge and the sessions that follow; [`telegram`] the
-//! bot's notifications and buttons; [`capture`] what PostHog is told of the leads' lives, sent
+//! [`notifications`] the notes the conductor's Telegram sends; [`capture`] what PostHog is told of the leads' lives, sent
 //! from an outbox; [`place`] the places' live settings the sites read and the panel edits;
 //! [`pricing`] the brands' price lists, the same; [`experiment`] the brands' experiments as
 //! configuration; [`booking`] the leads' bookings, the providers' seam and the matching of
-//! their bookings to leads; [`live`] the bus that tells the server's sockets what changed,
+//! their bookings to leads; [`live`] the bus that tells the conductor's feed what changed,
 //! published here after each commit.
 
-pub mod access;
 pub mod booking;
 pub mod capture;
 pub mod experiment;
 pub mod invoices;
 pub mod live;
+pub mod notifications;
 pub mod operator;
 pub mod place;
 pub mod posthog;
 pub mod pricing;
 pub mod seal;
-pub mod session;
 pub mod store;
-pub mod telegram;
 #[cfg(feature = "testing")]
 pub mod testing;
 pub mod wire;
@@ -45,7 +43,6 @@ use panel_core::{
 	fact::{Fact, MessageRef},
 	ids::{BrandId, LeadId, LocationId},
 	lead::Recorded,
-	signature::{self, SignatureError},
 };
 use sa_auth::SourceKind;
 use serde_json::Value;
@@ -53,7 +50,7 @@ use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
 use crate::{
-	seal::{DataKey, pii_aad, source_secret_aad},
+	seal::{DataKey, pii_aad},
 	store::{
 		Store,
 		events::{self, Inserted, NewEvent, Status},
@@ -61,11 +58,6 @@ use crate::{
 	},
 	wire::{Checked, Incoming},
 };
-
-/// The [`IngestError::Unauthorized`] of a delivery outside the replay window: the only one a
-/// caller is told apart. It is checked before the key, and says only that the caller's clock
-/// and ours disagree.
-pub const STALE: &str = "stale or malformed timestamp";
 
 /// Why a `lead.messaged` naming its lead by a ref no lead of the brand carries is deferred: the
 /// landing posts its `lead.created` in the background as the customer taps, so the message may
@@ -79,15 +71,11 @@ pub const UNKNOWN_LEAD: &str = "unknown_lead: subject.lead_id names no lead yet:
 /// Why a whole batch was refused. Per-event verdicts are [`Outcome`]s instead.
 #[derive(Debug, thiserror::Error)]
 pub enum IngestError {
-	/// No such key, a revoked one, a bad signature, or a delivery outside the window. The
-	/// caller is told only that it was refused; the log says which.
-	#[error("unauthorized: {0}")]
-	Unauthorized(&'static str),
 	/// The body as a whole is not a batch; or, for a lookup, the brand or the ref asked is not
 	/// one.
 	#[error("{0}")]
 	BadRequest(Invalid),
-	/// A good signature, by a key that may not ask this: not a bot's, or not for that brand.
+	/// A key that may not ask this: not a bot's, or not for that brand.
 	#[error("forbidden: {0}")]
 	Forbidden(&'static str),
 	#[error(transparent)]
@@ -116,27 +104,6 @@ pub struct EventVerdict {
 	pub index: usize,
 	pub id: String,
 	pub outcome: Outcome,
-}
-
-/// A signed request, as it arrived.
-#[derive(Clone, Copy, Debug)]
-pub struct SignedBatch<'a> {
-	pub key_id: &'a str,
-	pub timestamp: &'a str,
-	pub signature: &'a str,
-	pub body: &'a [u8],
-}
-
-/// A new source's credentials; the secret is shown once and never again.
-pub struct NewSource {
-	pub key_id: String,
-	pub secret: Zeroizing<String>,
-}
-
-impl std::fmt::Debug for NewSource {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		f.debug_struct("NewSource").field("key_id", &self.key_id).field("secret", &"<redacted>").finish()
-	}
 }
 
 /// A lead as a bot sees it through the lookup by ref: where it stands and what the customer
@@ -194,17 +161,6 @@ pub fn derived_id(namespace: &[u8], parts: &[&[u8]]) -> uuid::Uuid {
 		.into_uuid()
 }
 
-/// The sources' keys changed: no brand, no single subject a screen would refetch by.
-fn sources_changed() -> live::Change {
-	live::Change {
-		topic: live::Topic::Sources,
-		brand: None,
-		id: None,
-		user: None,
-		at: Timestamp::now(),
-	}
-}
-
 /// Queues what PostHog is told of a new lead event: nothing for what is about no lead, nor for
 /// a `lead.created` that is not the one that counts (a source's second one).
 async fn queue_capture(conn: &mut sqlx::SqliteConnection, recorded: &Recorded, lead: Option<&panel_core::lead::LeadState>, now: Timestamp) -> eyre::Result<()> {
@@ -239,7 +195,6 @@ async fn queue_capture(conn: &mut sqlx::SqliteConnection, recorded: &Recorded, l
 pub struct Panel {
 	store: Store,
 	key: Arc<DataKey>,
-	rotations: Arc<session::Rotations>,
 	live: live::Bus,
 	posthog: Option<posthog::PosthogProject>,
 	/// Whether journaled lead events are queued for PostHog ([`capture`]).
@@ -251,7 +206,6 @@ impl Panel {
 		Self {
 			store,
 			key: Arc::new(key),
-			rotations: Arc::default(),
 			live: live::Bus::default(),
 			posthog: None,
 			capture: false,
@@ -284,45 +238,13 @@ impl Panel {
 		&self.live
 	}
 
-	/// Registers a source that may write events of `kind` for `brands`, with a fresh
-	/// secret. `None` when the key id is taken.
-	pub async fn add_source(&self, key_id: &str, kind: SourceKind, brands: BTreeSet<BrandId>) -> eyre::Result<Option<NewSource>> {
-		eyre::ensure!(panel_core::ids::is_slug(key_id), "a key id is a lowercase slug of 1–64 of [a-z0-9_-]");
-		eyre::ensure!(!brands.is_empty(), "a source writes for at least one brand");
-		// The booking adapters are the panel's own: what a provider says arrives through its
-		// webhook's signature or the panel's pull, never a key.
-		eyre::ensure!(kind != SourceKind::Booking, "a key of kind booking is not issued: the panel's booking adapters write without one");
-		let secret = Zeroizing::new(DataKey::generate_hex()?);
-		let sealed = self.key.seal(&source_secret_aad(key_id), secret.as_bytes())?;
-		let grant = KeyGrant {
-			key_id: key_id.to_owned(),
-			kind,
-			brands,
-		};
-		let added = self.store.insert_source(&grant, &sealed, &self.key.fingerprint()).await?;
-		if added {
-			self.live.changed(sources_changed());
-		}
-		Ok(added.then(|| NewSource { key_id: key_id.to_owned(), secret }))
-	}
-
-	/// Revokes a source's key; `false` when there was no such key, or it was revoked already.
-	pub async fn revoke_source(&self, key_id: &str) -> eyre::Result<bool> {
-		let revoked = self.store.revoke_source(key_id).await?;
-		if revoked {
-			self.live.changed(sources_changed());
-		}
-		Ok(revoked)
-	}
-
-	/// Checks a batch's signature, then judges, journals and projects each of its events.
-	pub async fn ingest(&self, batch: SignedBatch<'_>, now: Timestamp) -> Result<Vec<EventVerdict>, IngestError> {
-		let grant = self.authenticate(&batch, now).await?;
-		let raw = wire::batch(batch.body).map_err(IngestError::BadRequest)?;
+	/// Judges, journals and projects each event of a batch written under `grant`.
+	pub async fn ingest(&self, grant: &KeyGrant, body: &[u8], now: Timestamp) -> Result<Vec<EventVerdict>, IngestError> {
+		let raw = wire::batch(body).map_err(IngestError::BadRequest)?;
 		let mut verdicts = Vec::with_capacity(raw.len());
 		for (index, event) in raw.into_iter().enumerate() {
 			let id = wire::claimed_id(&event);
-			let outcome = self.one(&grant, event, now).await?;
+			let outcome = self.one(grant, event, now).await?;
 			verdicts.push(EventVerdict { index, id, outcome });
 		}
 		let count = |f: fn(&Outcome) -> bool| verdicts.iter().filter(|v| f(&v.outcome)).count();
@@ -337,11 +259,8 @@ impl Panel {
 	}
 
 	/// The brand's newest lead carrying `message_ref`, for a bot's key of that brand (`GET
-	/// /api/ingest/v1/leads/by-ref/{brand}/{ref}`): signed as a batch is, `request.body` being
-	/// what the server signs in place of one — `GET <path>`.
-	/// `Ok(None)` when no lead of the brand carries it.
-	pub async fn lead_by_ref(&self, request: SignedBatch<'_>, brand: &str, message_ref: &str, now: Timestamp) -> Result<Option<RefLead>, IngestError> {
-		let grant = self.authenticate(&request, now).await?;
+	/// /api/ingest/v1/leads/by-ref/{brand}/{ref}`). `Ok(None)` when no lead of the brand carries it.
+	pub async fn lead_by_ref(&self, grant: &KeyGrant, brand: &str, message_ref: &str) -> Result<Option<RefLead>, IngestError> {
 		let brand = BrandId::parse(brand).map_err(IngestError::BadRequest)?;
 		let message_ref = MessageRef::parse(message_ref).map_err(|_| IngestError::BadRequest(Invalid::new("the ref is not like \"AQ-7K3F\"")))?;
 		// What the customer asked for is read back only to what holds a conversation with them.
@@ -376,40 +295,6 @@ impl Panel {
 			messaged_at: row.messaged.map(|(at, _)| at),
 			messaged_channel: row.messaged.map(|(_, m)| m.as_str()),
 		}))
-	}
-
-	async fn authenticate(&self, batch: &SignedBatch<'_>, now: Timestamp) -> Result<KeyGrant, IngestError> {
-		let refuse = |e: SignatureError| {
-			IngestError::Unauthorized(match e {
-				SignatureError::MalformedTimestamp | SignatureError::Stale => STALE,
-				SignatureError::Mismatch => "bad signature",
-			})
-		};
-		// Free checks first, before the database: the window, and whether the key id could
-		// be one at all. A key id that could not is not logged — it is the caller's string.
-		signature::check_window(batch.timestamp, now).map_err(refuse)?;
-		if !panel_core::ids::is_slug(batch.key_id) {
-			return Err(IngestError::Unauthorized("unknown key"));
-		}
-		let Some(source) = self.store.active_source(batch.key_id).await? else {
-			// The MAC is computed anyway, against a key nobody holds, so an unknown key takes
-			// as long to refuse as a bad signature and key ids cannot be told apart by timing.
-			let _refused = signature::verify(&[0u8; 32], batch.timestamp, batch.signature, batch.body, now);
-			tracing::warn!(key_id = batch.key_id, "ingest: unknown or revoked key");
-			return Err(IngestError::Unauthorized("unknown key"));
-		};
-		if source.data_key_fp != self.key.fingerprint() {
-			return Err(IngestError::Internal(eyre::eyre!("source {} was sealed under another PANEL_DATA_KEY", batch.key_id)));
-		}
-		let secret = self
-			.key
-			.open(&source_secret_aad(batch.key_id), &source.secret_sealed)
-			.wrap_err_with(|| format!("opening the secret of source {}", batch.key_id))?;
-		signature::verify(&secret, batch.timestamp, batch.signature, batch.body, now).map_err(|e| {
-			tracing::warn!(key_id = batch.key_id, error = %e, "ingest: signature refused");
-			refuse(e)
-		})?;
-		Ok(source.grant)
 	}
 
 	async fn one(&self, grant: &KeyGrant, raw: Value, now: Timestamp) -> eyre::Result<Outcome> {
@@ -555,8 +440,8 @@ impl Panel {
 		}
 		tx.commit().await.wrap_err("committing an event")?;
 		// Every event that reaches the projections passes here, whoever wrote it: this one
-		// publication is what keeps ingest, the operator's actions, the buttons and the booking
-		// adapters from forgetting to. An unregistered event changes no read, and says nothing.
+		// publication is what keeps ingest, the operator's actions and the booking adapters
+		// from forgetting to. An unregistered event changes no read, and says nothing.
 		for change in changes {
 			self.live.changed(change);
 		}

@@ -40,23 +40,21 @@ use uuid::Uuid;
 
 use crate::{
 	api::{ApiError, ApiResult, body, idempotency_key, recorded},
+	gate::Caller,
 	http::{ApiRoute, Section},
 	scope_ledger::ScopeLedger,
-	signin::{Caller, Freshness},
 };
 
 /// The ledger, when the panel is configured for one (`SCOPE_LEDGER_*`).
 type MaybeLedger = Option<Extension<Arc<ScopeLedger>>>;
 
 pub(crate) fn routes() -> Vec<ApiRoute> {
-	use Freshness::{Cached, Fresh};
 	use Method as M;
 	let work = Some(Section::Work);
 	vec![
-		ApiRoute::new(M::GET, "/invoices", work, Cached, list),
-		ApiRoute::new(M::GET, "/invoices/{id}", work, Cached, item),
-		// Money is asked for on a permission concierge confirms now, not one cached minutes ago.
-		ApiRoute::new(M::POST, "/invoices", work, Fresh, create),
+		ApiRoute::new(M::GET, "/invoices", work, list),
+		ApiRoute::new(M::GET, "/invoices/{id}", work, item),
+		ApiRoute::new(M::POST, "/invoices", work, create),
 	]
 }
 

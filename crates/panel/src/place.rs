@@ -106,7 +106,6 @@ fn place_changed(brand: &BrandId, slug: &LocationId, at: Timestamp) -> crate::li
 		topic: crate::live::Topic::Places,
 		brand: Some(brand.clone()),
 		id: Some(slug.as_str().to_owned()),
-		user: None,
 		at,
 	}
 }

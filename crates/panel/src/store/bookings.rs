@@ -397,7 +397,7 @@ pub async fn to_tell(conn: &mut SqliteConnection, since: Timestamp, limit: i64) 
 		 LEFT JOIN bookings bk ON bk.brand_id = be.brand_id AND bk.provider = be.provider AND bk.external_ref = be.external_ref \
 		 WHERE e.received_at >= $1 AND e.status = 'registered' \
 		 AND (be.kind IN ('created', 'set', 'canceled') OR (be.kind = 'status_changed' AND be.status = 'canceled')) \
-		 AND NOT EXISTS (SELECT 1 FROM telegram_fanout t WHERE t.rule = 'booked' AND t.event_id = be.event_id) \
+		 AND NOT EXISTS (SELECT 1 FROM fanout t WHERE t.rule = 'booked' AND t.event_id = be.event_id) \
 		 ORDER BY e.received_at, e.id LIMIT $2",
 	)
 	.bind(to_db(since))

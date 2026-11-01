@@ -6,8 +6,6 @@ members = [
     "crates/panel_core",
     "crates/panel_gen",
     "crates/panel_server",
-    "crates/sa_auth",
-    "crates/sa_ui",
 ]
 
 [workspace.package]
@@ -23,16 +21,13 @@ panel = { path = "crates/panel", version = "0.1.0" }
 panel_contracts = { path = "crates/panel_contracts", version = "0.1.0" }
 panel_core = { path = "crates/panel_core", version = "0.1.0" }
 panel_server = { path = "crates/panel_server", version = "0.1.0" }
-sa_auth = { path = "crates/sa_auth", version = "0.1.0" }
+sa_auth = { path = "/home/v/s/ev/_sa/site_conductor/.claude/worktrees/sa-auth-principal/crates/sa_auth" }
 
 axum = "0.8"
 base64 = "0.22"
 chacha20poly1305 = "0.10"
 clap = { version = "4", features = ["derive"] }
 color-eyre = "0.6"
-concierge_iam = "0.1.0"
-dioxus = { version = "0.7", default-features = false }
-ed25519-dalek = "2"
 ev_lib = { version = "0.24.2", default-features = false }
 eyre = "0.6"
 futures = "0.3"
@@ -40,7 +35,6 @@ getrandom = "0.3"
 hex = "0.4"
 hmac = "0.13"
 http-body-util = "0.1"
-hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
 jiff = "0.2"
 pbjson = "0.9"
 pbjson-build = "0.9"
@@ -53,7 +47,6 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.11"
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite-bundled", "macros", "migrate", "uuid", "json"] }
-subtle = "2.6"
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 tonic = { version = "0.14", features = ["tls-aws-lc"] }

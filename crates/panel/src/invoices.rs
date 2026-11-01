@@ -359,7 +359,6 @@ fn invoice_changed(id: Option<Uuid>, at: Timestamp) -> crate::live::Change {
 		topic: crate::live::Topic::Invoices,
 		brand: None,
 		id: id.map(|id| id.to_string()),
-		user: None,
 		at,
 	}
 }
