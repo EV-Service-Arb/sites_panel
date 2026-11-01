@@ -1,46 +1,43 @@
-//! The HTTP ingest end to end, through the real router, against a real Postgres.
+//! The HTTP surface end to end, through the real router: who gets in (the conductor's assertion,
+//! and only for what it was signed for), ingest under a source's, a bot's lookup.
 
 use axum::{
-	body::{Body, to_bytes},
-	http::{Request, StatusCode},
+	body::Body,
+	http::{Method, Request, StatusCode},
 };
 use jiff::Timestamp;
-use panel::testing::{Signed, TestDb, event, messenger_lead, panel, sign, sign_get};
-use panel_core::ids::BrandId;
-use sa_auth::SourceKind;
+use panel::testing::{Conductor, TestDb, batch, event, grant, messenger_lead, panel};
+use panel_server::testing::{As, app, app_with, raw, send};
+use sa_auth::{Principal, Service, SourceKind};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
-async fn send(app: axum::Router, signed: &Signed, headers: &[&str]) -> (StatusCode, Value) {
-	let mut req = Request::post("/api/ingest/v1/events").header("content-type", "application/json");
-	for h in headers {
-		req = match *h {
-			"x-sa-key-id" => req.header(*h, &signed.key_id),
-			"x-sa-timestamp" => req.header(*h, &signed.timestamp),
-			"x-sa-signature" => req.header(*h, &signed.signature),
-			other => panic!("{other}"),
-		};
-	}
-	let res = app.oneshot(req.body(Body::from(signed.body.clone())).unwrap()).await.unwrap();
-	let status = res.status();
-	let body = to_bytes(res.into_body(), usize::MAX).await.unwrap();
-	(status, serde_json::from_slice(&body).unwrap_or(Value::Null))
+const INGEST: &str = "/api/ingest/v1/events";
+
+fn site() -> As {
+	As::source("aquafix-site", SourceKind::Site, &["aquafix"])
 }
 
-const ALL: [&str; 3] = ["x-sa-key-id", "x-sa-timestamp", "x-sa-signature"];
+fn json_of(bytes: &[u8]) -> Value {
+	serde_json::from_slice(bytes).unwrap_or(Value::Null)
+}
+
+/// `body` posted to `path` with `assertion` as the header, whatever it was signed for.
+async fn with_assertion(app: &axum::Router, method: Method, path: &str, assertion: Option<String>, body: Vec<u8>) -> (StatusCode, Value) {
+	let mut req = Request::builder().method(method).uri(path);
+	if let Some(a) = assertion {
+		req = req.header(sa_auth::HEADER, a);
+	}
+	let res = app.clone().oneshot(req.body(Body::from(body)).unwrap()).await.unwrap();
+	let status = res.status();
+	(status, json_of(&axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap()))
+}
 
 #[tokio::test]
 async fn ingest_over_http() {
 	let db = TestDb::create().await;
-	let panel = panel(&db).await;
-	let secret = panel
-		.add_source("aquafix-site", SourceKind::Site, [BrandId::parse("aquafix").unwrap()].into())
-		.await
-		.unwrap()
-		.unwrap()
-		.secret
-		.to_string();
-	let app = panel_server::http::router(panel);
+	let conductor = Conductor::new("k1");
+	let app = app(panel(&db).await, &conductor);
 	let now = Timestamp::now();
 	let lead = json!({"brandId": "aquafix", "leadId": "L-1"});
 	let created = event("lead.created", now, "site", lead.clone(), json!({"channel": "form"}));
@@ -50,45 +47,141 @@ async fn ingest_over_http() {
 		event("lead.created", now, "site", json!({"brandId": "vifnet", "leadId": "V-1"}), json!({"channel": "form"})),
 		event("review.new", now, "site", lead, json!({})),
 	];
+	let body = batch("aquafix-site", &events);
 
-	let good = sign("aquafix-site", &secret, &events, now);
-	let (status, body) = send(app.clone(), &good, &ALL).await;
-	assert_eq!(status, StatusCode::MULTI_STATUS, "{body}");
-	let results = body["results"].as_array().unwrap();
+	let (status, answer) = raw(&app, &conductor, &site(), Method::POST, INGEST, &[], body.clone()).await;
+	let answer = json_of(&answer);
+	assert_eq!(status, StatusCode::MULTI_STATUS, "{answer}");
+	let results = answer["results"].as_array().unwrap();
 	let statuses: Vec<&str> = results.iter().map(|r| r["status"].as_str().unwrap()).collect();
 	assert_eq!(statuses, ["accepted", "duplicate", "rejected", "accepted"]);
-	assert_eq!(results[2]["reason"], "this key may not write for brand vifnet");
+	assert_eq!(results[2]["reason"], "this key may not write for brand vifnet", "the grant is the assertion's");
 	assert_eq!(results[2]["index"], 2);
 	assert_eq!(results[0]["id"], events[0]["id"]);
 	assert!(results[3]["reason"].as_str().unwrap().contains("not registered"));
 
-	let (status, body) = send(app.clone(), &good, &ALL[..2]).await;
-	assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
-
-	let forged = sign("aquafix-site", &"f".repeat(64), &events, now);
-	let unknown = sign("nobody", &secret, &events, now);
-	let (s1, b1) = send(app.clone(), &forged, &ALL).await;
-	let (s2, b2) = send(app.clone(), &unknown, &ALL).await;
-	assert_eq!((s1, s2), (StatusCode::UNAUTHORIZED, StatusCode::UNAUTHORIZED));
-	assert_eq!(b1, b2, "an unknown key and a bad signature read the same");
-
-	let stale = sign("aquafix-site", &secret, &events, now - jiff::SignedDuration::from_mins(10));
-	let (status, body) = send(app.clone(), &stale, &ALL).await;
-	assert_eq!((status, body["error"].as_str()), (StatusCode::UNAUTHORIZED, Some("timestamp outside the replay window")));
-
-	let empty = sign("aquafix-site", &secret, &[], now);
-	let (status, body) = send(app.clone(), &empty, &ALL).await;
-	assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-
-	let huge = Signed {
-		body: vec![b' '; panel_server::http::MAX_BODY + 1],
-		..sign("aquafix-site", &secret, &events, now)
-	};
-	let (status, _) = send(app.clone(), &huge, &ALL).await;
+	let (status, answer) = raw(&app, &conductor, &site(), Method::POST, INGEST, &[], batch("aquafix-site", &[])).await;
+	assert_eq!(status, StatusCode::BAD_REQUEST, "{:?}", json_of(&answer));
+	let (status, _) = raw(&app, &conductor, &site(), Method::POST, INGEST, &[], vec![b' '; panel_server::http::MAX_BODY + 1]).await;
 	assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
 
-	let res = app.oneshot(Request::get("/health").body(Body::empty()).unwrap()).await.unwrap();
+	let res = app.clone().oneshot(Request::get("/health").body(Body::empty()).unwrap()).await.unwrap();
 	assert_eq!(res.status(), StatusCode::OK);
+}
+
+/// Every way a request may not be the conductor's, or not this request's: one answer, 401.
+#[tokio::test]
+async fn only_the_conductors_assertion_for_this_request_gets_in() {
+	let db = TestDb::create().await;
+	let conductor = Conductor::new("k1");
+	let app = app(panel(&db).await, &conductor);
+	let now = Timestamp::now();
+	let body = batch(
+		"aquafix-site",
+		&[event("lead.created", now, "site", json!({"brandId": "aquafix", "leadId": "L-1"}), json!({"channel": "form"}))],
+	);
+	let source = |c: &Conductor, body: &[u8]| c.source("aquafix-site", SourceKind::Site, &["aquafix"], "POST", INGEST, body);
+	let unauthenticated = json!({"error": "unauthenticated"});
+	let operator = panel_server::testing::alias("sa:operator");
+	let refused = [
+		("no assertion", Method::POST, INGEST, None, body.clone()),
+		("a key of the same name", Method::POST, INGEST, Some(source(&Conductor::new("k1"), &body)), body.clone()),
+		("a key it does not know", Method::POST, INGEST, Some(source(&Conductor::new("k2"), &body)), body.clone()),
+		("another body", Method::POST, INGEST, Some(source(&conductor, b"{\"events\":[]}")), body.clone()),
+		(
+			"another service",
+			Method::POST,
+			INGEST,
+			Some(conductor.sign(
+				Service::ReviewArchive,
+				Principal::Source(sa_auth::Source::new("aquafix-site".into(), SourceKind::Site, ["aquafix".to_owned()].into(), &body)),
+				"POST",
+				INGEST,
+			)),
+			body.clone(),
+		),
+		(
+			"a user on ingest",
+			Method::POST,
+			INGEST,
+			Some(conductor.user(uuid::Uuid::now_v7(), &operator, "POST", INGEST)),
+			body.clone(),
+		),
+		(
+			"a kind no key is issued for",
+			Method::POST,
+			INGEST,
+			Some(conductor.source("aquafix-ops", SourceKind::Panel, &["aquafix"], "POST", INGEST, &body)),
+			body.clone(),
+		),
+		("no assertion on /api/v1", Method::GET, "/api/v1/leads", None, Vec::new()),
+		(
+			"another path",
+			Method::GET,
+			"/api/v1/leads",
+			Some(conductor.user(uuid::Uuid::now_v7(), &operator, "GET", "/api/v1/places")),
+			Vec::new(),
+		),
+		(
+			"another method",
+			Method::GET,
+			"/api/v1/leads",
+			Some(conductor.user(uuid::Uuid::now_v7(), &operator, "POST", "/api/v1/leads")),
+			Vec::new(),
+		),
+		(
+			"the conductor on /api/v1",
+			Method::GET,
+			"/api/v1/leads",
+			Some(conductor.conductor("GET", "/api/v1/leads")),
+			Vec::new(),
+		),
+		(
+			"a user on the conductor's feeds",
+			Method::GET,
+			"/api/conductor/sources/received",
+			Some(conductor.user(uuid::Uuid::now_v7(), &panel_server::testing::alias("sa:admin"), "GET", "/api/conductor/sources/received")),
+			Vec::new(),
+		),
+		(
+			"a user whose sub is no user id",
+			Method::GET,
+			"/api/v1/leads",
+			Some(conductor.sign(
+				Service::Sites,
+				Principal::User(sa_auth::User {
+					sub: "olga".into(),
+					email: "o@example.com".into(),
+					email_verified: true,
+					name: "Olga".into(),
+					permissions: operator.iter().filter(|p| p.starts_with("sa:sites:")).collect(),
+				}),
+				"GET",
+				"/api/v1/leads",
+			)),
+			Vec::new(),
+		),
+	];
+	for (why, method, path, assertion, body) in refused {
+		assert_eq!(
+			with_assertion(&app, method, path, assertion, body).await,
+			(StatusCode::UNAUTHORIZED, unauthenticated.clone()),
+			"{why}"
+		);
+	}
+	let n: i64 = sqlx::query_scalar("SELECT count(*) FROM events").fetch_one(&db.pool().await).await.unwrap();
+	assert_eq!(n, 0, "nothing refused was journaled");
+
+	let (status, _) = send(&app, &conductor, &As::user(operator.clone()), Method::GET, "/api/v1/leads?limit=5", None, &[]).await;
+	assert_eq!(status, StatusCode::OK, "the query is not part of what is signed");
+	let work_only: sa_auth::PermissionSet = [sa_auth::Work::Read.as_str()].into_iter().collect();
+	let (status, _) = send(&app, &conductor, &As::user(work_only.clone()), Method::GET, "/api/v1/funnel", None, &[]).await;
+	assert_eq!(status, StatusCode::FORBIDDEN, "signed in, outside the section");
+	let sub = uuid::Uuid::now_v7();
+	let (status, me) = send(&app, &conductor, &As::User(sub, work_only), Method::GET, "/api/v1/me", None, &[]).await;
+	assert_eq!((status, me), (StatusCode::OK, json!({"sub": sub.to_string(), "permissions": ["sa:sites:work:read"]})));
+	let (status, _) = send(&app, &conductor, &As::Nobody, Method::GET, "/api/internal/brands/aquafix/locations/royat", None, &[]).await;
+	assert_eq!(status, StatusCode::OK, "the landings' reads take no assertion");
 }
 
 /// A body that never arrives.
@@ -96,79 +189,64 @@ fn stalled() -> Body {
 	Body::from_stream(futures::stream::pending::<Result<Vec<u8>, std::io::Error>>())
 }
 
-fn request(key_id: &str, timestamp: &str, body: Body) -> Request<Body> {
-	Request::post("/api/ingest/v1/events")
-		.header("x-sa-key-id", key_id)
-		.header("x-sa-timestamp", timestamp)
-		.header("x-sa-signature", "00")
-		.body(body)
-		.unwrap()
+fn post(assertion: Option<&str>, body: Body) -> Request<Body> {
+	let mut req = Request::post(INGEST);
+	if let Some(a) = assertion {
+		req = req.header(sa_auth::HEADER, a);
+	}
+	req.body(body).unwrap()
 }
 
 #[tokio::test]
 async fn costly_requests_are_refused_before_the_body_is_read() {
 	let db = TestDb::create().await;
+	let conductor = Conductor::new("k1");
 	let panel = panel(&db).await;
-	let now = Timestamp::now().as_second().to_string();
-	let stale = (Timestamp::now().as_second() - 600).to_string();
 	let quick = std::time::Duration::from_secs(5);
+	let assertion = conductor.source("aquafix-site", SourceKind::Site, &["aquafix"], "POST", INGEST, b"{}");
 
-	// Both would hang on the stalled body if it were read first.
-	let app = panel_server::http::router(panel.clone());
-	for (key_id, ts) in [("aquafix-site", stale.as_str()), ("Not a key id", now.as_str())] {
-		let res = tokio::time::timeout(quick, app.clone().oneshot(request(key_id, ts, stalled())))
-			.await
-			.expect("answered without the body")
-			.unwrap();
-		assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "{key_id} {ts}");
-	}
+	let app = app(panel.clone(), &conductor);
+	let res = tokio::time::timeout(quick, app.clone().oneshot(post(None, stalled())))
+		.await
+		.expect("answered without the body")
+		.unwrap();
+	assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 
 	let limits = panel_server::http::Limits {
 		max_concurrent: 1,
 		body_timeout: std::time::Duration::from_millis(200),
-		request_timeout: std::time::Duration::from_secs(5),
-		..Default::default()
+		..panel_server::http::Limits::default()
 	};
-	let app = panel_server::http::router_with(panel, limits);
-	let res = tokio::time::timeout(quick, app.clone().oneshot(request("aquafix-site", &now, stalled()))).await.unwrap().unwrap();
+	let app = app_with(panel, &conductor, limits, panel::booking::PushSources::default());
+	let res = tokio::time::timeout(quick, app.clone().oneshot(post(Some(&assertion), stalled()))).await.unwrap().unwrap();
 	assert_eq!(res.status(), StatusCode::REQUEST_TIMEOUT, "a body too slow to arrive");
 
 	// One slow request holds the only slot; the next is shed, not queued.
 	let (tx, rx) = tokio::sync::oneshot::channel::<()>();
 	let held = futures::stream::once(async move {
-		let _ = rx.await;
+		rx.await.expect("released below");
 		Ok::<_, std::io::Error>(b"{}".to_vec())
 	});
-	let first = tokio::spawn(app.clone().oneshot(request("aquafix-site", &now, Body::from_stream(held))));
-	tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-	let res = app.clone().oneshot(request("aquafix-site", &now, Body::from("{}"))).await.unwrap();
-	assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
-	tx.send(()).unwrap();
-	assert_eq!(first.await.unwrap().unwrap().status(), StatusCode::UNAUTHORIZED, "the held one goes on to be judged");
+	let first = app.clone().oneshot(post(Some(&assertion), Body::from_stream(held)));
+	let second = async {
+		tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+		let res = app.clone().oneshot(post(Some(&assertion), Body::from("{}"))).await.unwrap();
+		tx.send(()).unwrap();
+		res
+	};
+	let (first, second) = tokio::join!(first, second);
+	assert_eq!(second.status(), StatusCode::SERVICE_UNAVAILABLE);
+	assert_eq!(first.unwrap().status(), StatusCode::BAD_REQUEST, "the held one goes on to be judged");
 }
 
-async fn look_up(app: &axum::Router, uri: &str, signed: &Signed) -> (StatusCode, Value) {
-	let req = Request::get(uri)
-		.header("x-sa-key-id", &signed.key_id)
-		.header("x-sa-timestamp", &signed.timestamp)
-		.header("x-sa-signature", &signed.signature)
-		.body(Body::empty())
-		.unwrap();
-	let res = app.clone().oneshot(req).await.unwrap();
-	let status = res.status();
-	let body = to_bytes(res.into_body(), usize::MAX).await.unwrap();
-	(status, serde_json::from_slice(&body).unwrap_or(Value::Null))
-}
-
-/// A bot looks a lead up by the ref the customer brought: signed as ingest is, over `GET <path>`
-/// in place of a body; only its own brand's, only a bot's key; what the customer asked for, never who they are.
+/// A bot looks a lead up by the ref the customer brought, under its key's assertion over an
+/// empty body: only its own brand's, only a bot's key; what the customer asked for, never who
+/// they are.
 #[tokio::test]
 async fn a_bot_looks_a_lead_up_by_its_ref() {
 	let db = TestDb::create().await;
+	let conductor = Conductor::new("k1");
 	let panel = panel(&db).await;
-	let aquafix = || [BrandId::parse("aquafix").unwrap()].into();
-	let site = panel.add_source("aquafix-site", SourceKind::Site, aquafix()).await.unwrap().unwrap().secret.to_string();
-	let bot = panel.add_source("aquafix-tg", SourceKind::Bot, aquafix()).await.unwrap().unwrap().secret.to_string();
 	let now = Timestamp::now();
 	let earlier = now - jiff::SignedDuration::from_mins(5);
 	let mut priced = messenger_lead(now, "aquafix", "L-2", "telegram", "AQ-7K3F");
@@ -176,12 +254,20 @@ async fn a_bot_looks_a_lead_up_by_its_ref() {
 	priced["properties"]["quotedCents"] = json!(9900);
 	priced["properties"]["pricingValidFrom"] = json!("2026-10-01");
 	let leads = [messenger_lead(earlier, "aquafix", "L-1", "whatsapp", "AQ-7K3F"), priced];
-	let got = panel.ingest(sign("aquafix-site", &site, &leads, now).batch(), now).await.unwrap();
+	let got = panel
+		.ingest(&grant("aquafix-site", SourceKind::Site, &["aquafix"]), &batch("aquafix-site", &leads), now)
+		.await
+		.unwrap();
 	assert!(got.iter().all(|v| v.outcome == panel::Outcome::Accepted { unregistered: false }), "{got:?}");
-	let app = panel_server::http::router(panel);
+	let app = app(panel, &conductor);
+	let bot = As::source("aquafix-tg", SourceKind::Bot, &["aquafix"]);
 	let uri = "/api/ingest/v1/leads/by-ref/aquafix/AQ-7K3F";
+	let look_up = |who: As, uri: &'static str| {
+		let (app, conductor) = (app.clone(), &conductor);
+		async move { send(&app, conductor, &who, Method::GET, uri, None, &[]).await }
+	};
 
-	let (status, body) = look_up(&app, uri, &sign_get("aquafix-tg", &bot, uri, now)).await;
+	let (status, body) = look_up(bot.clone(), uri).await;
 	assert_eq!(status, StatusCode::OK, "{body}");
 	let created = body["created_at"].as_str().unwrap().to_owned();
 	assert_eq!(
@@ -195,52 +281,24 @@ async fn a_bot_looks_a_lead_up_by_its_ref() {
 	let dump = body.to_string();
 	assert!(!dump.contains("+336") && !dump.contains("Dupont"), "{dump}");
 
-	let (status, body) = look_up(
-		&app,
-		"/api/ingest/v1/leads/by-ref/aquafix/AQ-0000",
-		&sign_get("aquafix-tg", &bot, "/api/ingest/v1/leads/by-ref/aquafix/AQ-0000", now),
-	)
-	.await;
+	let (status, body) = look_up(bot.clone(), "/api/ingest/v1/leads/by-ref/aquafix/AQ-0000").await;
 	assert_eq!((status, body["error"].as_str()), (StatusCode::NOT_FOUND, Some("no lead of the brand carries that ref")));
-	let (status, _) = look_up(
-		&app,
-		"/api/ingest/v1/leads/by-ref/aquafix/aq-7k3f",
-		&sign_get("aquafix-tg", &bot, "/api/ingest/v1/leads/by-ref/aquafix/aq-7k3f", now),
-	)
-	.await;
+	let (status, _) = look_up(bot.clone(), "/api/ingest/v1/leads/by-ref/aquafix/aq-7k3f").await;
 	assert_eq!(status, StatusCode::BAD_REQUEST, "a ref is as the landing made it");
-	let (status, body) = look_up(
-		&app,
-		"/api/ingest/v1/leads/by-ref/vifnet/AQ-7K3F",
-		&sign_get("aquafix-tg", &bot, "/api/ingest/v1/leads/by-ref/vifnet/AQ-7K3F", now),
-	)
-	.await;
+	let (status, body) = look_up(bot.clone(), "/api/ingest/v1/leads/by-ref/vifnet/AQ-7K3F").await;
 	assert_eq!((status, body["error"].as_str()), (StatusCode::FORBIDDEN, Some("this key is not for that brand")));
-	let (status, body) = look_up(&app, uri, &sign_get("aquafix-site", &site, uri, now)).await;
+	let (status, body) = look_up(site(), uri).await;
 	assert_eq!((status, body["error"].as_str()), (StatusCode::FORBIDDEN, Some("only a bot's key looks a lead up by its ref")));
-	let (status, body) = look_up(&app, uri, &sign_get("aquafix-tg", &"0".repeat(64), uri, now)).await;
-	assert_eq!((status, body["error"].as_str()), (StatusCode::UNAUTHORIZED, Some("invalid key or signature")));
-	let (status, _) = look_up(&app, uri, &sign_get("aquafix-tg", &bot, uri, now - jiff::SignedDuration::from_mins(10))).await;
-	assert_eq!(status, StatusCode::UNAUTHORIZED, "the replay window holds");
-	let other = "/api/ingest/v1/leads/by-ref/aquafix/AQ-0000";
-	let (status, _) = look_up(&app, other, &sign_get("aquafix-tg", &bot, uri, now)).await;
-	assert_eq!(status, StatusCode::UNAUTHORIZED, "a signature opens the one path it was made for");
-	let ts = now.as_second().to_string();
-	let empty = Signed {
-		key_id: "aquafix-tg".into(),
-		signature: panel_core::signature::sign(bot.as_bytes(), &ts, b""),
-		timestamp: ts,
-		body: Vec::new(),
-	};
-	let (status, _) = look_up(&app, uri, &empty).await;
-	assert_eq!(status, StatusCode::UNAUTHORIZED, "nor does a MAC over an empty body");
-	let with_query = format!("{uri}?locale=fr");
-	let (status, _) = look_up(&app, &with_query, &sign_get("aquafix-tg", &bot, &with_query, now)).await;
-	assert_eq!(status, StatusCode::OK, "the query is signed with the path");
-	let (status, _) = look_up(&app, &with_query, &sign_get("aquafix-tg", &bot, uri, now)).await;
-	assert_eq!(status, StatusCode::UNAUTHORIZED, "and cannot be added after");
-	let unsigned = Request::get(uri).body(Body::empty()).unwrap();
-	assert_eq!(app.clone().oneshot(unsigned).await.unwrap().status(), StatusCode::UNAUTHORIZED);
+	let (status, _) = look_up(bot.clone(), "/api/ingest/v1/leads/by-ref/aquafix/AQ-7K3F?locale=fr").await;
+	assert_eq!(status, StatusCode::OK, "the conductor checked the query with the MAC; the assertion binds the path");
+	let over_a_body = conductor.source("aquafix-tg", SourceKind::Bot, &["aquafix"], "GET", uri, b"x");
+	assert_eq!(with_assertion(&app, Method::GET, uri, Some(over_a_body), Vec::new()).await.0, StatusCode::UNAUTHORIZED);
+	let elsewhere = conductor.source("aquafix-tg", SourceKind::Bot, &["aquafix"], "GET", "/api/ingest/v1/leads/by-ref/aquafix/AQ-0000", b"");
+	assert_eq!(
+		with_assertion(&app, Method::GET, uri, Some(elsewhere), Vec::new()).await.0,
+		StatusCode::UNAUTHORIZED,
+		"an assertion opens the one path it was made for"
+	);
 
 	// What it said, once the customer wrote.
 	let wrote = event(
@@ -250,10 +308,10 @@ async fn a_bot_looks_a_lead_up_by_its_ref() {
 		json!({"brandId": "aquafix"}),
 		json!({"channel": "telegram", "messageRef": "AQ-7K3F"}),
 	);
-	let batch = sign("aquafix-tg", &bot, &[wrote], now);
-	let (status, body) = send(app.clone(), &batch, &ALL).await;
+	let (status, body) = raw(&app, &conductor, &bot, Method::POST, INGEST, &[], batch("aquafix-tg", &[wrote])).await;
+	let body = json_of(&body);
 	assert_eq!((status, body["results"][0]["status"].as_str()), (StatusCode::MULTI_STATUS, Some("accepted")), "{body}");
-	let (_, body) = look_up(&app, uri, &sign_get("aquafix-tg", &bot, uri, now)).await;
+	let (_, body) = look_up(bot, uri).await;
 	assert_eq!(body["messaged_channel"], "telegram");
 	assert!(body["messaged_at"].is_string());
 }
