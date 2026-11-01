@@ -21,14 +21,13 @@ use panel::{
 	Panel,
 	booking::{BookingEvent, Change, Contact, Provider, PushError, PushRequest, PushSource, PushSources},
 	live::{Signal, Topic},
-	testing::{TestDb, event, panel, sign},
+	testing::{Conductor, TestDb, batch, event, grant, panel},
 };
 use panel_core::ids::BrandId;
 use panel_server::{
-	concierge::{Concierge, DevIdentity},
 	google_calendar::{BrandCalendar, GoogleCalendar},
-	http,
-	signin::{SignIn, SignInConfig},
+	http::Limits,
+	testing::{As, Client, alias, app, app_with, raw, send},
 };
 use sa_auth::SourceKind;
 use serde_json::{Value, json};
@@ -37,74 +36,11 @@ use tower::ServiceExt;
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
-const ORIGIN: &str = "http://127.0.0.1:59120";
-
-fn app(panel: Panel, alias: &str) -> Router {
-	let who = DevIdentity {
-		permissions: sa_auth::Catalog::collect("sa", 0).aliases[alias].iter().cloned().collect(),
-		email: format!("dev-{}@localhost", alias.trim_start_matches("sa:")),
-	};
-	let config = SignInConfig {
-		panel_origin: ORIGIN.to_owned(),
-		concierge_origin: ORIGIN.to_owned(),
-	};
-	http::app(SignIn::new(panel, Concierge::dev(who), config))
-}
-
-#[derive(Default)]
-struct Browser {
-	jar: HashMap<String, String>,
-}
-
-impl Browser {
-	async fn send(&mut self, app: &Router, method: Method, uri: &str, body: Option<Value>, headers: &[(&str, &str)]) -> (StatusCode, Value) {
-		let mut req = Request::builder().method(method.clone()).uri(uri);
-		if !self.jar.is_empty() {
-			req = req.header(header::COOKIE, self.jar.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join("; "));
-		}
-		if method != Method::GET
-			&& let Some(t) = self.jar.get("sa_csrf")
-		{
-			req = req.header("x-sa-csrf", t);
-		}
-		for (k, v) in headers {
-			req = req.header(*k, *v);
-		}
-		let req = match body {
-			Some(b) => req.header(header::CONTENT_TYPE, "application/json").body(Body::from(b.to_string())),
-			None => req.body(Body::empty()),
-		};
-		let res = app.clone().oneshot(req.unwrap()).await.unwrap();
-		for c in res.headers().get_all(header::SET_COOKIE) {
-			let (pair, _) = c.to_str().unwrap().split_once(';').unwrap_or((c.to_str().unwrap(), ""));
-			let (k, v) = pair.split_once('=').unwrap();
-			self.jar.insert(k.to_owned(), v.to_owned());
-		}
-		let status = res.status();
-		let bytes = to_bytes(res.into_body(), usize::MAX).await.unwrap();
-		(status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
-	}
-
-	async fn get(&mut self, app: &Router, uri: &str) -> (StatusCode, Value) {
-		self.send(app, Method::GET, uri, None, &[]).await
-	}
-
-	async fn post(&mut self, app: &Router, uri: &str, body: Value) -> (StatusCode, Value) {
-		self.send(app, Method::POST, uri, Some(body), &[]).await
-	}
-
-	async fn signed_in(app: &Router) -> Self {
-		let mut b = Self::default();
-		let login = app.clone().oneshot(Request::get("/auth/login").body(Body::empty()).unwrap()).await.unwrap();
-		let location = login.headers()[header::LOCATION].to_str().unwrap().to_owned();
-		for c in login.headers().get_all(header::SET_COOKIE) {
-			let (pair, _) = c.to_str().unwrap().split_once(';').unwrap();
-			let (k, v) = pair.split_once('=').unwrap();
-			b.jar.insert(k.to_owned(), v.to_owned());
-		}
-		let (status, _) = b.get(app, location.strip_prefix(ORIGIN).unwrap()).await;
-		assert_eq!(status, StatusCode::SEE_OTHER);
-		b
+fn operator<'a>(app: &'a Router, conductor: &'a Conductor) -> Client<'a> {
+	Client {
+		app,
+		conductor,
+		who: As::user(alias("sa:operator")),
 	}
 }
 
@@ -112,12 +48,8 @@ fn vifnet() -> BrandId {
 	BrandId::parse("vifnet").unwrap()
 }
 
-/// A site key for vifnet, and leads sent through it with their PII.
-async fn site(panel: &Panel) -> String {
-	panel.add_source("vifnet-site", SourceKind::Site, [vifnet()].into()).await.unwrap().unwrap().secret.to_string()
-}
-
-async fn site_lead(panel: &Panel, secret: &str, id: &str, at: Timestamp, pii: Value) {
+/// A lead sent through vifnet's site key, with its PII.
+async fn site_lead(panel: &Panel, id: &str, at: Timestamp, pii: Value) {
 	let mut e = event(
 		"lead.created",
 		at,
@@ -126,8 +58,10 @@ async fn site_lead(panel: &Panel, secret: &str, id: &str, at: Timestamp, pii: Va
 		json!({"channel": "form"}),
 	);
 	e["pii"] = pii;
-	let now = Timestamp::now();
-	let v = panel.ingest(sign("vifnet-site", secret, &[e], now).batch(), now).await.unwrap();
+	let v = panel
+		.ingest(&grant("vifnet-site", SourceKind::Site, &["vifnet"]), &batch("vifnet-site", &[e]), Timestamp::now())
+		.await
+		.unwrap();
 	assert_eq!(v[0].outcome, panel::Outcome::Accepted { unregistered: false });
 }
 
@@ -146,32 +80,28 @@ fn told(rx: &mut broadcast::Receiver<Signal>) -> Vec<(Topic, Option<String>)> {
 async fn an_operator_books_closes_and_clears_a_slot() {
 	let db = TestDb::create().await;
 	let panel = panel(&db).await;
-	let app = app(panel.clone(), "sa:operator");
-	let mut b = Browser::signed_in(&app).await;
+	let conductor = Conductor::new("k1");
+	let app = app(panel.clone(), &conductor);
+	let b = operator(&app, &conductor);
 	let (status, made) = b
-		.post(&app, "/api/v1/leads", json!({"brand": "vifnet", "location": "vifnet", "need": "ménage", "phone": "0612345678"}))
+		.post("/api/v1/leads", json!({"brand": "vifnet", "location": "vifnet", "need": "ménage", "phone": "0612345678"}))
 		.await;
 	assert_eq!(status, StatusCode::CREATED, "{made}");
 	let lead = format!("/api/v1/leads/vifnet/{}", made["lead_id"].as_str().unwrap());
 	let booking = |b: Value| b["lead"]["booking"].clone();
 
 	assert_eq!(
-		booking(b.get(&app, &lead).await.1),
+		booking(b.get(&lead).await.1),
 		json!({"status": "none", "provider": null, "start_at": null, "end_at": null, "external_ref": null, "match": null, "preferred_date": null, "preferred_part": null})
 	);
 	assert_eq!(
-		b.post(&app, &format!("{lead}/booking/status"), json!({"status": "done"})).await.0,
+		b.post(&format!("{lead}/booking/status"), json!({"status": "done"})).await.0,
 		StatusCode::CONFLICT,
 		"nothing booked"
 	);
-	assert_eq!(
-		b.post(&app, &format!("{lead}/booking"), json!({"action": "clear"})).await.0,
-		StatusCode::CONFLICT,
-		"nothing to clear"
-	);
+	assert_eq!(b.post(&format!("{lead}/booking"), json!({"action": "clear"})).await.0, StatusCode::CONFLICT, "nothing to clear");
 	let (status, e) = b
 		.post(
-			&app,
 			&format!("{lead}/booking"),
 			json!({"action": "set", "start_at": "2026-10-08T10:00:00+02:00", "end_at": "2026-10-08T09:00:00+02:00"}),
 		)
@@ -180,46 +110,44 @@ async fn an_operator_books_closes_and_clears_a_slot() {
 
 	let mut rx = panel.bus().subscribe();
 	let set = json!({"action": "set", "start_at": "2026-10-08T10:00:00+02:00", "end_at": "2026-10-08T11:00:00+02:00"});
-	let (status, first) = b.send(&app, Method::POST, &format!("{lead}/booking"), Some(set.clone()), &[("idempotency-key", "k1")]).await;
+	let (status, first) = b.send(Method::POST, &format!("{lead}/booking"), Some(set.clone()), &[("idempotency-key", "k1")]).await;
 	assert_eq!(status, StatusCode::CREATED);
-	let (status, again) = b.send(&app, Method::POST, &format!("{lead}/booking"), Some(set), &[("idempotency-key", "k1")]).await;
+	let (status, again) = b.send(Method::POST, &format!("{lead}/booking"), Some(set), &[("idempotency-key", "k1")]).await;
 	assert_eq!((status, &again), (StatusCode::OK, &first), "a retry is the first answer");
 	assert_eq!(told(&mut rx), [(Topic::Lead, made["lead_id"].as_str().map(str::to_owned))]);
 	assert_eq!(
-		booking(b.get(&app, &lead).await.1),
+		booking(b.get(&lead).await.1),
 		json!({"status": "booked", "provider": "manual", "start_at": "2026-10-08T08:00:00Z", "end_at": "2026-10-08T09:00:00Z",
 			"external_ref": null, "match": "manual", "preferred_date": null, "preferred_part": null})
 	);
-	assert_eq!(b.post(&app, &format!("{lead}/booking/status"), json!({"status": "lost"})).await.0, StatusCode::BAD_REQUEST);
-	assert_eq!(b.post(&app, &format!("{lead}/booking/status"), json!({"status": "no_show"})).await.0, StatusCode::CREATED);
-	assert_eq!(booking(b.get(&app, &lead).await.1)["status"], "no_show");
+	assert_eq!(b.post(&format!("{lead}/booking/status"), json!({"status": "lost"})).await.0, StatusCode::BAD_REQUEST);
+	assert_eq!(b.post(&format!("{lead}/booking/status"), json!({"status": "no_show"})).await.0, StatusCode::CREATED);
+	assert_eq!(booking(b.get(&lead).await.1)["status"], "no_show");
 	assert_eq!(
-		b.post(&app, &format!("{lead}/booking/status"), json!({"status": "done"})).await.0,
+		b.post(&format!("{lead}/booking/status"), json!({"status": "done"})).await.0,
 		StatusCode::CONFLICT,
 		"closed already"
 	);
-	assert_eq!(b.post(&app, &format!("{lead}/booking"), json!({"action": "clear"})).await.0, StatusCode::CREATED);
-	assert_eq!(booking(b.get(&app, &lead).await.1)["status"], "none");
-	b.post(&app, &format!("{lead}/booking"), json!({"action": "set", "start_at": "2026-10-09T10:00:00+02:00"})).await;
-	assert_eq!(b.post(&app, &format!("{lead}/booking/status"), json!({"status": "done"})).await.0, StatusCode::CREATED);
+	assert_eq!(b.post(&format!("{lead}/booking"), json!({"action": "clear"})).await.0, StatusCode::CREATED);
+	assert_eq!(booking(b.get(&lead).await.1)["status"], "none");
+	b.post(&format!("{lead}/booking"), json!({"action": "set", "start_at": "2026-10-09T10:00:00+02:00"})).await;
+	assert_eq!(b.post(&format!("{lead}/booking/status"), json!({"status": "done"})).await.0, StatusCode::CREATED);
 	assert_eq!(
-		b.post(&app, &format!("{lead}/booking"), json!({"action": "set", "start_at": "2026-10-10T10:00:00+02:00"}))
-			.await
-			.0,
+		b.post(&format!("{lead}/booking"), json!({"action": "set", "start_at": "2026-10-10T10:00:00+02:00"})).await.0,
 		StatusCode::CONFLICT,
 		"a done booking is not booked again"
 	);
-	assert_eq!(b.post(&app, &format!("{lead}/booking"), json!({"action": "clear"})).await.0, StatusCode::CONFLICT);
-	let (_, listed) = b.get(&app, "/api/v1/leads?booking=done").await;
+	assert_eq!(b.post(&format!("{lead}/booking"), json!({"action": "clear"})).await.0, StatusCode::CONFLICT);
+	let (_, listed) = b.get("/api/v1/leads?booking=done").await;
 	assert_eq!(listed["leads"].as_array().unwrap().len(), 1);
-	assert_eq!(b.get(&app, "/api/v1/leads?booking=booked").await.1["leads"], json!([]));
-	assert_eq!(b.get(&app, "/api/v1/leads?booking=maybe").await.0, StatusCode::BAD_REQUEST);
-	assert_eq!(b.post(&app, "/api/v1/leads/vifnet/p-nope/booking", json!({"action": "clear"})).await.0, StatusCode::NOT_FOUND);
+	assert_eq!(b.get("/api/v1/leads?booking=booked").await.1["leads"], json!([]));
+	assert_eq!(b.get("/api/v1/leads?booking=maybe").await.0, StatusCode::BAD_REQUEST);
+	assert_eq!(b.post("/api/v1/leads/vifnet/p-nope/booking", json!({"action": "clear"})).await.0, StatusCode::NOT_FOUND);
 
 	// The rebuild lands on the same booking.
-	let before = b.get(&app, &lead).await.1["lead"]["booking"].clone();
+	let before = b.get(&lead).await.1["lead"]["booking"].clone();
 	panel.rebuild_projections().await.unwrap();
-	assert_eq!(b.get(&app, &lead).await.1["lead"]["booking"], before);
+	assert_eq!(b.get(&lead).await.1["lead"]["booking"], before);
 }
 
 // ── a fake Google ───────────────────────────────────────────────────────────────────────
@@ -305,8 +233,8 @@ fn appointment(id: &str, etag: &str, start: &str, email: &str, phone: Option<&st
 	})
 }
 
-async fn lead_booking(b: &mut Browser, app: &Router, lead: &str) -> Value {
-	let (status, body) = b.get(app, &format!("/api/v1/leads/vifnet/{lead}")).await;
+async fn lead_booking(b: &Client<'_>, lead: &str) -> Value {
+	let (status, body) = b.get(&format!("/api/v1/leads/vifnet/{lead}")).await;
 	assert_eq!(status, StatusCode::OK, "{lead}: {body}");
 	body["lead"]["booking"].clone()
 }
@@ -323,18 +251,18 @@ async fn sync(panel: &Panel, api: &GoogleCalendar, full: bool) -> panel::booking
 async fn google_bookings_are_pulled_matched_moved_and_canceled() {
 	let db = TestDb::create().await;
 	let panel = panel(&db).await;
-	let secret = site(&panel).await;
-	let app = app(panel.clone(), "sa:operator");
-	let mut b = Browser::signed_in(&app).await;
+	let conductor = Conductor::new("k1");
+	let app = app(panel.clone(), &conductor);
+	let b = operator(&app, &conductor);
 	let (g, api) = fake_google().await;
 	let hour_ago = Timestamp::now() - SignedDuration::from_hours(1);
-	site_lead(&panel, &secret, "lead-1-0000000a", hour_ago, json!({"phone": "06 12 34 56 78", "need": "x"})).await;
-	site_lead(&panel, &secret, "lead-2-0000000b", hour_ago, json!({"phone": "+33 7 00 00 00 01", "email": "Bea@Example.fr"})).await;
+	site_lead(&panel, "lead-1-0000000a", hour_ago, json!({"phone": "06 12 34 56 78", "need": "x"})).await;
+	site_lead(&panel, "lead-2-0000000b", hour_ago, json!({"phone": "+33 7 00 00 00 01", "email": "Bea@Example.fr"})).await;
 	// Two leads with one number: a booking from it is not for either of them by itself.
-	site_lead(&panel, &secret, "lead-3-0000000c", hour_ago, json!({"phone": "0699999901"})).await;
-	site_lead(&panel, &secret, "lead-4-0000000d", hour_ago, json!({"phone": "+33699999901"})).await;
+	site_lead(&panel, "lead-3-0000000c", hour_ago, json!({"phone": "0699999901"})).await;
+	site_lead(&panel, "lead-4-0000000d", hour_ago, json!({"phone": "+33699999901"})).await;
 	// Too old to be the one: outside the 14 days.
-	site_lead(&panel, &secret, "lead-5-0000000e", hour_ago - SignedDuration::from_hours(24 * 15), json!({"phone": "0655555501"})).await;
+	site_lead(&panel, "lead-5-0000000e", hour_ago - SignedDuration::from_hours(24 * 15), json!({"phone": "0655555501"})).await;
 
 	let mut rx = panel.bus().subscribe();
 	// Kept: Google answers one revision of an event the same way every time.
@@ -374,17 +302,17 @@ async fn google_bookings_are_pulled_matched_moved_and_canceled() {
 		"{i:?}: the meeting is no booking, the unknown cancellation ignored"
 	);
 
-	let phone = lead_booking(&mut b, &app, "lead-1-0000000a").await;
+	let phone = lead_booking(&b, "lead-1-0000000a").await;
 	assert_eq!(
 		(phone["status"].as_str(), phone["match"].as_str(), phone["provider"].as_str()),
 		(Some("booked"), Some("contact"), Some("google_calendar"))
 	);
 	assert_eq!((phone["external_ref"].as_str(), phone["start_at"].as_str()), (Some("evphone1"), Some("2026-10-08T08:00:00Z")));
-	assert_eq!(lead_booking(&mut b, &app, "lead-2-0000000b").await["external_ref"], "evmail22", "by email, whatever its case");
+	assert_eq!(lead_booking(&b, "lead-2-0000000b").await["external_ref"], "evmail22", "by email, whatever its case");
 	for twin in ["lead-3-0000000c", "lead-4-0000000d", "lead-5-0000000e"] {
-		assert_eq!(lead_booking(&mut b, &app, twin).await["status"], "none", "{twin}");
+		assert_eq!(lead_booking(&b, twin).await["status"], "none", "{twin}");
 	}
-	let (status, unmatched) = b.get(&app, "/api/v1/bookings/unmatched?brand=vifnet").await;
+	let (status, unmatched) = b.get("/api/v1/bookings/unmatched?brand=vifnet").await;
 	assert_eq!(status, StatusCode::OK);
 	let refs: Vec<&str> = unmatched["bookings"].as_array().unwrap().iter().map(|x| x["external_ref"].as_str().unwrap()).collect();
 	assert_eq!(refs, ["evtwin33", "evnone44"], "the next slot first");
@@ -404,7 +332,7 @@ async fn google_bookings_are_pulled_matched_moved_and_canceled() {
 	let second = sync(&panel, &api, false).await;
 	assert_eq!(g.asked()[0]["syncToken"], "t1", "from the cursor");
 	assert_eq!((second.full, second.ingested.written, second.ingested.matched), (false, 1, 1));
-	let after = lead_booking(&mut b, &app, "lead-1-0000000a").await;
+	let after = lead_booking(&b, "lead-1-0000000a").await;
 	assert_eq!(
 		(after["start_at"].as_str(), after["match"].as_str()),
 		(Some("2026-10-09T13:00:00Z"), Some("contact")),
@@ -418,7 +346,7 @@ async fn google_bookings_are_pulled_matched_moved_and_canceled() {
 	g.answer(StatusCode::OK, json!({"items": [original], "nextSyncToken": "t4"}));
 	let again = sync(&panel, &api, false).await.ingested;
 	assert_eq!((again.written, again.duplicate), (0, 1), "{again:?}");
-	assert_eq!(lead_booking(&mut b, &app, "lead-1-0000000a").await["start_at"], "2026-10-09T13:00:00Z");
+	assert_eq!(lead_booking(&b, "lead-1-0000000a").await["start_at"], "2026-10-09T13:00:00Z");
 
 	// Canceled.
 	g.answer(
@@ -426,7 +354,7 @@ async fn google_bookings_are_pulled_matched_moved_and_canceled() {
 		json!({"items": [{"id": "evphone1", "etag": "\"e3\"", "status": "cancelled"}], "nextSyncToken": "t5"}),
 	);
 	sync(&panel, &api, false).await;
-	assert_eq!(lead_booking(&mut b, &app, "lead-1-0000000a").await["status"], "canceled");
+	assert_eq!(lead_booking(&b, "lead-1-0000000a").await["status"], "canceled");
 
 	// The sync token expired: everything again, from the window.
 	g.asked();
@@ -468,28 +396,22 @@ async fn google_bookings_are_pulled_matched_moved_and_canceled() {
 	// An operator attaches one without a lead; it leaves the list, its lead is booked.
 	let id = twin["id"].as_str().unwrap();
 	assert_eq!(
-		b.post(&app, &format!("/api/v1/bookings/{id}/attach"), json!({"lead": "lead-9-0000000f"})).await.0,
+		b.post(&format!("/api/v1/bookings/{id}/attach"), json!({"lead": "lead-9-0000000f"})).await.0,
 		StatusCode::NOT_FOUND
 	);
 	assert_eq!(
-		b.post(&app, &format!("/api/v1/bookings/{}/attach", Uuid::now_v7()), json!({"lead": "lead-3-0000000c"})).await.0,
+		b.post(&format!("/api/v1/bookings/{}/attach", Uuid::now_v7()), json!({"lead": "lead-3-0000000c"})).await.0,
 		StatusCode::NOT_FOUND
 	);
 	told(&mut rx);
-	assert_eq!(
-		b.post(&app, &format!("/api/v1/bookings/{id}/attach"), json!({"lead": "lead-3-0000000c"})).await.0,
-		StatusCode::CREATED
-	);
-	assert_eq!(
-		b.post(&app, &format!("/api/v1/bookings/{id}/attach"), json!({"lead": "lead-3-0000000c"})).await.0,
-		StatusCode::CONFLICT
-	);
-	let attached = lead_booking(&mut b, &app, "lead-3-0000000c").await;
+	assert_eq!(b.post(&format!("/api/v1/bookings/{id}/attach"), json!({"lead": "lead-3-0000000c"})).await.0, StatusCode::CREATED);
+	assert_eq!(b.post(&format!("/api/v1/bookings/{id}/attach"), json!({"lead": "lead-3-0000000c"})).await.0, StatusCode::CONFLICT);
+	let attached = lead_booking(&b, "lead-3-0000000c").await;
 	assert_eq!(
 		(attached["status"].as_str(), attached["match"].as_str(), attached["external_ref"].as_str()),
 		(Some("booked"), Some("manual"), Some("evtwin33"))
 	);
-	let left: Vec<Value> = b.get(&app, "/api/v1/bookings/unmatched").await.1["bookings"].as_array().unwrap().clone();
+	let left: Vec<Value> = b.get("/api/v1/bookings/unmatched").await.1["bookings"].as_array().unwrap().clone();
 	assert_eq!(left.iter().map(|x| x["external_ref"].as_str().unwrap()).collect::<Vec<_>>(), ["evnone44"]);
 	let topics = told(&mut rx);
 	assert!(
@@ -498,22 +420,16 @@ async fn google_bookings_are_pulled_matched_moved_and_canceled() {
 	);
 
 	// Re-attached elsewhere: the first lead loses it.
-	assert_eq!(
-		b.post(&app, &format!("/api/v1/bookings/{id}/attach"), json!({"lead": "lead-4-0000000d"})).await.0,
-		StatusCode::CREATED
-	);
-	assert_eq!(lead_booking(&mut b, &app, "lead-3-0000000c").await["status"], "none");
-	assert_eq!(lead_booking(&mut b, &app, "lead-4-0000000d").await["external_ref"], "evtwin33");
+	assert_eq!(b.post(&format!("/api/v1/bookings/{id}/attach"), json!({"lead": "lead-4-0000000d"})).await.0, StatusCode::CREATED);
+	assert_eq!(lead_booking(&b, "lead-3-0000000c").await["status"], "none");
+	assert_eq!(lead_booking(&b, "lead-4-0000000d").await["external_ref"], "evtwin33");
 
 	// And all of it again from the journal alone.
-	let snapshot = [lead_booking(&mut b, &app, "lead-1-0000000a").await, lead_booking(&mut b, &app, "lead-4-0000000d").await];
-	let unmatched_before = b.get(&app, "/api/v1/bookings/unmatched").await.1;
+	let snapshot = [lead_booking(&b, "lead-1-0000000a").await, lead_booking(&b, "lead-4-0000000d").await];
+	let unmatched_before = b.get("/api/v1/bookings/unmatched").await.1;
 	panel.rebuild_projections().await.unwrap();
-	assert_eq!(
-		[lead_booking(&mut b, &app, "lead-1-0000000a").await, lead_booking(&mut b, &app, "lead-4-0000000d").await],
-		snapshot
-	);
-	assert_eq!(b.get(&app, "/api/v1/bookings/unmatched").await.1, unmatched_before);
+	assert_eq!([lead_booking(&b, "lead-1-0000000a").await, lead_booking(&b, "lead-4-0000000d").await], snapshot);
+	assert_eq!(b.get("/api/v1/bookings/unmatched").await.1, unmatched_before);
 }
 
 // ── push ────────────────────────────────────────────────────────────────────────────────
@@ -544,53 +460,43 @@ impl PushSource for FakeCalCom {
 	}
 }
 
-async fn hook(app: &Router, uri: &str, signature: &str, body: Value) -> (StatusCode, Value) {
-	let req = Request::post(uri)
-		.header("x-fake-signature", signature)
-		.header(header::CONTENT_TYPE, "application/json")
-		.body(Body::from(body.to_string()))
-		.unwrap();
-	let res = app.clone().oneshot(req).await.unwrap();
-	let status = res.status();
-	(status, serde_json::from_slice(&to_bytes(res.into_body(), usize::MAX).await.unwrap()).unwrap_or(Value::Null))
+async fn hook(app: &Router, conductor: &Conductor, uri: &str, signature: &str, body: Value) -> (StatusCode, Value) {
+	send(app, conductor, &As::Nobody, Method::POST, uri, Some(body), &[("x-fake-signature", signature)]).await
 }
 
 #[tokio::test]
 async fn the_push_route_answers_registered_providers_only() {
 	let db = TestDb::create().await;
 	let panel = panel(&db).await;
-	let secret = site(&panel).await;
-	site_lead(
-		&panel,
-		&secret,
-		"lead-7-0000000a",
-		Timestamp::now() - SignedDuration::from_mins(5),
-		json!({"phone": "0612345678"}),
-	)
-	.await;
+	site_lead(&panel, "lead-7-0000000a", Timestamp::now() - SignedDuration::from_mins(5), json!({"phone": "0612345678"})).await;
 	let body = json!({"ref": "lead-7-0000000a", "uid": "calbk-1", "start": "2026-10-08T08:00:00Z"});
 
-	let served = http::router(panel.clone());
+	let conductor = Conductor::new("k1");
+	let served = app(panel.clone(), &conductor);
 	for uri in [
 		"/api/hooks/booking/cal_com/vifnet",
 		"/api/hooks/booking/google_calendar/vifnet",
 		"/api/hooks/booking/calendly/vifnet",
 	] {
-		assert_eq!(hook(&served, uri, "ok", body.clone()).await.0, StatusCode::NOT_FOUND, "{uri}: no provider is registered");
+		assert_eq!(
+			hook(&served, &conductor, uri, "ok", body.clone()).await.0,
+			StatusCode::NOT_FOUND,
+			"{uri}: no provider is registered"
+		);
 	}
 
-	let fake = http::router_with_hooks(panel.clone(), http::Limits::default(), PushSources::default().with(FakeCalCom));
-	assert_eq!(hook(&fake, "/api/hooks/booking/google_calendar/vifnet", "ok", body.clone()).await.0, StatusCode::NOT_FOUND);
-	assert_eq!(hook(&fake, "/api/hooks/booking/cal_com/Vifnet", "ok", body.clone()).await.0, StatusCode::NOT_FOUND, "not a brand");
-	assert_eq!(hook(&fake, "/api/hooks/booking/cal_com/vifnet", "forged", body.clone()).await.0, StatusCode::UNAUTHORIZED);
-	assert_eq!(hook(&fake, "/api/hooks/booking/cal_com/vifnet", "ok", json!({"uid": "x"})).await.0, StatusCode::BAD_REQUEST);
-	let (status, done) = hook(&fake, "/api/hooks/booking/cal_com/vifnet", "ok", body.clone()).await;
+	let fake = app_with(panel.clone(), &conductor, Limits::default(), PushSources::default().with(FakeCalCom));
+	let push = |uri: &'static str, signature: &'static str, body: Value| hook(&fake, &conductor, uri, signature, body);
+	assert_eq!(push("/api/hooks/booking/google_calendar/vifnet", "ok", body.clone()).await.0, StatusCode::NOT_FOUND);
+	assert_eq!(push("/api/hooks/booking/cal_com/Vifnet", "ok", body.clone()).await.0, StatusCode::NOT_FOUND, "not a brand");
+	assert_eq!(push("/api/hooks/booking/cal_com/vifnet", "forged", body.clone()).await.0, StatusCode::UNAUTHORIZED);
+	assert_eq!(push("/api/hooks/booking/cal_com/vifnet", "ok", json!({"uid": "x"})).await.0, StatusCode::BAD_REQUEST);
+	let (status, done) = push("/api/hooks/booking/cal_com/vifnet", "ok", body.clone()).await;
 	assert_eq!((status, done["written"].as_u64()), (StatusCode::OK, Some(1)), "{done}");
-	assert_eq!(hook(&fake, "/api/hooks/booking/cal_com/vifnet", "ok", body).await.1["unchanged"], 1, "a retried webhook");
+	assert_eq!(push("/api/hooks/booking/cal_com/vifnet", "ok", body).await.1["unchanged"], 1, "a retried webhook");
 
-	let operator = app(panel.clone(), "sa:operator");
-	let mut b = Browser::signed_in(&operator).await;
-	let booked = lead_booking(&mut b, &operator, "lead-7-0000000a").await;
+	let b = operator(&fake, &conductor);
+	let booked = lead_booking(&b, "lead-7-0000000a").await;
 	assert_eq!(
 		(booked["match"].as_str(), booked["provider"].as_str(), booked["status"].as_str()),
 		(Some("ref"), Some("cal_com"), Some("booked"))
@@ -603,8 +509,8 @@ async fn the_push_route_answers_registered_providers_only() {
 async fn a_request_before_its_lead_is_answered_409_to_retry() {
 	let db = TestDb::create().await;
 	let panel = panel(&db).await;
-	let secret = site(&panel).await;
-	let served = http::router(panel.clone());
+	let conductor = Conductor::new("k1");
+	let served = app(panel.clone(), &conductor);
 	let now = Timestamp::now();
 	let requested = event(
 		"booking.requested",
@@ -613,25 +519,23 @@ async fn a_request_before_its_lead_is_answered_409_to_retry() {
 		json!({"brandId": "vifnet", "leadId": "lead-8-0000000a"}),
 		json!({"lead_ref": "lead-8-0000000a", "provider": "google_calendar"}),
 	);
-	let post = |signed: panel::testing::Signed| {
-		Request::post("/api/ingest/v1/events")
-			.header("x-sa-key-id", signed.key_id)
-			.header("x-sa-timestamp", signed.timestamp)
-			.header("x-sa-signature", signed.signature)
-			.body(Body::from(signed.body))
-			.unwrap()
-	};
-	let res = served.clone().oneshot(post(sign("vifnet-site", &secret, std::slice::from_ref(&requested), now))).await.unwrap();
+	let body = batch("vifnet-site", std::slice::from_ref(&requested));
+	let uri = "/api/ingest/v1/events";
+	let site = As::source("vifnet-site", SourceKind::Site, &["vifnet"]);
+
+	// `raw` drops the headers, and Retry-After is what the outbox reads.
+	let assertion = conductor.source("vifnet-site", SourceKind::Site, &["vifnet"], "POST", uri, &body);
+	let req = Request::post(uri).header(sa_auth::HEADER, assertion).body(Body::from(body.clone())).unwrap();
+	let res = served.clone().oneshot(req).await.unwrap();
 	assert_eq!(res.status(), StatusCode::CONFLICT);
 	assert_eq!(res.headers()[header::RETRY_AFTER], "30");
-	let body: Value = serde_json::from_slice(&to_bytes(res.into_body(), usize::MAX).await.unwrap()).unwrap();
-	assert_eq!(body["results"][0]["status"], "deferred", "{body}");
+	let answer: Value = serde_json::from_slice(&to_bytes(res.into_body(), usize::MAX).await.unwrap()).unwrap();
+	assert_eq!(answer["results"][0]["status"], "deferred", "{answer}");
 
-	site_lead(&panel, &secret, "lead-8-0000000a", now - SignedDuration::from_mins(1), json!({"phone": "0612345678"})).await;
-	let res = served.oneshot(post(sign("vifnet-site", &secret, &[requested], Timestamp::now()))).await.unwrap();
-	assert_eq!(res.status(), StatusCode::MULTI_STATUS);
-	let operator = app(panel, "sa:operator");
-	let mut b = Browser::signed_in(&operator).await;
-	let got = lead_booking(&mut b, &operator, "lead-8-0000000a").await;
+	site_lead(&panel, "lead-8-0000000a", now - SignedDuration::from_mins(1), json!({"phone": "0612345678"})).await;
+	let (status, _) = raw(&served, &conductor, &site, Method::POST, uri, &[], body).await;
+	assert_eq!(status, StatusCode::MULTI_STATUS);
+	let b = operator(&served, &conductor);
+	let got = lead_booking(&b, "lead-8-0000000a").await;
 	assert_eq!((got["status"].as_str(), got["provider"].as_str()), (Some("requested"), Some("google_calendar")));
 }
