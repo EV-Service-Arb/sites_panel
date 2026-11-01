@@ -93,7 +93,10 @@
           inherit pname;
           version = manifest.version;
           src = pureSrc;
-          cargoLock.lockFile = ./Cargo.lock;
+          cargoLock = {
+            lockFile = ./Cargo.lock;
+            allowBuiltinFetchGit = true;
+          };
           cargoBuildFlags = [ "-p" "panel_server" ];
           nativeBuildInputs = with pkgs; [ pkg-config ];
           # ev_lib's `sentry` turns on reqwest's native-tls, which is OpenSSL on Linux
