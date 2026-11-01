@@ -21,7 +21,7 @@ panel = { path = "crates/panel", version = "0.1.0" }
 panel_contracts = { path = "crates/panel_contracts", version = "0.1.0" }
 panel_core = { path = "crates/panel_core", version = "0.1.0" }
 panel_server = { path = "crates/panel_server", version = "0.1.0" }
-sa_auth = { git = "https://github.com/EV-Service-Arb/panel", rev = "396ebcef5a2561c5f37ce9a12ee5334b11d81f91" }
+sa_auth = { git = "https://github.com/EV-Service-Arb/site_conductor", branch = "main" }
 
 axum = "0.8"
 base64 = "0.22"
