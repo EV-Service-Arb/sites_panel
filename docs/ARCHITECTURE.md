@@ -423,6 +423,14 @@ GET /api/conductor/notifications?after=<seq>&limit=<1..500>
 
 ### Each key's last receipt
 
+`GET /api/conductor/internal-reads` → `{since: <boot, RFC 3339>, reads: {<brand>: {locations?, pricing?,
+experiments?: <RFC 3339>}}}`: the last `/api/internal` read per brand and endpoint, kept in memory
+only (`conductor::InternalReads`, nothing written on the read path, so it restarts empty; `since`
+says from when). At most 256 brands: past that a new brand is not recorded and none is evicted, so
+an unauthenticated caller cannot push the real ones out. The router mounts `/api/internal` from
+the same constant `--print-provided-paths` prints, which `checks.contract-provides` holds to the
+contract's `provides.internal`.
+
 `GET /api/conductor/sources/received` → `{<key_id>: <RFC 3339>}`: when each key the journal
 names last had an event received (`max(events.received_at)`); the conductor's "source silent".
 

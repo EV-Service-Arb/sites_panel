@@ -27,7 +27,7 @@
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use axum::{
-	Json, Router,
+	Extension, Json, Router,
 	body::to_bytes,
 	error_handling::HandleErrorLayer,
 	extract::{Path, Request, State},
@@ -146,6 +146,12 @@ pub struct Sites {
 	pub mfe: Option<PathBuf>,
 }
 
+/// The sites' reads, mounted by [`router`] and listed in the contract's `provides`.
+const INTERNAL: &str = "/api/internal";
+
+/// Every path the router mounts for another service to call (`--print-provided-paths`).
+pub const PROVIDED_PATHS: [&str; 1] = [INTERNAL];
+
 pub fn router(sites: Sites, limits: Limits) -> Router {
 	let keys = Arc::new(sites.keys);
 	let v1 = api_routes().into_iter().fold(Router::new(), |routes, r| {
@@ -156,7 +162,12 @@ pub fn router(sites: Sites, limits: Limits) -> Router {
 		routes.merge(Router::new().route(r.path, r.handler).route_layer(middleware::from_fn_with_state(gate, gate::user)))
 	});
 	let v1 = bounded(v1.with_state(sites.panel.clone()), limits.api_concurrent, limits.api_timeout);
-	let reads = bounded(conductor::reads(sites.panel.clone(), sites.locale), limits.api_concurrent, limits.api_timeout);
+	let internal_reads = conductor::InternalReads::new();
+	let reads = bounded(
+		conductor::reads(sites.panel.clone(), sites.locale, internal_reads.clone()),
+		limits.api_concurrent,
+		limits.api_timeout,
+	);
 	let to_conductor = reads
 		.merge(conductor::changes(sites.panel.clone()))
 		.route_layer(middleware::from_fn_with_state(keys.clone(), gate::conductor));
@@ -174,7 +185,7 @@ pub fn router(sites: Sites, limits: Limits) -> Router {
 	let mut app = Router::new()
 		.route("/health", get(|| async { "ok" }))
 		.merge(ingest)
-		.merge(places::internal().with_state(sites.panel.clone()))
+		.nest(INTERNAL, places::internal().with_state(sites.panel.clone()).layer(Extension(internal_reads)))
 		.merge(booking::hooks(sites.panel, sites.hooks))
 		.nest("/api/v1", v1)
 		.nest("/api/conductor", to_conductor);

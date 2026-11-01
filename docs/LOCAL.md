@@ -19,5 +19,5 @@ cargo r -p panel_server -- serve            # 127.0.0.1:59121
 cargo r -p panel_server -- place register aquafix royat
 ```
 
-The landings read their places, pricing and experiments from `http://127.0.0.1:59121/api/internal/brands/<brand>`
-(`LOCATIONS_API_URL`) and send their leads to the conductor's ingest.
+The landings read their places, pricing and experiments from `http://127.0.0.1:59121/api/internal`
+(`SITES_PANEL_INTERNAL_URL`, which they extend with `/brands/<brand>/…`) and send their leads to the conductor's ingest.

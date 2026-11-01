@@ -225,3 +225,31 @@ async fn each_key_s_last_receipt() {
 		"the panel's own events name no key"
 	);
 }
+
+#[tokio::test]
+async fn the_conductor_sees_which_internal_reads_a_brand_made_since_boot() {
+	let db = TestDb::create().await;
+	let conductor = Conductor::new("k1");
+	let app = app(panel(&db).await, &conductor);
+	let read = |who: &'static As, uri: &'static str| send(&app, &conductor, who, Method::GET, uri, None, &[]);
+
+	let (_, before) = read(&As::Conductor, "/api/conductor/internal-reads").await;
+	assert_eq!(before["reads"], json!({}));
+	let since = before["since"].as_str().unwrap().parse::<Timestamp>().unwrap();
+
+	read(&As::Nobody, "/api/internal/brands/aquafix/locations/royat").await;
+	read(&As::Nobody, "/api/internal/brands/aquafix/pricing").await;
+
+	let (status, after) = read(&As::Conductor, "/api/conductor/internal-reads").await;
+	assert_eq!(status, StatusCode::OK, "{after}");
+	assert_eq!(after["since"], before["since"]);
+	let seen = &after["reads"]["aquafix"];
+	for endpoint in ["locations", "pricing"] {
+		assert!(seen[endpoint].as_str().unwrap().parse::<Timestamp>().unwrap() >= since, "{endpoint}");
+	}
+	assert!(seen.get("experiments").is_none(), "never read: absent");
+	assert!(after["reads"].get("vifnet").is_none());
+
+	let (status, _) = read(&As::Nobody, "/api/conductor/internal-reads").await;
+	assert_eq!(status, StatusCode::UNAUTHORIZED);
+}

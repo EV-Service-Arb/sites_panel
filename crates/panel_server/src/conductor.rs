@@ -8,9 +8,15 @@
 //!                                  brand_id?, id?, at, permission}; {"type":"ping"} every 25 s
 //! GET /notifications?after&limit   {notes: [Note], next}: the notes after `after`, ≤ limit (≤ 500)
 //! GET /sources/received            {<key_id>: <RFC 3339 of its last event's arrival>}
+//! GET /internal-reads              {since: <boot, RFC 3339>, reads: {<brand>: {locations?, pricing?,
+//!                                  experiments?: <RFC 3339 of the last `/api/internal` read>}}}
 //! ```
 
-use std::time::Duration;
+use std::{
+	collections::{BTreeMap, HashMap},
+	sync::{Arc, Mutex},
+	time::Duration,
+};
 
 use axum::{
 	Json, Router,
@@ -20,12 +26,16 @@ use axum::{
 	response::{IntoResponse, Response},
 	routing::get,
 };
+use jiff::Timestamp;
 use panel::{
 	Panel,
 	live::{Change, Signal},
 	notifications::Notification,
 };
-use panel_core::notify::{Button, Locale, Rendered};
+use panel_core::{
+	ids::BrandId,
+	notify::{Button, Locale, Rendered},
+};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::broadcast::{Receiver, error::RecvError};
@@ -38,18 +48,66 @@ const PING_EVERY: Duration = Duration::from_secs(25);
 /// The most notes one read answers.
 const MAX_NOTES: i64 = 500;
 
+/// The most brands [`InternalReads`] keeps; kitstart sites are a handful.
+const MAX_READ_BRANDS: usize = 256;
+
+#[derive(Clone, Copy)]
+pub(crate) enum InternalEndpoint {
+	Locations,
+	Pricing,
+	Experiments,
+}
+
+impl InternalEndpoint {
+	fn as_str(self) -> &'static str {
+		match self {
+			Self::Locations => "locations",
+			Self::Pricing => "pricing",
+			Self::Experiments => "experiments",
+		}
+	}
+}
+
+/// The last `/api/internal` read per brand and endpoint, since boot. Memory only: the read path
+/// writes nothing to the database. A brand past [`MAX_READ_BRANDS`] is not recorded and none is
+/// evicted, so what the record holds stays what was first seen, and an unauthenticated caller
+/// inventing brand names cannot push real ones out.
+pub(crate) struct InternalReads {
+	since: Timestamp,
+	last: Mutex<HashMap<BrandId, BTreeMap<&'static str, Timestamp>>>,
+}
+
+impl InternalReads {
+	pub(crate) fn new() -> Arc<Self> {
+		Arc::new(Self {
+			since: Timestamp::now(),
+			last: Mutex::default(),
+		})
+	}
+
+	pub(crate) fn record(&self, brand: &BrandId, endpoint: InternalEndpoint) {
+		let mut last = self.last.lock().expect("no panic while held");
+		if last.len() >= MAX_READ_BRANDS && !last.contains_key(brand) {
+			return;
+		}
+		last.entry(brand.clone()).or_default().insert(endpoint.as_str(), Timestamp::now());
+	}
+}
+
 #[derive(Clone)]
 struct Reads {
 	panel: Panel,
 	locale: Locale,
+	internal: Arc<InternalReads>,
 }
 
-/// `/notifications` and `/sources/received`.
-pub(crate) fn reads(panel: Panel, locale: Locale) -> Router {
+/// `/notifications`, `/sources/received` and `/internal-reads`.
+pub(crate) fn reads(panel: Panel, locale: Locale, internal: Arc<InternalReads>) -> Router {
 	Router::new()
 		.route("/notifications", get(notifications))
 		.route("/sources/received", get(received))
-		.with_state(Reads { panel, locale })
+		.route("/internal-reads", get(internal_reads))
+		.with_state(Reads { panel, locale, internal })
 }
 
 /// `/changes`: unbounded in time, so outside the reads' timeout.
@@ -166,6 +224,15 @@ async fn notifications(State(r): State<Reads>, q: Result<Query<NotesQuery>, axum
 async fn received(State(r): State<Reads>) -> ApiResult<Json<Value>> {
 	let by_key: serde_json::Map<String, Value> = r.panel.received_by_key().await?.into_iter().map(|(k, at)| (k, at.to_string().into())).collect();
 	Ok(Json(Value::Object(by_key)))
+}
+
+async fn internal_reads(State(r): State<Reads>) -> Json<Value> {
+	let last = r.internal.last.lock().expect("no panic while held");
+	let reads: BTreeMap<&str, BTreeMap<&str, String>> = last
+		.iter()
+		.map(|(brand, endpoints)| (brand.as_str(), endpoints.iter().map(|(e, at)| (*e, at.to_string())).collect()))
+		.collect();
+	Json(json!({ "since": r.internal.since.to_string(), "reads": reads }))
 }
 
 /// How often the fan-out looks for what is due.
