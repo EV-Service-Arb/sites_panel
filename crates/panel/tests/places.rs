@@ -4,7 +4,7 @@
 use jiff::{SignedDuration, Timestamp};
 use panel::{
 	place::{Expected, Live, PlaceError},
-	testing::{TestDb, event, panel, sign},
+	testing::{TestDb, batch, event, grant, panel},
 };
 use panel_core::{
 	ids::{BrandId, LocationId},
@@ -122,7 +122,7 @@ async fn the_places_list_knows_leads_counts_and_hand_registered_ones() {
 	let db = TestDb::create().await;
 	let panel = panel(&db).await;
 	let (brand, slug) = ids();
-	let site = panel.add_source("aquafix-site", SourceKind::Site, [brand.clone()].into()).await.unwrap().unwrap();
+	let site = grant("aquafix-site", SourceKind::Site, &["aquafix"]);
 	let lead = event(
 		"lead.created",
 		now(),
@@ -130,7 +130,7 @@ async fn the_places_list_knows_leads_counts_and_hand_registered_ones() {
 		json!({"brandId": "aquafix", "locationId": "paris-11", "leadId": "L-1"}),
 		json!({"channel": "form"}),
 	);
-	panel.ingest(sign("aquafix-site", &site.secret, &[lead], now()).batch(), now()).await.unwrap();
+	panel.ingest(&site, &batch("aquafix-site", &[lead]), now()).await.unwrap();
 
 	let (v, added) = panel.register_place(&admin(), &brand, &slug, now()).await.unwrap();
 	assert!(added && v.settings.is_empty());

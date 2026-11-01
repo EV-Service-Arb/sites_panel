@@ -2,14 +2,12 @@
 //! locales, optimistic concurrency, removal, the history, what a site is answered, the brands
 //! listed, the live topic, and the schema's guards.
 
-use std::collections::BTreeSet;
-
 use jiff::Timestamp;
 use panel::{
 	live::{Signal, Topic},
 	place::Expected,
 	pricing::{ChangeKind, PricingError},
-	testing::{TestDb, event, panel, sign},
+	testing::{TestDb, batch, event, grant, panel},
 };
 use panel_core::{ids::BrandId, place::Editor, pricing::PricingInputs};
 use sa_auth::SourceKind;
@@ -137,11 +135,7 @@ async fn every_label_must_be_in_the_brands_locales() {
 async fn every_brand_the_panel_knows_is_listed() {
 	let db = TestDb::create().await;
 	let panel = panel(&db).await;
-	let site = panel
-		.add_source("aquafix-site", SourceKind::Site, BTreeSet::from([BrandId::parse("aquafix").unwrap()]))
-		.await
-		.unwrap()
-		.unwrap();
+	let site = grant("aquafix-site", SourceKind::Site, &["aquafix"]);
 	let lead = event(
 		"lead.created",
 		now(),
@@ -149,11 +143,8 @@ async fn every_brand_the_panel_knows_is_listed() {
 		json!({"brandId": "aquafix", "locationId": "royat", "leadId": "L-1"}),
 		json!({"channel": "form"}),
 	);
-	panel.ingest(sign("aquafix-site", &site.secret, &[lead], now()).batch(), now()).await.unwrap();
-	panel
-		.add_source("review-archive", SourceKind::ReviewArchive, BTreeSet::from([BrandId::parse("ecoclean").unwrap()]))
-		.await
-		.unwrap();
+	panel.ingest(&site, &batch("aquafix-site", &[lead]), now()).await.unwrap();
+	panel.set_brand_locales(&admin(), &BrandId::parse("ecoclean").unwrap(), &["fr".to_owned()], now()).await.unwrap();
 	panel.set_pricing(&admin(), &brand(), &cleaning(), Expected::Any, now()).await.unwrap();
 
 	let all = panel.all_pricing().await.unwrap();

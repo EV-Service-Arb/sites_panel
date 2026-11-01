@@ -10,10 +10,11 @@ use panel::{
 	Panel,
 	capture::{Captured, Capturer, Delivered, GIVE_UP_AFTER, SendError},
 	operator::{Actor, StageMove},
-	testing::{TestDb, event, panel, sign},
+	testing::{TestDb, batch, event, grant, panel},
 };
 use panel_core::{
 	booking::{BookingEvent, Change, Contact, Provider},
+	event::KeyGrant,
 	ids::{BrandId, LeadId},
 };
 use sa_auth::SourceKind;
@@ -34,9 +35,8 @@ impl Capturer for Fake {
 	}
 }
 
-async fn site(panel: &Panel) -> String {
-	let brands = [BrandId::parse("aquafix").unwrap()].into();
-	panel.add_source("aquafix-site", SourceKind::Site, brands).await.unwrap().unwrap().secret.to_string()
+fn site() -> KeyGrant {
+	grant("aquafix-site", SourceKind::Site, &["aquafix"])
 }
 
 fn created(lead: &str, at: Timestamp, analytics_id: Option<&str>) -> Value {
@@ -61,19 +61,13 @@ async fn outbox(panel: &Panel) -> Vec<(String, String, Value)> {
 async fn only_a_fresh_commit_queues_and_never_the_rebuild() {
 	let db = TestDb::create().await;
 	let panel = panel(&db).await.with_capture(true);
-	let secret = site(&panel).await;
+	let site = site();
 	let now = Timestamp::now();
 	let first = created("L-1", now - SignedDuration::from_mins(3), Some("0192f1c2-7d1e-7b3a-9c4d-1a2b3c4d5e6f"));
-	let got = panel
-		.ingest(sign("aquafix-site", &secret, &[first.clone(), created("L-2", now, None)], now).batch(), now)
-		.await
-		.unwrap();
+	let got = panel.ingest(&site, &batch("aquafix-site", &[first.clone(), created("L-2", now, None)]), now).await.unwrap();
 	assert!(got.iter().all(|v| v.outcome == panel::Outcome::Accepted { unregistered: false }), "{got:?}");
 	// Sent again: a duplicate. A second creation of L-1 is journaled, and does not count.
-	panel
-		.ingest(sign("aquafix-site", &secret, &[first, created("L-1", now, Some("other"))], now).batch(), now)
-		.await
-		.unwrap();
+	panel.ingest(&site, &batch("aquafix-site", &[first, created("L-1", now, Some("other"))]), now).await.unwrap();
 
 	let brand = BrandId::parse("aquafix").unwrap();
 	let by = Actor(uuid::Uuid::now_v7());
@@ -109,14 +103,11 @@ async fn only_a_fresh_commit_queues_and_never_the_rebuild() {
 async fn a_booking_is_told_under_its_lead_and_never_without_one() {
 	let db = TestDb::create().await;
 	let panel = panel(&db).await.with_capture(true);
-	let secret = site(&panel).await;
+	let site = site();
 	let now = Timestamp::now();
 	let visit = "0192f1c2-7d1e-7b3a-9c4d-1a2b3c4d5e6f";
 	panel
-		.ingest(
-			sign("aquafix-site", &secret, &[created("L-1", now - SignedDuration::from_mins(3), Some(visit))], now).batch(),
-			now,
-		)
+		.ingest(&site, &batch("aquafix-site", &[created("L-1", now - SignedDuration::from_mins(3), Some(visit))]), now)
 		.await
 		.unwrap();
 
@@ -177,10 +168,10 @@ async fn a_booking_is_told_under_its_lead_and_never_without_one() {
 async fn sent_retried_split_and_given_up() {
 	let db = TestDb::create().await;
 	let panel = panel(&db).await.with_capture(true);
-	let secret = site(&panel).await;
+	let site = site();
 	let now = Timestamp::now();
 	let events: Vec<Value> = (0..3).map(|i| created(&format!("L-{i}"), now - SignedDuration::from_mins(i), None)).collect();
-	panel.ingest(sign("aquafix-site", &secret, &events, now).batch(), now).await.unwrap();
+	panel.ingest(&site, &batch("aquafix-site", &events), now).await.unwrap();
 
 	let fake = Fake::default();
 	fake.answers.lock().unwrap().push(Err(SendError::Retry("503".into())));
@@ -198,7 +189,7 @@ async fn sent_retried_split_and_given_up() {
 	assert!(sent[0].iter().any(|c| c.distinct_id == "sa-lead:aquafix:L-0" && c.timestamp == events_time(&events, 0)));
 
 	// A week of failures: given up.
-	panel.ingest(sign("aquafix-site", &secret, &[created("L-9", now, None)], now).batch(), now).await.unwrap();
+	panel.ingest(&site, &batch("aquafix-site", &[created("L-9", now, None)]), now).await.unwrap();
 	fake.answers.lock().unwrap().push(Err(SendError::Retry("timeout".into())));
 	assert_eq!(panel.capture_pass(&fake, now + GIVE_UP_AFTER).await.unwrap(), Delivered { sent: 0, retried: 0, dropped: 1 });
 }
@@ -220,18 +211,12 @@ fn events_time(events: &[Value], i: usize) -> Timestamp {
 async fn a_conversation_is_told_once() {
 	let db = TestDb::create().await;
 	let panel = panel(&db).await.with_capture(true);
-	let secret = site(&panel).await;
-	let bot = panel
-		.add_source("aquafix-tg", SourceKind::Bot, [BrandId::parse("aquafix").unwrap()].into())
-		.await
-		.unwrap()
-		.unwrap()
-		.secret
-		.to_string();
+	let site = site();
+	let bot = grant("aquafix-tg", SourceKind::Bot, &["aquafix"]);
 	let now = Timestamp::now();
 	let at = |m| now - SignedDuration::from_mins(m);
 	let landing = [panel::testing::messenger_lead(at(10), "aquafix", "L-1", "telegram", "AQ-7K3F")];
-	panel.ingest(sign("aquafix-site", &secret, &landing, now).batch(), now).await.unwrap();
+	panel.ingest(&site, &batch("aquafix-site", &landing), now).await.unwrap();
 	let wrote = |m| {
 		event(
 			"lead.messaged",
@@ -241,7 +226,7 @@ async fn a_conversation_is_told_once() {
 			json!({"channel": "telegram", "messageRef": "AQ-7K3F"}),
 		)
 	};
-	let got = panel.ingest(sign("aquafix-tg", &bot, &[wrote(5), wrote(4)], now).batch(), now).await.unwrap();
+	let got = panel.ingest(&bot, &batch("aquafix-tg", &[wrote(5), wrote(4)]), now).await.unwrap();
 	assert!(got.iter().all(|v| v.outcome == panel::Outcome::Accepted { unregistered: false }), "{got:?}");
 	let messaged: Vec<(String, Value)> = outbox(&panel).await.into_iter().filter(|(e, ..)| e == "sa_lead_messaged").map(|(e, _, p)| (e, p)).collect();
 	assert_eq!(messaged.len(), 1, "{messaged:?}");

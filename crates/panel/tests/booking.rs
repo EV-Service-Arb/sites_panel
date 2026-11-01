@@ -1,6 +1,6 @@
 //! Booking in the engine, on throwaway SQLite files: the journal's migration to the source
 //! kind `booking` keeps every row, kitstart's `booking.requested` fixtures judged by the
-//! registry, and `booking.requested` through a signed ingest — deferred while its lead has
+//! registry, and `booking.requested` through a ingest under a source's grant — deferred while its lead has
 //! not arrived, refused for a wish out of the window.
 
 use std::{fs, path::PathBuf};
@@ -9,7 +9,7 @@ use jiff::{SignedDuration, Timestamp};
 use panel::{
 	Outcome,
 	operator::Pii,
-	testing::{TestDb, event, panel, sign},
+	testing::{TestDb, batch, event, grant, panel},
 	wire::{Checked, check},
 };
 use panel_core::{
@@ -79,13 +79,7 @@ fn kitstarts_requested_fixtures() {
 async fn a_requested_booking_waits_for_its_lead() {
 	let db = TestDb::create().await;
 	let panel = panel(&db).await;
-	let secret = panel
-		.add_source("vifnet-site", SourceKind::Site, [BrandId::parse("vifnet").unwrap()].into())
-		.await
-		.unwrap()
-		.unwrap()
-		.secret
-		.to_string();
+	let site = grant("vifnet-site", SourceKind::Site, &["vifnet"]);
 	let now = Timestamp::now();
 	let today = now.to_zoned(jiff::tz::TimeZone::UTC).date();
 	let subject = json!({"brandId": "vifnet", "locationId": "vifnet", "leadId": LEAD});
@@ -99,7 +93,7 @@ async fn a_requested_booking_waits_for_its_lead() {
 		)
 	};
 	let requested = wish(today.tomorrow().unwrap());
-	let first = panel.ingest(sign("vifnet-site", &secret, std::slice::from_ref(&requested), now).batch(), now).await.unwrap();
+	let first = panel.ingest(&site, &batch("vifnet-site", std::slice::from_ref(&requested)), now).await.unwrap();
 	assert!(matches!(first[0].outcome, Outcome::Deferred(_)), "{first:?}: the lead has not arrived");
 
 	let created = event(
@@ -109,7 +103,7 @@ async fn a_requested_booking_waits_for_its_lead() {
 		subject.clone(),
 		json!({"channel": "form", "flow": "quote"}),
 	);
-	let both = panel.ingest(sign("vifnet-site", &secret, &[created, requested], now).batch(), now).await.unwrap();
+	let both = panel.ingest(&site, &batch("vifnet-site", &[created, requested]), now).await.unwrap();
 	assert_eq!(both.iter().map(|v| v.outcome.clone()).collect::<Vec<_>>(), [ACCEPTED, ACCEPTED]);
 
 	let (lead, _) = panel
@@ -122,13 +116,10 @@ async fn a_requested_booking_waits_for_its_lead() {
 	assert_eq!((b.preferred_date, b.preferred_part.map(|p| p.as_str())), (today.tomorrow().ok(), Some("morning")));
 
 	let too_far = wish(today.checked_add(SignedDuration::from_hours(24 * 367)).unwrap());
-	let refused = panel.ingest(sign("vifnet-site", &secret, &[too_far], now).batch(), now).await.unwrap();
+	let refused = panel.ingest(&site, &batch("vifnet-site", &[too_far]), now).await.unwrap();
 	assert!(matches!(&refused[0].outcome, Outcome::Rejected(e) if e.0.contains("preferred_date")), "{refused:?}");
 	let past = wish(today.checked_sub(SignedDuration::from_hours(24 * 3)).unwrap());
-	assert!(matches!(
-		panel.ingest(sign("vifnet-site", &secret, &[past], now).batch(), now).await.unwrap()[0].outcome,
-		Outcome::Rejected(_)
-	));
+	assert!(matches!(panel.ingest(&site, &batch("vifnet-site", &[past]), now).await.unwrap()[0].outcome, Outcome::Rejected(_)));
 }
 
 /// The journal is copied whole into its wider table: every row, byte for byte, the foreign
