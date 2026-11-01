@@ -1,20 +1,17 @@
 # Bot API
 
 What a messenger bot or auto-responder (a brand's Telegram bot, a WhatsApp responder) sends to
-the panel and asks of it: a lead that started as a conversation, the fact that a customer
+the sites and asks of them: a lead that started as a conversation, the fact that a customer
 actually wrote, and the lead a messenger ref names (MESSENGER-CHANNELS-SPEC §3). It is the
 ingest API with a source of kind `bot`: the same signature, the same contract
 ([`contracts/proto/sa/v1/events.proto`](../contracts/proto/sa/v1/events.proto)), in-cluster
-only (the public ingress does not route `/api/ingest`).
+only (the public ingress does not route `/api/ingest`). The conductor (site_conductor) holds the
+keys and checks the signature; sites_panel decides what the key may write and answers.
 
 ## A key
 
-An admin issues one per bot, for the brands it answers for. The secret is printed once.
-
-```sh
-panel source add aquafix-tg --kind bot --brand aquafix
-# or in the panel: Sources → Add, kind "bot" (POST /api/v1/sources {key_id, kind: "bot", brands})
-```
+An admin issues one per bot at the conductor, for the brands it answers for (its Sources page,
+kind "bot"). The secret is shown once.
 
 A bot's key may write `lead.created` (channel `whatsapp` or `telegram` only) and
 `lead.messaged`, for its brands; anything else is `rejected`. It is the only kind of key that
@@ -26,7 +23,7 @@ Every request carries three headers:
 
 ```text
 x-sa-key-id:    aquafix-tg
-x-sa-timestamp: 1791370800                     unix seconds; ±5 minutes of the panel's clock
+x-sa-timestamp: 1791370800                     unix seconds; ±5 minutes of the conductor's clock
 x-sa-signature: hex(HMAC-SHA256(secret, "sa-ingest/v1." + <x-sa-timestamp> + "." + <raw body>))
 ```
 
@@ -133,7 +130,7 @@ words: show it back only in the conversation that brought the ref.
 ## curl
 
 ```sh
-KEY=aquafix-tg SECRET=… PANEL=http://panel.service-arb.svc.cluster.local:59120
+KEY=aquafix-tg SECRET=… PANEL=<the conductor's in-cluster URL>
 sign() { printf 'sa-ingest/v1.%s.%s' "$1" "$2" | openssl dgst -sha256 -hmac "$SECRET" -r | cut -d' ' -f1; }
 
 # lookup

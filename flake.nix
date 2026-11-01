@@ -14,7 +14,7 @@
       manifest = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package;
       # The binary (crates/panel_server, `[[bin]] name`), the image and the release all go
       # by this name; the workspace root has no package of its own.
-      pname = "panel";
+      pname = "sites_panel";
     in
     flake-utils.lib.eachDefaultSystem (
       system:
@@ -28,7 +28,7 @@
 
         # Single source for the container's exposed port and the prod bind. The binary's
         # own default (`panel_server::DEFAULT_BIND`) is the same port on 127.0.0.1.
-        port = 59120;
+        port = 59121;
 
         # `nix run .#gen`: the front end's mirror of the Rust (crates/panel_gen), committed.
         gen = pkgs.writeShellApplication {
@@ -49,7 +49,7 @@
               generated = {
                 enable = true;
                 name = "regenerate derived files";
-                entry = "bash -c '${gen}/bin/gen && git add -A frontend/src/entities/session/model/generated.ts frontend/src/entities/lead/model/generated.ts frontend/src/entities/source/model/generated.ts frontend/src/shared/config/generated.ts frontend/src/shared/api/generated.ts'";
+                entry = "bash -c '${gen}/bin/gen && git add -A frontend/src/entities/lead/model/generated.ts frontend/src/shared/config/generated.ts frontend/src/shared/api/generated.ts'";
                 pass_filenames = false;
                 require_serial = true;
               };
@@ -100,47 +100,24 @@
           # (Security.framework on Darwin, which needs nothing here).
           buildInputs = lib.optionals pkgs.stdenv.isLinux [ pkgs.openssl ];
           # `cargo test` runs in the devShell and CI; the tests bind loopback servers (fake
-          # Telegram, PostHog and concierge), which the Darwin sandbox refuses unless asked
+          # PostHog and Google), which the Darwin sandbox refuses unless asked
           doCheck = false;
           auditable = false; # cargo-auditable doesn't support edition 2024
         };
 
-        # The front end's static export (`next build` → out/), served by `panel serve` from
-        # PANEL_WEB_DIR on the same origin as /api and /auth.
+        # The front end's bundle (`npm run build` → dist/: mfe-sites.js, mfe-sites.css and hashed
+        # chunks), served by `sites_panel serve` at /mfe/* from PANEL_MFE_DIR.
         frontend = pkgs.buildNpmPackage {
           pname = "${pname}-frontend";
           version = manifest.version;
           src = lib.cleanSourceWith {
             src = lib.cleanSource ./frontend;
-            filter = path: _type: !(builtins.elem (baseNameOf path) [ "node_modules" ".next" "out" ]);
+            filter = path: _type: !(builtins.elem (baseNameOf path) [ "node_modules" "dist" ]);
           };
           npmDepsHash = "sha256-JKDCZ8uMBXRA/NxdpkIA5wtJyzr5zRoxhB4zynwrzZ0=";
-          env = {
-            NEXT_TELEMETRY_DISABLED = "1";
-            # NEXT_PUBLIC_* values are inlined by `next build`, so these are compile-time:
-            # the image carries the choice, no runtime switch. They turn on the platform path:
-            # the sign-in dialog over the panel, the platform's account chip and sign-in, and
-            # the wallet page. The bundles come from the platform origin (concierge's from
-            # /api/auth/mfe/*, the wallet's from /wallet/mfe/*), which the server's CSP names
-            # only with PANEL_CSP_PLATFORM_MFE=1 (devops panelEnv). Rollback: run the v0.12.1
-            # image. v0.11.0 boots too, but it loads the chip through the pinned proxy, so
-            # without its pins in the environment the chip shows only its fallback.
-            NEXT_PUBLIC_SIGNIN_OVERLAY = "1";
-            NEXT_PUBLIC_WALLET_PAGE = "1";
-          };
-          # Turbopack talks to its node workers over a loopback socket, which the Darwin
-          # sandbox refuses unless asked.
-          __darwinAllowLocalNetworking = true;
-          # Turbopack's build stalls in the sandbox after "Compiled successfully" (its
-          # PostCSS worker never hands back); webpack makes the same export.
-          npmBuildFlags = [ "--" "--webpack" ];
-          # next writes its cache under HOME, which the sandbox does not have
-          preBuild = ''
-            export HOME="$TMPDIR"
-          '';
           installPhase = ''
             runHook preInstall
-            cp -r out "$out"
+            cp -r dist "$out"
             runHook postInstall
           '';
         };
@@ -149,7 +126,7 @@
         # start (no init container, no migrate step), replicated off the pod by the cluster's
         # litestream — which is what `sqlite` below asks for. One writer: one pod, replaced
         # (Recreate), never two at once on the volume.
-        dbPath = "/data/panel.db";
+        dbPath = "/data/sites_panel.db";
 
         # What the deploy must provide, beyond what `container.implement` records. Plain
         # data on the contract, read by the devops generator; `checks.contract-env` holds
@@ -157,39 +134,30 @@
         deploy = {
           # Settings::required_var_names("production"): the pod exits 78 without any of them.
           # PANEL_DB_PATH is the container's own env (below); the rest the deploy supplies.
-          requiredEnv = [ "PANEL_DB_PATH" "PANEL_DATA_KEY" "PANEL_PUBLIC_ORIGIN" "CONCIERGE_PUBLIC_ORIGIN" "CONCIERGE_GRPC_ADDR" "RP_CLIENT_SECRET_SA" "PANEL_ASSERTION_KEY" "PANEL_REVIEW_ARCHIVE_URL" "PANEL_PLAYBOOK_URL" ];
+          requiredEnv = [ "PANEL_DB_PATH" "PANEL_DATA_KEY" "PANEL_ASSERTION_KEYS" ];
           # from the sops-backed Secret, never literal env
           secretEnv = [
             "PANEL_DATA_KEY"
             "SENTRY_DSN"
-            "RP_CLIENT_SECRET_SA"
-            "PANEL_ASSERTION_KEY"
-            "TELEGRAM_BOT_TOKEN"
             "GOOGLE_OAUTH_CLIENT_SECRET"
             "GOOGLE_CALENDAR_REFRESH_TOKEN_AQUAFIX"
             "GOOGLE_CALENDAR_REFRESH_TOKEN_VIFNET"
           ];
+          # PANEL_ASSERTION_KEYS: the conductor's public keys (not secret), `<kid>:<base64>`, comma-separated.
           # POSTHOG_PROJECT_API_KEY (phc_, public like the landings', not a secret; + POSTHOG_HOST):
           # serve sends the leads' life to PostHog; unset, nothing is sent (serve warns).
           # POSTHOG_PROJECT_ID (+ POSTHOG_APP_HOST): the experiments link to their funnels in
           # PostHog; unset, no links. Links are opened by the browser: no egress for them.
           # Google Calendar booking pull (docs/ARCHITECTURE.md, Booking): the OAuth client both or
           # neither; a brand's calendar is pulled only with its refresh token
-          # (`panel booking google-authorize <brand>` makes one); its calendar id defaults to
+          # (`sites_panel booking google-authorize <brand>` makes one); its calendar id defaults to
           # `primary`. A token without the client fails the boot.
-          # PANEL_CSP_PLATFORM_MFE: `0` (default) or `1`. With `1` the pages' CSP also allows the
-          # platform's MFE directories (https://evinvest.ltd/api/auth/mfe/ and /wallet/mfe/) in
-          # script-src and the origin in connect-src. The front end always loads them from there,
-          # so production sets `1`.
           # SCOPE_LEDGER_* (docs/ARCHITECTURE.md, Invoices): banking's ScopeLedger over mTLS, the
           # address and the three *_PEM_FILE paths all or none; unset, /api/v1/invoices answers
           # 503. The *_PEM_FILE values are literal paths (`/etc/settings/<VAR>`) to files mounted
           # from the Secret, as invest's are: the paths are not secrets, so not in secretEnv.
           optionalEnv = [
-            "PANEL_CSP_PLATFORM_MFE"
             "SENTRY_DSN"
-            "TELEGRAM_BOT_TOKEN"
-            "TELEGRAM_BOT_USERNAME"
             "TELEGRAM_LOCALE"
             "POSTHOG_PROJECT_API_KEY"
             "POSTHOG_HOST"
@@ -207,21 +175,14 @@
             "SCOPE_LEDGER_TLS_CERT_PEM_FILE"
             "SCOPE_LEDGER_TLS_KEY_PEM_FILE"
           ];
-          ingress = {
-            # in-cluster only, by service DNS: the landings' ingest and place reads
-            # (docs/ARCHITECTURE.md, Deploy requirements)
-            excludePathPrefixes = [ "/api/ingest" "/api/internal" ];
-            # per client IP at the edge; the panel bounds concurrency, not who calls. /api/hooks:
-            # the booking providers' webhooks (public, signature-checked; none registered yet)
-            rateLimitPathPrefixes = [ "/auth" "/api/hooks" ];
-          };
+          # No public route: the conductor forwards /api/sites/*, ingest, /api/hooks and /sites/mfe/*
+          # here by service DNS; the landings read /api/internal the same way.
           egress = {
-            # in-cluster peers, at the addresses these name: concierge's gRPC, the services the
-            # forward reaches (docs/ARCHITECTURE.md, Forward), and banking's ScopeLedger
-            grpcEnv = [ "CONCIERGE_GRPC_ADDR" "PANEL_REVIEW_ARCHIVE_URL" "PANEL_PLAYBOOK_URL" "SCOPE_LEDGER_ADDR" ];
-            # the Bot API; PostHog's capture host (POSTHOG_HOST's default — follow it if it is
-            # pointed elsewhere); Google's token endpoint and Calendar API for the booking pull
-            hosts = [ "api.telegram.org:443" "us.i.posthog.com:443" "oauth2.googleapis.com:443" "www.googleapis.com:443" ];
+            # banking's ScopeLedger
+            grpcEnv = [ "SCOPE_LEDGER_ADDR" ];
+            # PostHog's capture host (POSTHOG_HOST's default — follow it if it is pointed
+            # elsewhere); Google's token endpoint and Calendar API for the booking pull
+            hosts = [ "us.i.posthog.com:443" "oauth2.googleapis.com:443" "www.googleapis.com:443" ];
           };
         };
 
@@ -235,7 +196,7 @@
             # a source that gets a 5xx retries from its outbox; nothing is lost while down
             criticality = "normal";
             entrypoint = [ "${bin}/bin/${pname}" "serve" "--bind" "0.0.0.0:${toString port}" ];
-            # /bin/panel, for `kubectl exec … panel source add` and the like
+            # /bin/sites_panel, for `kubectl exec … sites_panel place set` and the like
             contents = [ bin ];
             # the production guards (`#[required_in("production")]`) are armed wherever it runs
             # PostHog: the project the landings send to (Cloud US 614067, their
@@ -246,9 +207,7 @@
               POSTHOG_PROJECT_API_KEY = "phc_sBwWEgdgockVmfyucBRkTTo6iZ4Y2eApSGorD22WLzj3";
               POSTHOG_PROJECT_ID = "614067";
             };
-            # the epoch versions the sa catalog `serve` publishes to concierge: it must travel with
-            # the build, or a tag whose catalog changed boots on the previous epoch and is refused
-            imageEnv = [ "PANEL_WEB_DIR=${frontend}" "PANEL_BUILD_EPOCH=${toString self.lastModified}" ];
+            imageEnv = [ "PANEL_MFE_DIR=${frontend}" ];
           };
         };
         # `implement` knows no key for the above, and throws on one it does not know.
@@ -266,11 +225,9 @@
           text = ''
             cat <<'EOF'
             nix develop                       toolchain, sqlite
-            nix build                         the panel binary
-            nix build .#${pname}-container    OCI image, the front end in it (Linux only)
-            nix build .#frontend              the front end's static export
-            nix run .#local-stack             the panel and both landings on this machine,
-                                              wired together (docs/LOCAL.md)
+            nix build                         the sites_panel binary
+            nix build .#${pname}-container    OCI image, the front end's bundle in it (Linux only)
+            nix build .#frontend              the front end's bundle
             nix run .#publish -- major|minor|patch [note]
                                               tag the next vX.Y.Z and push it: CI ships the image
             nix run .#gen                     the front end's mirror of the Rust types
@@ -278,7 +235,7 @@
             nix run .#help                    this
             cargo test                        every test; the database ones on throwaway
                                               SQLite files, nothing to set up
-            the CLI itself: panel --help
+            the CLI itself: sites_panel --help
             EOF
           '';
         };
@@ -317,22 +274,12 @@
             git push origin "$next"
           '';
         };
-        # The panel (dev sign-in) and the landings beside its checkout, wired together on this
-        # machine; the script is the source, shellchecked here (docs/LOCAL.md). It builds the
-        # binary and the front end itself, unless PANEL_BIN / PANEL_WEB_DIR name others: the
-        # app does not depend on them, so naming a cargo build skips the Nix one.
-        localStack = pkgs.writeShellApplication {
-          name = "local-stack";
-          runtimeInputs = with pkgs; [ coreutils curl gawk git gnused ];
-          text = builtins.readFile ./scripts/local-stack.sh;
-        };
       in
       {
         apps = {
           help = { type = "app"; program = lib.getExe help; };
           publish = { type = "app"; program = lib.getExe publish; };
           gen = { type = "app"; program = lib.getExe gen; };
-          local-stack = { type = "app"; program = lib.getExe localStack; };
         };
 
         packages = {
