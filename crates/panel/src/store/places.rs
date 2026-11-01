@@ -19,6 +19,7 @@ use super::{from_db, to_db};
 pub struct StoredPlace {
 	pub registered: bool,
 	pub withdrawn: bool,
+	pub gmb_id: Option<i64>,
 	pub settings: Option<StoredSettings>,
 }
 
@@ -41,10 +42,10 @@ fn settings_of(raw: Value, what: &str) -> eyre::Result<PlaceSettings> {
 }
 
 pub async fn place(conn: &mut SqliteConnection, brand: &BrandId, slug: &LocationId) -> eyre::Result<StoredPlace> {
-	/// `withdrawn`, `settings`, `updated_at`, `updated_by`.
-	type Row = (bool, Option<Json<Value>>, Option<i64>, Option<String>);
+	/// `withdrawn`, `gmb_id`, `settings`, `updated_at`, `updated_by`.
+	type Row = (bool, Option<i64>, Option<Json<Value>>, Option<i64>, Option<String>);
 	let row: Option<Row> = sqlx::query_as(
-		"SELECT p.withdrawn, s.settings, s.updated_at, s.updated_by FROM places p \
+		"SELECT p.withdrawn, p.gmb_id, s.settings, s.updated_at, s.updated_by FROM places p \
 		 LEFT JOIN place_settings s ON s.brand_id = p.brand_id AND s.location_id = p.location_id \
 		 WHERE p.brand_id = $1 AND p.location_id = $2",
 	)
@@ -53,7 +54,7 @@ pub async fn place(conn: &mut SqliteConnection, brand: &BrandId, slug: &Location
 	.fetch_optional(&mut *conn)
 	.await
 	.wrap_err("reading a place")?;
-	let Some((withdrawn, settings, updated_at, updated_by)) = row else {
+	let Some((withdrawn, gmb_id, settings, updated_at, updated_by)) = row else {
 		return Ok(StoredPlace::default());
 	};
 	let settings = match (settings, updated_at, updated_by) {
@@ -67,6 +68,7 @@ pub async fn place(conn: &mut SqliteConnection, brand: &BrandId, slug: &Location
 	Ok(StoredPlace {
 		registered: true,
 		withdrawn,
+		gmb_id,
 		settings,
 	})
 }
@@ -111,6 +113,38 @@ pub async fn set_withdrawn(conn: &mut SqliteConnection, brand: &BrandId, slug: &
 		.await
 		.wrap_err("withdrawing or restoring a place")?;
 	Ok(())
+}
+
+/// Links a place to a GMB (or frees it with `None`); `false` when another place has that GMB.
+pub async fn set_gmb(conn: &mut SqliteConnection, brand: &BrandId, slug: &LocationId, gmb_id: Option<i64>) -> eyre::Result<bool> {
+	let taken: Option<i64> = match gmb_id {
+		Some(g) => sqlx::query_scalar("SELECT 1 FROM places WHERE gmb_id = $1 AND NOT (brand_id = $2 AND location_id = $3)")
+			.bind(g)
+			.bind(brand.as_str())
+			.bind(slug.as_str())
+			.fetch_optional(&mut *conn)
+			.await
+			.wrap_err("looking for the place of a GMB")?,
+		None => None,
+	};
+	if taken.is_some() {
+		return Ok(false);
+	}
+	sqlx::query("UPDATE places SET gmb_id = $3 WHERE brand_id = $1 AND location_id = $2")
+		.bind(brand.as_str())
+		.bind(slug.as_str())
+		.bind(gmb_id)
+		.execute(&mut *conn)
+		.await
+		.wrap_err("linking a place to a GMB")?;
+	Ok(true)
+}
+
+pub async fn gmbs(conn: &mut SqliteConnection) -> eyre::Result<Vec<(i64, String, String)>> {
+	sqlx::query_as("SELECT gmb_id, brand_id, location_id FROM places WHERE gmb_id IS NOT NULL ORDER BY gmb_id")
+		.fetch_all(&mut *conn)
+		.await
+		.wrap_err("listing the GMBs' places")
 }
 
 pub async fn insert_change(conn: &mut SqliteConnection, brand: &BrandId, slug: &LocationId, change: &Change, by_user: Option<Uuid>) -> eyre::Result<()> {

@@ -22,6 +22,8 @@ pub struct PlaceView {
 	pub brand: BrandId,
 	pub slug: LocationId,
 	pub withdrawn: bool,
+	/// The conductor's GMB this place is the landing of.
+	pub gmb_id: Option<i64>,
 	/// Only the fields set; empty when none (the site serves its baked config).
 	pub settings: PlaceSettings,
 	/// `None` while the settings were never set: what a first edit must expect.
@@ -56,6 +58,9 @@ pub enum PlaceError {
 	/// The settings changed since the editor read them.
 	#[error("the settings changed since they were read")]
 	Conflict,
+	/// Another place is already the landing of that GMB.
+	#[error("the GMB is linked to another place")]
+	GmbTaken,
 	#[error("invalid settings: {0:?}")]
 	Invalid(FieldErrors),
 	#[error(transparent)]
@@ -89,6 +94,7 @@ fn view(brand: &BrandId, slug: &LocationId, stored: StoredPlace) -> PlaceView {
 		brand: brand.clone(),
 		slug: slug.clone(),
 		withdrawn: stored.withdrawn,
+		gmb_id: stored.gmb_id,
 		settings,
 		updated_at,
 		updated_by,
@@ -196,6 +202,29 @@ impl Panel {
 			})
 		})
 		.await
+	}
+
+	/// Makes a registered place the landing of a GMB, or of none; the change is not journaled
+	/// (`place_changes` holds settings), only published.
+	pub async fn link_gmb(&self, brand: &BrandId, slug: &LocationId, gmb_id: Option<i64>, now: Timestamp) -> Result<PlaceView, PlaceError> {
+		let mut tx = self.store.begin_write().await?;
+		if !places::place(&mut tx, brand, slug).await?.registered {
+			return Err(PlaceError::NotFound);
+		}
+		if !places::set_gmb(&mut tx, brand, slug, gmb_id).await? {
+			return Err(PlaceError::GmbTaken);
+		}
+		let stored = places::place(&mut tx, brand, slug).await?;
+		tx.commit().await.wrap_err("committing a place's GMB")?;
+		tracing::info!(%brand, %slug, ?gmb_id, "place linked to a GMB");
+		self.live.changed(place_changed(brand, slug, micros(now)?));
+		Ok(view(brand, slug, stored))
+	}
+
+	/// Every place with a GMB: `(gmb_id, brand, slug)`.
+	pub async fn gmbs(&self) -> eyre::Result<Vec<(i64, String, String)>> {
+		let mut conn = self.store.pool().acquire().await.wrap_err("a connection")?;
+		places::gmbs(&mut conn).await
 	}
 
 	/// Takes a place off the sites (`true`) or puts it back (`false`); its settings are kept.

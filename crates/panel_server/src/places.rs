@@ -10,6 +10,9 @@
 //! POST /api/v1/places/{brand}/{slug}/settings/revert/{id}  admin  [{expected_updated_at}]
 //!                                                              → 200 as GET; 404; 409 stale
 //! POST /api/v1/places/{brand}/{slug}/withdraw | /restore   admin  → 200 as GET
+//! PUT  /api/v1/places/{brand}/{slug}/gmb          admin    {gmb_id: n | null}
+//!                                                              → 200 as GET; 404; 409 {"error": "gmb_taken"}
+//! GET  /api/v1/gmbs                                            {"<gmb_id>": {brand, location}}
 //! POST /api/v1/places                                admin    {brand, slug} → 201 as GET;
 //!                                                              409 {"error": "exists"}
 //! GET  /api/internal/brands/{brand}/locations/{slug}?locale    PlaceLive, `{}` when none or
@@ -63,6 +66,8 @@ pub(crate) fn routes() -> Vec<ApiRoute> {
 		ApiRoute::new(M::POST, "/places/{brand}/{slug}/settings/revert/{id}", work, revert),
 		ApiRoute::new(M::POST, "/places/{brand}/{slug}/withdraw", work, withdraw),
 		ApiRoute::new(M::POST, "/places/{brand}/{slug}/restore", work, restore),
+		ApiRoute::new(M::PUT, "/places/{brand}/{slug}/gmb", work, link_gmb),
+		ApiRoute::new(M::GET, "/gmbs", work, gmbs),
 	]
 }
 
@@ -101,6 +106,7 @@ const INTERNAL_TIMEOUT: Duration = Duration::from_secs(3);
 enum PlaceApiError {
 	Api(ApiError),
 	Conflict,
+	GmbTaken,
 	Invalid(panel_core::place::FieldErrors),
 }
 
@@ -109,6 +115,7 @@ impl IntoResponse for PlaceApiError {
 		match self {
 			Self::Api(e) => e.into_response(),
 			Self::Conflict => (StatusCode::CONFLICT, Json(json!({ "error": "conflict" }))).into_response(),
+			Self::GmbTaken => (StatusCode::CONFLICT, Json(json!({ "error": "gmb_taken" }))).into_response(),
 			Self::Invalid(fields) => (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({ "error": "invalid", "fields": fields }))).into_response(),
 		}
 	}
@@ -130,6 +137,7 @@ fn place_error(e: PlaceError) -> PlaceApiError {
 	match e {
 		PlaceError::NotFound => PlaceApiError::Api(ApiError::NotFound),
 		PlaceError::Conflict => PlaceApiError::Conflict,
+		PlaceError::GmbTaken => PlaceApiError::GmbTaken,
 		PlaceError::Invalid(f) => PlaceApiError::Invalid(f),
 		PlaceError::Internal(e) => PlaceApiError::Api(ApiError::Internal(e)),
 	}
@@ -157,6 +165,7 @@ fn body(v: PlaceView, caller: &Caller) -> Value {
 		"brand": v.brand.as_str(),
 		"slug": v.slug.as_str(),
 		"withdrawn": v.withdrawn,
+		"gmb_id": v.gmb_id,
 		"settings": v.settings.as_json(),
 		"updated_at": v.updated_at.map(|t| t.to_string()),
 		"updated_by": v.updated_by,
@@ -276,6 +285,36 @@ async fn withdraw(State(panel): State<Panel>, Extension(caller): Extension<Calle
 
 async fn restore(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Path((brand, slug)): Path<(String, String)>) -> PlaceResult<Json<Value>> {
 	withdrawal(&panel, &caller, &brand, &slug, false).await
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GmbBody {
+	/// Required: `null` unlinks, an absent field is refused.
+	#[serde(deserialize_with = "Option::deserialize")]
+	gmb_id: Option<i64>,
+}
+
+async fn link_gmb(
+	State(panel): State<Panel>,
+	Extension(caller): Extension<Caller>,
+	Path((brand, slug)): Path<(String, String)>,
+	b: Result<Json<GmbBody>, JsonRejection>,
+) -> PlaceResult<Json<Value>> {
+	admin(&caller)?;
+	let (brand, slug) = ids(&brand, &slug)?;
+	let b = json_body(b)?;
+	let v = panel.link_gmb(&brand, &slug, b.gmb_id, Timestamp::now()).await.map_err(place_error)?;
+	Ok(Json(body(v, &caller)))
+}
+
+async fn gmbs(State(panel): State<Panel>) -> PlaceResult<Json<Value>> {
+	let rows = panel.gmbs().await?;
+	let by_id: serde_json::Map<String, Value> = rows
+		.into_iter()
+		.map(|(id, brand, location)| (id.to_string(), json!({ "brand": brand, "location": location })))
+		.collect();
+	Ok(Json(Value::Object(by_id)))
 }
 
 #[derive(Deserialize)]
