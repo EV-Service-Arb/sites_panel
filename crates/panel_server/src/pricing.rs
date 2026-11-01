@@ -20,7 +20,7 @@
 //! `path` is kitstart's, relative to the model: `needs.standard.inputs[2]`,
 //! `inputs[0].options[1].labels` (`""` when the model is not an object at all).
 
-use std::{collections::BTreeMap, time::Duration};
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use axum::{
 	Extension, Json,
@@ -42,6 +42,7 @@ use serde_json::{Value, json};
 
 use crate::{
 	api::ApiError,
+	conductor::{InternalEndpoint, InternalReads},
 	gate::Caller,
 	http::{ApiRoute, Section},
 	places::editor,
@@ -235,10 +236,11 @@ async fn preview(State(panel): State<Panel>, Path(brand): Path<String>, b: Resul
 /// What a site gets: the model, or `{}` for none — and `{}` too for a brand id that cannot be
 /// one, a store that fails or does not answer in time. The site then keeps its baked model,
 /// which is what it would do on an error; a 404 or a 5xx here would only be noise.
-pub(crate) async fn live(State(panel): State<Panel>, Path(brand): Path<String>) -> Json<Value> {
+pub(crate) async fn live(State(panel): State<Panel>, Extension(reads): Extension<Arc<InternalReads>>, Path(brand): Path<String>) -> Json<Value> {
 	let Ok(brand) = BrandId::parse(&brand) else {
 		return Json(json!({}));
 	};
+	reads.record(&brand, InternalEndpoint::Pricing);
 	match tokio::time::timeout(LIVE_WITHIN, panel.live_pricing(&brand)).await {
 		Ok(Ok(Some(model))) => Json(model),
 		Ok(Ok(None)) => Json(json!({})),

@@ -159,6 +159,12 @@ fn main() -> eyre::Result<()> {
 		}
 		return Ok(());
 	}
+	if std::env::args().nth(1).as_deref() == Some("--print-provided-paths") {
+		for path in http::PROVIDED_PATHS {
+			println!("{path}");
+		}
+		return Ok(());
+	}
 	// Exits 78 (EX_CONFIG) on a bad environment, before anything else is built.
 	let settings = ev_lib::settings::or_exit(Settings::from_env());
 

@@ -19,7 +19,7 @@ use uuid::Uuid;
 use crate::http::Section;
 
 /// The signed-in user of an `/api/v1` request, as the conductor vouched for them; put in the
-/// request's extensions by [`user`].
+/// request's extensions by `user`.
 #[derive(Clone, Debug)]
 pub struct Caller {
 	pub user_id: Uuid,

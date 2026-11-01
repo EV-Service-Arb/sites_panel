@@ -15,7 +15,7 @@
 //! changed_at}, effective: {weights,
 //! enabled, holdout}, weights_changed_at, retired, posthog_url}`.
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use axum::{
 	Extension, Json,
@@ -38,6 +38,7 @@ use serde_json::{Map, Value, json};
 
 use crate::{
 	api::ApiError,
+	conductor::{InternalEndpoint, InternalReads},
 	gate::Caller,
 	http::{ApiRoute, Section},
 	places::editor,
@@ -152,11 +153,12 @@ async fn configure(State(panel): State<Panel>, Extension(caller): Extension<Call
 /// What a site gets: its brand's overrides, or none — and none too for a brand id that cannot
 /// be one, a store that fails or does not answer in time. The site then runs its code's config,
 /// which is what it would do on an error.
-pub(crate) async fn live(State(panel): State<Panel>, Path(brand): Path<String>) -> Json<Value> {
+pub(crate) async fn live(State(panel): State<Panel>, Extension(reads): Extension<Arc<InternalReads>>, Path(brand): Path<String>) -> Json<Value> {
 	let none = || Json(json!({ "experiments": {} }));
 	let Ok(brand) = BrandId::parse(&brand) else {
 		return none();
 	};
+	reads.record(&brand, InternalEndpoint::Experiments);
 	match tokio::time::timeout(LIVE_WITHIN, panel.live_experiments(&brand)).await {
 		Ok(Ok(overrides)) => {
 			let experiments: Map<String, Value> = overrides.iter().map(|(k, o)| (k.clone(), live_json(o))).collect();

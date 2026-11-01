@@ -51,6 +51,7 @@ use uuid::Uuid;
 
 use crate::{
 	api::ApiError,
+	conductor::{InternalEndpoint, InternalReads},
 	gate::Caller,
 	http::{ApiRoute, Section},
 };
@@ -92,9 +93,9 @@ pub fn internal() -> Router<Panel> {
 		.load_shed()
 		.layer(GlobalConcurrencyLimitLayer::with_semaphore(permits));
 	Router::new()
-		.route("/api/internal/brands/{brand}/locations/{slug}", get(live).layer(places))
-		.route("/api/internal/brands/{brand}/pricing", get(crate::pricing::live).layer(pricing.clone()))
-		.route("/api/internal/brands/{brand}/experiments", get(crate::experiments::live).layer(experiments))
+		.route("/brands/{brand}/locations/{slug}", get(live).layer(places))
+		.route("/brands/{brand}/pricing", get(crate::pricing::live).layer(pricing.clone()))
+		.route("/brands/{brand}/experiments", get(crate::experiments::live).layer(experiments))
 }
 
 /// The sites' reads at once, places, pricing and experiments together.
@@ -337,12 +338,13 @@ async fn register(State(panel): State<Panel>, Extension(caller): Extension<Calle
 
 /// What a site gets. `locale` is accepted and not needed: a landmark is stored with every
 /// locale's text, and the site picks its own.
-async fn live(State(panel): State<Panel>, Path((brand, slug)): Path<(String, String)>) -> Response {
+async fn live(State(panel): State<Panel>, Extension(reads): Extension<Arc<InternalReads>>, Path((brand, slug)): Path<(String, String)>) -> Response {
 	// A brand or slug that could not name a place is a place the panel does not know: `{}`,
 	// never the 404 that would take a live page down.
 	let (Ok(brand), Ok(slug)) = (BrandId::parse(&brand), LocationId::parse(&slug)) else {
 		return Json(json!({})).into_response();
 	};
+	reads.record(&brand, InternalEndpoint::Locations);
 	match panel.live_place(&brand, &slug).await {
 		Ok(Live::Settings(s)) => Json(s.as_json()).into_response(),
 		Ok(Live::Withdrawn) => (StatusCode::NOT_FOUND, Json(json!({ "error": "not_found" }))).into_response(),

@@ -214,12 +214,21 @@
           };
         };
         # `implement` knows no key for the above, and throws on one it does not know.
-        containers = lib.mapAttrs (_: c: c // { contract = c.contract // deploy; }) containerStd.containers;
+        # `provides`: endpoint -> path, what devops derives a consumer's URL and ingress from.
+        provides.internal = "/api/internal";
+        containers = lib.mapAttrs (_: c: c // { contract = c.contract // deploy // { inherit provides; }; }) containerStd.containers;
 
         contractEnv = pkgs.runCommand "${pname}-contract-env" { } ''
           ${bin}/bin/${pname} --print-required-vars production | sort > got
           printf '%s\n' ${lib.escapeShellArgs deploy.requiredEnv} | sort > want
           diff -u want got || { echo "flake.nix deploy.requiredEnv disagrees with the binary" >&2; exit 1; }
+          touch "$out"
+        '';
+
+        contractProvides = pkgs.runCommand "${pname}-contract-provides" { } ''
+          ${bin}/bin/${pname} --print-provided-paths | sort > got
+          printf '%s\n' ${lib.escapeShellArgs (lib.attrValues provides)} | sort > want
+          diff -u want got || { echo "flake.nix provides disagrees with the paths the router mounts" >&2; exit 1; }
           touch "$out"
         '';
 
@@ -293,6 +302,7 @@
         containers = lib.optionalAttrs pkgs.stdenv.isLinux containers;
 
         checks.contract-env = contractEnv;
+        checks.contract-provides = contractProvides;
 
         devShells.default =
           with pkgs;

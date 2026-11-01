@@ -127,11 +127,9 @@ GET /api/internal/brands/<brand>/locations/<slug>?locale=fr
     404 {"error": "not_found"}  only for a place an admin withdrew: the site 404s that page
 ```
 
-A site points at it with, in its deploy config (in-cluster, not a secret):
-
-```sh
-LOCATIONS_API_URL=http://panel.service-arb.svc.cluster.local:59120/api/internal/brands/<brand>
-```
+A site is given `SITES_PANEL_INTERNAL_URL` (this service's origin plus `/api/internal`, derived by
+devops from the contracts: `provides.internal` here, `consumes` on the landing) and appends
+`/brands/<brand>/…`.
 
 `/api/internal` has no session and is not published: the public IngressRoute must exclude it,
 and the NetworkPolicy lets the landings' pods in. Admins edit in the panel (operators read);
