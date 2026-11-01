@@ -98,6 +98,14 @@ crates/panel_gen/                    `nix run .#gen`: the front end's mirror of 
                                      tables (ev_lib `ts_gen`), into frontend/**/generated.ts,
                                      committed; the pre-commit hook re-runs it
 sa_auth (the conductor's crate)      the `sa` permissions and the assertion: verified here
+frontend/                            the `mfe-sites` bundle: <mfe-sites-panel> (the page, routes
+                                     under `base`) and <mfe-sites-nav> (the conductor's Sites
+                                     dropdown); `npm run build` → dist/ (PANEL_MFE_DIR); the
+                                     element API (attributes, window events, routes) in its README
+  src/app/                           defineElement, the /me gate, the page's routes (a lazy chunk
+                                     per screen)
+  src/shared/lib/router.ts           one location for both elements under `base`
+  src/shared/lib/live/               the host's relayed socket (sa:live, sa:live-status)
 ```
 
 ## Ingest → journal → projections

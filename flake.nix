@@ -114,7 +114,7 @@
             src = lib.cleanSource ./frontend;
             filter = path: _type: !(builtins.elem (baseNameOf path) [ "node_modules" "dist" ]);
           };
-          npmDepsHash = "sha256-JKDCZ8uMBXRA/NxdpkIA5wtJyzr5zRoxhB4zynwrzZ0=";
+          npmDepsHash = "sha256-8Dr9hgPyz/OvBjM5+yFenhWI4FoC+1Gcefw3bypoe+A=";
           installPhase = ''
             runHook preInstall
             cp -r dist "$out"
