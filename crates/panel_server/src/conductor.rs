@@ -238,7 +238,7 @@ async fn internal_reads(State(r): State<Reads>) -> Json<Value> {
 /// How often the fan-out looks for what is due.
 const FAN_OUT_EVERY: Duration = Duration::from_secs(2);
 
-/// The fan-out, every [`FAN_OUT_EVERY`] until `shutdown` (`serve`'s).
+/// The fan-out, every `FAN_OUT_EVERY` until `shutdown` (`serve`'s).
 pub async fn fan_out(panel: Panel, locale: Locale, shutdown: tokio::sync::watch::Receiver<bool>) {
 	crate::every(FAN_OUT_EVERY, shutdown, "the notifications' fan-out", || async {
 		panel.fan_out(jiff::Timestamp::now(), locale).await?;
