@@ -113,7 +113,7 @@ fn text_field(pii: &Value, field: &str) -> Option<String> {
 impl Panel {
 	/// Appends a note for what the rules say is due at `now`: new leads, overdue leads,
 	/// payments and bookings, each once. Safe on several processes at once: each candidate is
-	/// claimed with its note. Prunes notes past [`NOTE_KEEP`]. How many notes were appended.
+	/// claimed with its note. Prunes notes past `NOTE_KEEP`. How many notes were appended.
 	pub async fn fan_out(&self, now: Timestamp, locale: Locale) -> eyre::Result<usize> {
 		let mut conn = self.store.pool().acquire().await.wrap_err("a connection for the fan-out")?;
 		db::prune(&mut conn, now - NOTE_KEEP, now - CLAIM_KEEP).await?;
