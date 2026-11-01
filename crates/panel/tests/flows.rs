@@ -5,9 +5,9 @@ use jiff::{SignedDuration, Timestamp};
 use panel::{
 	Outcome, Panel,
 	operator::{LeadQuery, Pii},
-	testing::{TestDb, event, panel, sign},
+	testing::{TestDb, batch, event, grant, panel},
 };
-use panel_core::{Invalid, fact::LeadFlow, ids::BrandId};
+use panel_core::{Invalid, fact::LeadFlow};
 use sa_auth::SourceKind;
 use serde_json::{Value, json};
 
@@ -17,17 +17,6 @@ fn now() -> Timestamp {
 
 fn at(minutes: i64) -> Timestamp {
 	"2026-10-04T09:00:00Z".parse::<Timestamp>().unwrap() + SignedDuration::from_mins(minutes)
-}
-
-fn aquafix() -> BrandId {
-	BrandId::parse("aquafix").unwrap()
-}
-
-/// A panel with aquafix's site key; its secret.
-async fn setup(db: &TestDb) -> (Panel, String) {
-	let panel = panel(db).await;
-	let site = panel.add_source("aquafix-site", SourceKind::Site, [aquafix()].into()).await.unwrap().unwrap();
-	(panel, site.secret.to_string())
 }
 
 fn created(lead: &str, minutes: i64, properties: Value) -> Value {
@@ -40,8 +29,10 @@ fn created(lead: &str, minutes: i64, properties: Value) -> Value {
 	)
 }
 
-async fn ingest(panel: &Panel, secret: &str, events: &[Value]) -> Vec<Outcome> {
-	let got = panel.ingest(sign("aquafix-site", secret, events, now()).batch(), now()).await.unwrap();
+/// `events` written under aquafix's site key.
+async fn ingest(panel: &Panel, events: &[Value]) -> Vec<Outcome> {
+	let site = grant("aquafix-site", SourceKind::Site, &["aquafix"]);
+	let got = panel.ingest(&site, &batch("aquafix-site", events), now()).await.unwrap();
 	got.into_iter().map(|v| v.outcome).collect()
 }
 
@@ -63,11 +54,10 @@ async fn offers(pool: &sqlx::SqlitePool) -> Vec<OfferRow> {
 #[tokio::test]
 async fn a_lead_says_its_flow_and_price_and_the_registry_holds_them_together() {
 	let db = TestDb::create().await;
-	let (panel, secret) = setup(&db).await;
+	let panel = panel(&db).await;
 	let inputs = |n: usize| Value::Object((0..n).map(|i| (format!("input-{i}"), json!("v"))).collect());
 	let got = ingest(
 		&panel,
-		&secret,
 		&[
 			created("L-0", 0, json!({"channel": "form"})),
 			created("L-1", 1, json!({"channel": "form", "flow": "quote"})),
@@ -173,12 +163,12 @@ async fn a_lead_says_its_flow_and_price_and_the_registry_holds_them_together() {
 async fn the_flow_migration_keeps_the_leads_both_ways() {
 	const FLOW: i64 = 20261004090000;
 	let db = TestDb::create().await;
-	let (panel, secret) = setup(&db).await;
+	let panel = panel(&db).await;
 	let events = [
 		created("L-1", 0, json!({"channel": "form", "flow": "fixed", "quotedCents": 8000, "pricingValidFrom": "2026-09-15"})),
 		created("L-2", 1, json!({"channel": "form"})),
 	];
-	assert_eq!(ingest(&panel, &secret, &events).await, [ACCEPTED, ACCEPTED]);
+	assert_eq!(ingest(&panel, &events).await, [ACCEPTED, ACCEPTED]);
 	let pool = db.pool().await;
 	let leads = "SELECT sum(leads) FROM reporting_funnel_daily";
 	let count = |sql: &'static str| {

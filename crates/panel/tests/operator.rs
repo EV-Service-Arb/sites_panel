@@ -1,10 +1,10 @@
-//! What an operator does, against a real Postgres: every action is an event in the journal,
+//! What an operator does, on a real SQLite file: every action is an event in the journal,
 //! the projections follow, and a rebuild lands on the same state.
 
 use jiff::{SignedDuration, Timestamp, civil::date};
 use panel::{
 	operator::{ActionError, Actor, CallOutcome, FunnelBy, LeadQuery, NewLead, Payment, Pii, StageMove},
-	testing::{TestDb, event, panel, sign},
+	testing::{TestDb, batch, event, grant, panel},
 };
 use panel_core::{
 	ids::{BrandId, JobId, LeadId, LocationId},
@@ -20,6 +20,10 @@ fn now() -> Timestamp {
 
 fn brand() -> BrandId {
 	BrandId::parse("aquafix").unwrap()
+}
+
+fn site() -> panel_core::event::KeyGrant {
+	grant("aquafix-site", SourceKind::Site, &["aquafix"])
 }
 
 #[tokio::test]
@@ -144,7 +148,6 @@ async fn actions_are_events_and_move_the_projection() {
 async fn lists_filters_pages_and_the_sla() {
 	let db = TestDb::create().await;
 	let panel = panel(&db).await;
-	let site = panel.add_source("aquafix-site", SourceKind::Site, [brand()].into()).await.unwrap().unwrap();
 	let at = |mins: i64| now() + SignedDuration::from_mins(mins);
 	let lead = |id: &str| json!({"brandId": "aquafix", "locationId": "paris-11", "leadId": id});
 	let mut events = Vec::new();
@@ -153,7 +156,7 @@ async fn lists_filters_pages_and_the_sla() {
 		e["pii"] = json!({"name": format!("Customer {id}")});
 		events.push(e);
 	}
-	let got = panel.ingest(sign("aquafix-site", &site.secret, &events, at(40)).batch(), at(40)).await.unwrap();
+	let got = panel.ingest(&site(), &batch("aquafix-site", &events), at(40)).await.unwrap();
 	assert_eq!(got.len(), 3);
 	let by = Actor(Uuid::now_v7());
 	panel
@@ -211,7 +214,6 @@ async fn lists_filters_pages_and_the_sla() {
 async fn slices_places_payments_and_counts() {
 	let db = TestDb::create().await;
 	let panel = panel(&db).await;
-	let site = panel.add_source("aquafix-site", SourceKind::Site, [brand()].into()).await.unwrap().unwrap();
 	let at = |mins: i64| now() + SignedDuration::from_mins(mins);
 	let yesterday = now() - SignedDuration::from_hours(24);
 	let subject = |id: &str, location: Option<&str>| {
@@ -228,7 +230,7 @@ async fn slices_places_payments_and_counts() {
 		event("lead.created", at(1), "site", subject("L-2", Some("lyon-2")), form.clone()),
 		event("lead.created", at(2), "site", subject("L-3", None), form.clone()),
 	];
-	panel.ingest(sign("aquafix-site", &site.secret, &events, at(3)).batch(), at(3)).await.unwrap();
+	panel.ingest(&site(), &batch("aquafix-site", &events), at(3)).await.unwrap();
 	let by = Actor(Uuid::now_v7());
 	let vifnet = BrandId::parse("vifnet").unwrap();
 	let new = NewLead {
@@ -336,9 +338,8 @@ async fn messenger_leads_by_hand() {
 			"{not_by_hand:?}: {refused:?}"
 		);
 	}
-	let site = panel.add_source("aquafix-site", SourceKind::Site, [brand()].into()).await.unwrap().unwrap();
 	let landing = [messenger_lead(t(1), "aquafix", "L-1", "telegram", "AQ-7K3F")];
-	panel.ingest(sign("aquafix-site", &site.secret, &landing, t(2)).batch(), t(2)).await.unwrap();
+	panel.ingest(&site(), &batch("aquafix-site", &landing), t(2)).await.unwrap();
 
 	let l1 = LeadId::parse("L-1").unwrap();
 	let first = panel.mark_messaged_once(by, &brand(), &l1, Messenger::Telegram, t(3), Some("k1")).await.unwrap();
