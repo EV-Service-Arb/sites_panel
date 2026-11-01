@@ -3,10 +3,10 @@ import { http } from "@/shared/api";
 import { type PricingChange, type PricingItem, pricingChangesParser, pricingItemParser, pricingListParser, previewParser } from "../model/item";
 import type { PricingAnswers, PricingModel } from "../model/model";
 
-const brandPath = (brand: string) => `/api/v1/pricing/${encodeURIComponent(brand)}`;
+const brandPath = (brand: string) => `/pricing/${encodeURIComponent(brand)}`;
 
 export async function fetchPricingList(): Promise<PricingItem[]> {
-  return (await http.get("/api/v1/pricing", pricingListParser)).items;
+  return (await http.get("/pricing", pricingListParser)).items;
 }
 
 export function fetchPricing(brand: string): Promise<PricingItem> {

@@ -1,32 +1,32 @@
-import { defineConfig, globalIgnores } from "eslint/config";
-import nextVitals from "eslint-config-next/core-web-vitals";
-import nextTs from "eslint-config-next/typescript";
+import js from "@eslint/js";
+import reactHooks from "eslint-plugin-react-hooks";
+import tseslint from "typescript-eslint";
 
-export default defineConfig([
-  ...nextVitals,
-  ...nextTs,
+// Only brackets opening on a digit or `#` are caught: the hardcoded sizes and colours. `calc()`, `var()` and
+// `env()` brackets stay legal, as do `grid-cols-(--name)` and bare viewport units (`max-h-[90dvh]`).
+const ARBITRARY = "-\\[(?!\\d+(?:\\.\\d+)?(?:d|s|l)?v[hw]\\])(?:#|\\d)";
+
+export default tseslint.config(
+  { ignores: ["dist/**", ".build/**", "node_modules/**"] },
+  js.configs.recommended,
   {
-    // Ported from banking/cabinet/frontend: arbitrary Tailwind values pile up because
-    // nothing stops them, so the guard is a rule rather than a convention.
-    //
-    // Only brackets opening on a digit or `#` are caught: those are the hardcoded sizes
-    // and colours. `calc()`, `var()` and `env()` brackets (device insets, the tab bar's
-    // height) stay legal, as does `grid-cols-(--name)` for a track with no step on the
-    // scale. Bare viewport units are exempt: `max-h-[90dvh]` sizes against the viewport.
-    files: ["**/*.ts", "**/*.tsx"],
+    files: ["**/*.{ts,tsx}"],
+    extends: [...tseslint.configs.recommended],
+    plugins: { "react-hooks": reactHooks },
     rules: {
+      ...reactHooks.configs.recommended.rules,
+      // Validators refuse control characters by naming them in a class; tests match NBSP and the narrow NBSP literally.
+      "no-control-regex": "off",
+      "no-irregular-whitespace": ["error", { skipRegExps: true }],
       "no-restricted-syntax": [
         "error",
-        {
-          selector: "Literal[value=/-\\[(?!\\d+(?:\\.\\d+)?(?:d|s|l)?v[hw]\\])(?:#|\\d)/]",
-          message: "Arbitrary Tailwind value — use a scale step, or a CSS custom property for a genuine one-off.",
-        },
-        {
-          selector: "TemplateElement[value.raw=/-\\[(?!\\d+(?:\\.\\d+)?(?:d|s|l)?v[hw]\\])(?:#|\\d)/]",
-          message: "Arbitrary Tailwind value — use a scale step, or a CSS custom property for a genuine one-off.",
-        },
+        { selector: `Literal[value=/${ARBITRARY}/]`, message: "Arbitrary Tailwind value — use a scale step, or a CSS custom property for a genuine one-off." },
+        { selector: `TemplateElement[value.raw=/${ARBITRARY}/]`, message: "Arbitrary Tailwind value — use a scale step, or a CSS custom property for a genuine one-off." },
       ],
     },
   },
-  globalIgnores([".next/**", "out/**", "node_modules/**", "next-env.d.ts"]),
-]);
+  {
+    files: ["scripts/**/*.{mjs,ts}", "eslint.config.mjs"],
+    languageOptions: { globals: { process: "readonly", console: "readonly", URL: "readonly", Buffer: "readonly", setTimeout: "readonly", setInterval: "readonly" } },
+  },
+);

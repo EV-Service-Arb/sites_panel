@@ -1,5 +1,3 @@
-"use client";
-
 import { Button, type ButtonVariant, Dialog, DialogContent, DialogHeader, DialogTitle } from "@evinvest/uikit";
 import { useState } from "react";
 

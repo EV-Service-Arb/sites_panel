@@ -1,5 +1,3 @@
-"use client";
-
 import { useResource } from "@/shared/lib/use-resource";
 
 import { fetchPlaces } from "../api/places";

@@ -1,5 +1,3 @@
-"use client";
-
 import { Collapsible, CollapsibleContent, CollapsibleTrigger, Label, Switch, buttonVariants } from "@evinvest/uikit";
 import { ChevronDown } from "lucide-react";
 import { useId } from "react";

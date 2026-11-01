@@ -147,6 +147,7 @@ describe("a 422", () => {
     const http = createHttp({
       fetch: async () => new Response(JSON.stringify({ error: "invalid", fields: { phone: "must be E.164", "hours[0].opens": "must be HH:MM", geo: "out of range" } }), { status: 422 }),
       cookie: () => "",
+      host: () => ({ api: "", csrfCookie: "sa_csrf" }),
       onUnauthenticated: () => {},
     });
     const err: unknown = await http.send("PUT", "/x", {}, (v) => v).catch((e: unknown) => e);
@@ -158,7 +159,7 @@ describe("a 422", () => {
   });
 
   it("without fields stays a plain failure", async () => {
-    const http = createHttp({ fetch: async () => new Response("{}", { status: 422 }), cookie: () => "", onUnauthenticated: () => {} });
+    const http = createHttp({ fetch: async () => new Response("{}", { status: 422 }), cookie: () => "", host: () => ({ api: "", csrfCookie: "sa_csrf" }), onUnauthenticated: () => {} });
     const err: unknown = await http.get("/x", (v) => v).catch((e: unknown) => e);
     expect((err as { failure?: unknown }).failure).toEqual({ kind: "failed", status: 422, message: "" });
   });

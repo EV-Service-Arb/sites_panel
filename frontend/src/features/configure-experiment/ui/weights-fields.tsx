@@ -1,5 +1,3 @@
-"use client";
-
 import { Field, FieldDescription, FieldError, FieldLabel, FieldLegend, FieldSet, Input } from "@evinvest/uikit";
 import { useId } from "react";
 

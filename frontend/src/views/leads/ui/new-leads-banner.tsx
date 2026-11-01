@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@evinvest/uikit";
 
 import { useT } from "@/shared/i18n";

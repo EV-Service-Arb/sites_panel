@@ -1,5 +1,3 @@
-"use client";
-
 import { Card, CardContent, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, cn } from "@evinvest/uikit";
 
 import { type Invoice, InvoiceStateBadge, payableInvoiceId } from "@/entities/invoice";

@@ -1,5 +1,3 @@
-"use client";
-
 import { useState } from "react";
 
 import { type PlaceKey, type PlaceSettings, type PlaceSettingsView, savePlaceSettings } from "@/entities/place";

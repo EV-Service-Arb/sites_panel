@@ -1,5 +1,3 @@
-"use client";
-
 import { useCallback, useSyncExternalStore } from "react";
 
 /** The uikit Sidebar shows from `md` up; below it the tab bar and bottom sheets take over. */

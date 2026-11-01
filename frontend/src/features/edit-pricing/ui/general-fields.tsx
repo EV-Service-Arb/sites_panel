@@ -1,5 +1,3 @@
-"use client";
-
 import { useT } from "@/shared/i18n";
 
 import { FIELD } from "../model/fields";

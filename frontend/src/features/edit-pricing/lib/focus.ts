@@ -6,7 +6,6 @@ import { domIdOf } from "../model/fields";
  * `input:k3:labels` → `input:k3`).
  */
 export function focusField(field: string): void {
-  if (typeof document === "undefined") return;
   for (let at: string | null = field; at !== null; at = at.includes(":") ? at.slice(0, at.lastIndexOf(":")) : null) {
     const el = document.getElementById(domIdOf(at));
     if (!el) continue;

@@ -1,5 +1,3 @@
-"use client";
-
 import { Alert, AlertDescription, AlertTitle, Button } from "@evinvest/uikit";
 
 import { useLocale, useT } from "@/shared/i18n";

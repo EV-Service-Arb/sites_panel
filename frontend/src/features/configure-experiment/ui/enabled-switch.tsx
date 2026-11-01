@@ -1,5 +1,3 @@
-"use client";
-
 import { Switch } from "@evinvest/uikit";
 
 import type { Experiment } from "@/entities/experiment";

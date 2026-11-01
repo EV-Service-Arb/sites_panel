@@ -1,14 +1,16 @@
 import { type Parser, parse } from "@/shared/lib/parse";
 
+import { host } from "@/shared/config/host";
+import { tellHost } from "@/shared/lib/host-events";
+
 import { CSRF_HEADER, readCsrf } from "./csrf";
-import { requestSignInOverlay } from "./signin-overlay";
 
 /**
- * Why a call failed, in the words the screens act on. The backend's gate
- * (`panel_server::signin::gate`) answers 401 for no session, 403 with
- * `"no access to the panel"` for a signed-in person without a grant, 403 `"csrf"`
- * for a write without the header, and 503 while concierge is unreachable —
- * which keeps the session, so the front end must not sign anyone out on it.
+ * Why a call failed, in the words the screens act on. The conductor's gate
+ * answers 401 for no session, 403 with `"no access to the panel"` for a
+ * signed-in person without a grant, 403 `"csrf"` for a write without the
+ * header, and 503 while concierge is unreachable — which keeps the session,
+ * so nobody is signed out on it.
  */
 export type ApiFailure =
   | { kind: "unauthenticated" }
@@ -38,11 +40,13 @@ export interface HttpDeps {
   fetch: typeof fetch;
   /** The page's cookies, as `document.cookie` has them. */
   cookie: () => string;
-  /** A 401: the session is gone. The browser goes to the backend's sign-in. */
+  /** Read per call: the host settles them when an element connects, after this module loaded. */
+  host: () => { api: string; csrfCookie: string };
+  /** A 401: the session is gone, the host signs the person in. */
   onUnauthenticated: () => void;
 }
 
-export type Query = Record<string, string | number | boolean | null | undefined>;
+type Query = Record<string, string | number | boolean | null | undefined>;
 
 function withQuery(path: string, query?: Query): string {
   if (!query) return path;
@@ -80,7 +84,7 @@ async function errorBody(res: Response): Promise<ErrorBody> {
   }
 }
 
-export async function failureOf(res: Response): Promise<ApiFailure> {
+async function failureOf(res: Response): Promise<ApiFailure> {
   const { message, fields, path, body } = await errorBody(res);
   switch (res.status) {
     case 401:
@@ -105,9 +109,6 @@ export async function failureOf(res: Response): Promise<ApiFailure> {
   }
 }
 
-/** What a write may ask of `fetch` beyond the defaults. `keepalive`: the request outlives the page, for a write that a navigation follows at once. */
-export type SendInit = Pick<RequestInit, "keepalive">;
-
 export interface Http {
   get<T>(path: string, parser: Parser<T>, query?: Query): Promise<T>;
   /** Every write carries the CSRF header; the backend refuses one without it. `headers` adds others (an Idempotency-Key). */
@@ -117,7 +118,6 @@ export interface Http {
     body: unknown,
     parser: Parser<T>,
     headers?: Readonly<Record<string, string>>,
-    init?: SendInit,
   ): Promise<T>;
 }
 
@@ -125,7 +125,7 @@ export function createHttp(deps: HttpDeps): Http {
   async function call<T>(path: string, init: RequestInit, parser: Parser<T>): Promise<T> {
     let res: Response;
     try {
-      res = await deps.fetch(path, { credentials: "same-origin", cache: "no-store", ...init });
+      res = await deps.fetch(`${deps.host().api}${path}`, { credentials: "same-origin", cache: "no-store", ...init });
     } catch {
       throw new ApiError({ kind: "network" });
     }
@@ -140,11 +140,11 @@ export function createHttp(deps: HttpDeps): Http {
 
   return {
     get: (path, parser, query) => call(withQuery(path, query), { method: "GET", headers: { accept: "application/json" } }, parser),
-    send: (method, path, body, parser, extra, options) => {
+    send: (method, path, body, parser, extra) => {
       const headers: Record<string, string> = { ...extra, accept: "application/json" };
-      const csrf = readCsrf(deps.cookie());
+      const csrf = readCsrf(deps.cookie(), deps.host().csrfCookie);
       if (csrf) headers[CSRF_HEADER] = csrf;
-      const init: RequestInit = { ...options, method, headers };
+      const init: RequestInit = { method, headers };
       if (body !== undefined) {
         headers["content-type"] = "application/json";
         init.body = JSON.stringify(body);
@@ -154,33 +154,11 @@ export function createHttp(deps: HttpDeps): Http {
   };
 }
 
-/** The backend's sign-in; a full navigation, since it answers with a redirect to concierge. */
-export const SIGN_IN_PATH = "/auth/login";
-
-/** The sign-in through Google's account chooser, past the evinvest.ltd session the browser may have. */
-export function switchAccountPath(returnTo: string): string {
-  return `${SIGN_IN_PATH}?prompt=select_account&return_to=${encodeURIComponent(returnTo)}`;
-}
-
-/** The full-page way to sign in: off to the backend's sign-in, and back here. */
-export function redirectToSignIn(): void {
-  if (typeof window === "undefined") return;
-  const here = window.location.pathname + window.location.search;
-  // /auth/login is the Rust backend's route, not a page of this app: only a full navigation reaches it.
-  // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-  window.location.assign(`${SIGN_IN_PATH}?return_to=${encodeURIComponent(here)}`);
-}
-
-/** The session is gone (an HTTP 401, the live socket's 4401): the overlay when it is on, else the redirect. */
-export function goToSignIn(): void {
-  if (requestSignInOverlay()) return;
-  redirectToSignIn();
-}
-
 export const http: Http = createHttp({
   fetch: (input, init) => fetch(input, init),
-  cookie: () => (typeof document === "undefined" ? "" : document.cookie),
-  onUnauthenticated: goToSignIn,
+  cookie: () => document.cookie,
+  host,
+  onUnauthenticated: () => tellHost("sa:unauthenticated"),
 });
 
 /** For bodies the screens do not read (`201 {event_id}`, `204`). */

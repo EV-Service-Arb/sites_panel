@@ -34,7 +34,7 @@ describe("saving a model", () => {
   it("PUTs exactly the model and the updated_at the draft started from", async () => {
     const calls = answer([200, item("2026-10-03T12:00:00Z")]);
     expect(await trySave("vifnet", cleaning, "2026-10-01T09:00:00Z")).toMatchObject({ kind: "saved", item: { updated_at: "2026-10-03T12:00:00Z" } });
-    expect(calls[0]?.url).toBe("/api/v1/pricing/vifnet");
+    expect(calls[0]?.url).toBe("/api/sites/pricing/vifnet");
     expect(calls[0]?.init.method).toBe("PUT");
     expect(sent(calls[0])).toStrictEqual({ model: cleaning, expected_updated_at: "2026-10-01T09:00:00Z" });
   });
@@ -73,7 +73,7 @@ describe("the preview", () => {
   it("asks the server, sending the draft's model, the need and the answers", async () => {
     const calls = answer([200, { cents: 8400 }]);
     expect(await previewPrice("vifnet", cleaning, "standard", { zone: "proche" })).toBe(8400);
-    expect(calls[0]?.url).toBe("/api/v1/pricing/vifnet/preview");
+    expect(calls[0]?.url).toBe("/api/sites/pricing/vifnet/preview");
     expect(sent(calls[0])).toStrictEqual({ model: cleaning, need: "standard", inputs: { zone: "proche" } });
   });
 

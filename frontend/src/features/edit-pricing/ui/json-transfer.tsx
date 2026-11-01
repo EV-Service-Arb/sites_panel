@@ -1,5 +1,3 @@
-"use client";
-
 import { Alert, AlertDescription, Button, Field, FieldDescription, FieldLabel, Textarea, toast } from "@evinvest/uikit";
 import { ClipboardCopy, ClipboardPaste } from "lucide-react";
 import { useId, useState } from "react";

@@ -127,8 +127,8 @@ describe("a draft", () => {
 });
 
 describe("the live socket", () => {
-  it("no longer knows the metrics topic: such a frame is ignored", () => {
-    expect(parseLiveMessage(JSON.stringify({ type: "changed", topic: "metrics", brand_id: null, id: null, at: "2026-10-04T00:00:00Z" }))).toBeNull();
-    expect(parseLiveMessage(JSON.stringify({ type: "changed", topic: "experiments", brand_id: "aquafix", id: null, at: "2026-10-04T00:00:00Z" }))).not.toBeNull();
+  it("no longer knows the metrics topic: such a message is ignored", () => {
+    expect(parseLiveMessage({ type: "changed", topic: "metrics", brand_id: null, id: null, at: "2026-10-04T00:00:00Z" })).toBeNull();
+    expect(parseLiveMessage({ type: "changed", topic: "experiments", brand_id: "aquafix", id: null, at: "2026-10-04T00:00:00Z" })).not.toBeNull();
   });
 });

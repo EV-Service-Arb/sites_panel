@@ -1,5 +1,3 @@
-"use client";
-
 import { Button, FieldError } from "@evinvest/uikit";
 import { Plus } from "lucide-react";
 

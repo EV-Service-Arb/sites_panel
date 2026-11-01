@@ -1,5 +1,3 @@
-"use client";
-
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@evinvest/uikit";
 import { Calculator } from "lucide-react";
 

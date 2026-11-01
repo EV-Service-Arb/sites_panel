@@ -1,5 +1,3 @@
-"use client";
-
 import { Alert, AlertDescription, Button } from "@evinvest/uikit";
 import { useEffect, useState } from "react";
 

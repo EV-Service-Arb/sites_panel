@@ -1,5 +1,3 @@
-"use client";
-
 import type { ReactNode } from "react";
 
 import { useLocale, useT } from "@/shared/i18n";

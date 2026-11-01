@@ -1,5 +1,3 @@
-"use client";
-
 import { Settled, Skeleton } from "@evinvest/uikit";
 import { ArrowUpRight } from "lucide-react";
 

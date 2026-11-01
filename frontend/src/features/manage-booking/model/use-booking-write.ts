@@ -1,5 +1,3 @@
-"use client";
-
 import { toast } from "@evinvest/uikit";
 
 import { type BookingAction, type CloseBody, type LeadRef, type SlotBody, closeBooking, writeSlot } from "@/entities/lead";

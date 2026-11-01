@@ -20,7 +20,7 @@ describe("a revert", () => {
   it("carries the updated_at it was read at", async () => {
     const calls = answer(200, view);
     await revertSettingsChange({ brand: "aquafix", slug: "royat" }, "c-1", "2026-10-03T12:00:00Z");
-    expect(calls[0]?.url).toBe("/api/v1/places/aquafix/royat/settings/revert/c-1");
+    expect(calls[0]?.url).toBe("/api/sites/places/aquafix/royat/settings/revert/c-1");
     expect(JSON.parse(String(calls[0]?.init.body))).toEqual({ expected_updated_at: "2026-10-03T12:00:00Z" });
   });
 

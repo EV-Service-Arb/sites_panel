@@ -1,5 +1,3 @@
-"use client";
-
 import type { ButtonSize } from "@evinvest/uikit";
 
 import { DESKTOP_QUERY, useMediaQuery } from "@/shared/lib/use-media-query";

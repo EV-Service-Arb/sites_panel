@@ -1,5 +1,3 @@
-"use client";
-
 import { cn } from "@evinvest/uikit";
 
 import { useT } from "@/shared/i18n";
@@ -7,13 +5,14 @@ import { type LiveStatus, useLiveStatus } from "@/shared/lib/live";
 
 type Shown = "live" | "reconnecting" | "offline";
 
-/** Paused is a hidden tab and connecting the first second: both read as "getting there". */
-function shownOf(status: LiveStatus): Shown | null {
+/** Paused is a hidden tab and connecting the first second: both read as "getting there". Null: the host has not said yet. */
+function shownOf(status: LiveStatus | null): Shown | null {
   switch (status) {
     case "live":
       return "live";
     case "offline":
       return "offline";
+    case null:
     case "closed":
       return null;
     default:

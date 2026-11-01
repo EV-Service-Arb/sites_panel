@@ -1,5 +1,3 @@
-"use client";
-
 import { Button, Field, FieldDescription, FieldError, FieldLabel, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, toast } from "@evinvest/uikit";
 import { Plus } from "lucide-react";
 import { useId, useState } from "react";

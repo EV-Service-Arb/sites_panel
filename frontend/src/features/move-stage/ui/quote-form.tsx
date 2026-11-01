@@ -1,5 +1,3 @@
-"use client";
-
 import { Button, Field, FieldLabel, Input } from "@evinvest/uikit";
 import { useId, useState } from "react";
 

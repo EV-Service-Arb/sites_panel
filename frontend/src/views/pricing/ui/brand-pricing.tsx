@@ -1,5 +1,3 @@
-"use client";
-
 import { Settled, Skeleton } from "@evinvest/uikit";
 import { useCallback, useState } from "react";
 

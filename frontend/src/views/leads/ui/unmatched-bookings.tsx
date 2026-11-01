@@ -1,5 +1,3 @@
-"use client";
-
 import { Badge, Button, Card, Collapsible, CollapsibleContent, CollapsibleTrigger, Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@evinvest/uikit";
 import { ChevronDown } from "lucide-react";
 import { useState } from "react";

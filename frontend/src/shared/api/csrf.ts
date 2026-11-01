@@ -1,21 +1,10 @@
-/** The double-submit token the backend sets beside the session (`panel_server::cookies`). */
-const CSRF_COOKIE = "sa_csrf";
 export const CSRF_HEADER = "x-sa-csrf";
 
-/**
- * The CSRF token from a `document.cookie` string. Behind https the backend names
- * it `__Host-sa_csrf`, over plain http (development) `sa_csrf`; the prefixed one
- * wins when both are there, as it does on the server.
- */
-export function readCsrf(cookie: string): string | null {
-  const pairs = cookie
-    .split(";")
-    .map((p) => p.trim())
-    .filter(Boolean)
-    .map((p) => {
-      const at = p.indexOf("=");
-      return at < 0 ? ([p, ""] as const) : ([p.slice(0, at), p.slice(at + 1)] as const);
-    });
-  const find = (name: string) => pairs.find(([k, v]) => k === name && v !== "")?.[1] ?? null;
-  return find(`__Host-${CSRF_COOKIE}`) ?? find(CSRF_COOKIE);
+/** The value of cookie `name` in a `document.cookie` string; null when absent or empty. */
+export function readCsrf(cookie: string, name: string): string | null {
+  for (const pair of cookie.split(";")) {
+    const at = pair.indexOf("=");
+    if (at >= 0 && pair.slice(0, at).trim() === name) return pair.slice(at + 1).trim() || null;
+  }
+  return null;
 }

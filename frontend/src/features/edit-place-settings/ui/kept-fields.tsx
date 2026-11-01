@@ -1,5 +1,3 @@
-"use client";
-
 import { useT } from "@/shared/i18n";
 
 /** The live fields the panel does not edit in v1: named, so nobody wonders where the address went. */

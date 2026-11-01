@@ -1,5 +1,3 @@
-"use client";
-
 import { Alert, AlertDescription, Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@evinvest/uikit";
 import { useState } from "react";
 

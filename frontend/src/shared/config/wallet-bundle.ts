@@ -7,17 +7,15 @@ export const WALLET_ORIGIN = "https://evinvest.ltd";
 
 /**
  * Where banking publishes the bundle (`/wallet/mfe/wallet.js`, as its registry.json says).
- * Not served by the panel on purpose: the elements talk to the origin they were loaded from
- * (balances, history, action pages), so a copy under the panel's origin would ask the panel for
- * `/api/wallet`. Cross-origin means the panel's CSP must name this directory in `script-src`
- * and the origin in `connect-src`; the server does that when it runs with
- * PANEL_CSP_PLATFORM_MFE=1. Without it the browser refuses the script and the page shows its
- * "unavailable" state.
+ * Not served by sites or the conductor on purpose: the elements talk to the origin they were loaded
+ * from (balances, history, action pages). Cross-origin means the conductor's CSP must name this
+ * directory in `script-src` and the origin in `connect-src`; without it the browser refuses the
+ * script and the pay buttons show "unavailable".
  */
 export const WALLET_SCRIPT = `${WALLET_ORIGIN}/wallet/mfe/wallet.js`;
 
 /**
- * The bytes of `WALLET_SCRIPT` this panel runs (banking WALLET-INPAGE-SPEC control (g): the
+ * The bytes of `WALLET_SCRIPT` this bundle runs (banking WALLET-INPAGE-SPEC control (g): the
  * in-page pay form runs in this page). The sha256 of banking's `npm run --silent mfe:pins --
  * wallet` (`wallet.js=<hex>`) as SRI. banking's registry carries no integrity, so a release that
  * changes wallet.js turns the wallet and the pay buttons "unavailable" until this is updated.

@@ -2,19 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import { followsPlace, savedSince } from "@/entities/place/lib/live";
 import type { ChangedEvent } from "@/shared/lib/live/protocol";
-import { NOTHING_UNSEEN, newLeads, noteChanges, parseSeen, sectionOf, visit } from "@/views/shell/model/unseen";
+import { NOTHING_UNSEEN, newLeads, noteChanges, parseSeen, visit } from "@/views/nav/model/unseen";
 
 const at = "2026-10-03T10:00:00Z";
 const ev = (topic: ChangedEvent["topic"], brand_id: string | null = "aquafix", id: string | null = null): ChangedEvent => ({ topic, brand_id, id, at });
-
-describe("the screen a path is", () => {
-  it("ignores the export's trailing slash and the query", () => {
-    expect(sectionOf("/leads/")).toBe("leads");
-    expect(sectionOf("/places")).toBe("places");
-    expect(sectionOf("/")).toBeNull();
-    expect(sectionOf("/leadsx")).toBeNull();
-  });
-});
 
 describe("the nav's badges", () => {
   it("count new leads as the growth of the total since the screen was seen", () => {
@@ -30,9 +21,9 @@ describe("the nav's badges", () => {
     expect(s.places).toHaveLength(2);
   });
 
-  it("mark experiments and sources with a dot, and nothing for the other topics", () => {
-    const s = noteChanges(NOTHING_UNSEEN, [ev("experiments"), ev("sources"), ev("telegram"), ev("pricing")], "overview");
-    expect(s).toEqual({ places: [], experiments: true, sources: true, bookings: false });
+  it("mark experiments with a dot, and nothing for the other topics", () => {
+    const s = noteChanges(NOTHING_UNSEEN, [ev("experiments"), ev("pricing"), ev("invoices")], "overview");
+    expect(s).toEqual({ places: [], experiments: true, bookings: false });
   });
 
   it("mark bookings without a lead with a dot on Leads, cleared by opening Leads", () => {
@@ -49,10 +40,10 @@ describe("the nav's badges", () => {
   });
 
   it("clear when their screen opens, and only theirs", () => {
-    const s = { places: ["aquafix/lyon-3"], experiments: true, sources: true, bookings: false };
-    expect(visit(s, "places")).toEqual({ places: [], experiments: true, sources: true, bookings: false });
+    const s = { places: ["aquafix/lyon-3"], experiments: true, bookings: false };
+    expect(visit(s, "places")).toEqual({ places: [], experiments: true, bookings: false });
     expect(visit(s, "experiments").experiments).toBe(false);
-    expect(visit(s, "more")).toBe(s);
+    expect(visit(s, null)).toBe(s);
   });
 
   it("keep the leads baseline only when storage holds a count", () => {

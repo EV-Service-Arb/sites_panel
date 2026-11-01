@@ -1,5 +1,3 @@
-"use client";
-
 import { Alert, AlertDescription, Button, Spinner } from "@evinvest/uikit";
 
 import { PRICING_CURRENCY } from "@/entities/pricing";

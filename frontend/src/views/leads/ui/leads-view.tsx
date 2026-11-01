@@ -1,7 +1,4 @@
-"use client";
-
 import { Button } from "@evinvest/uikit";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useState } from "react";
 
 import { type LeadFilter, type LeadRef, decodeRef, encodeRef, fetchLeadCounts } from "@/entities/lead";
@@ -10,6 +7,7 @@ import { CallFlowProvider, OutcomeSheet } from "@/features/call-lead";
 import { CreateLeadButton } from "@/features/create-lead";
 import { LeadFilters, leadFilterFrom, narrows, paramsWith } from "@/features/lead-filters";
 import { useT } from "@/shared/i18n";
+import { replaceQuery, useQuery } from "@/shared/lib/router";
 import { useLastNonNull } from "@/shared/lib/use-last-non-null";
 import { useResource } from "@/shared/lib/use-resource";
 import { EmptyState } from "@/shared/ui/empty-state";
@@ -24,22 +22,19 @@ import { UnmatchedBookings } from "./unmatched-bookings";
 export function LeadsView() {
   const t = useT();
   const button = useButtonSize();
-  const params = useSearchParams();
-  const router = useRouter();
-  const pathname = usePathname();
+  const params = useQuery();
   const filter = leadFilterFrom(params);
   const open = decodeRef(params.get("lead"));
   // The card stays filled while the sheet slides away; the param is already gone by then.
   const shown = decodeRef(useLastNonNull(params.get("lead")));
   const [version, setVersion] = useState(0);
 
-  const go = (next: URLSearchParams) => router.replace(`${pathname}?${next.toString()}`, { scroll: false });
-  const setFilter = (patch: Partial<LeadFilter>) => go(paramsWith(params, patch));
+  const setFilter = (patch: Partial<LeadFilter>) => replaceQuery(paramsWith(params, patch));
   const openLead = (ref: LeadRef | null) => {
     const next = new URLSearchParams(params);
     if (ref) next.set("lead", encodeRef(ref));
     else next.delete("lead");
-    go(next);
+    replaceQuery(next);
   };
   const changed = useCallback(() => setVersion((v) => v + 1), []);
   const created = (ref: LeadRef) => {
@@ -68,7 +63,7 @@ export function LeadsView() {
           empty={
             <EmptyState title={t("leads.empty")} description={t(filtered ? "leads.empty.filtered" : "leads.empty.none")}>
               {filtered && (
-                <Button variant="outline" size={button()} onClick={() => go(new URLSearchParams())}>
+                <Button variant="outline" size={button()} onClick={() => replaceQuery(new URLSearchParams())}>
                   {t("leads.resetFilters")}
                 </Button>
               )}

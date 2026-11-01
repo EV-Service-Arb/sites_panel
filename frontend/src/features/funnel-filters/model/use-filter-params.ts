@@ -1,7 +1,6 @@
-"use client";
-
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
+
+import { replaceQuery, useQuery } from "@/shared/lib/router";
 
 import { type Period, periodFrom, rangeOf } from "./period";
 
@@ -13,9 +12,7 @@ export type FilterPatch = { period?: Period; brand?: string | null };
  * would refetch in a loop.
  */
 export function useFilterParams() {
-  const params = useSearchParams();
-  const router = useRouter();
-  const pathname = usePathname();
+  const params = useQuery();
   const period = periodFrom(params.get("period"));
   const brand = params.get("brand") || null;
   const [now] = useState(() => new Date());
@@ -26,7 +23,7 @@ export function useFilterParams() {
     if (patch.period !== undefined) next.set("period", String(patch.period));
     if (patch.brand) next.set("brand", patch.brand);
     else if (patch.brand === null) next.delete("brand");
-    router.replace(`${pathname}?${next.toString()}`);
+    replaceQuery(next);
   };
 
   return { period, brand, range, update };

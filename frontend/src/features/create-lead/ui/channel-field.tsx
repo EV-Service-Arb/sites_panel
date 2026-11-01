@@ -1,5 +1,3 @@
-"use client";
-
 import { Field, FieldLabel, ToggleGroup, ToggleGroupItem } from "@evinvest/uikit";
 import { useId } from "react";
 

@@ -1,5 +1,3 @@
-"use client";
-
 import { Badge, Button, Card, CardAction, CardContent, CardHeader, CardTitle, Progress } from "@evinvest/uikit";
 import { Fragment } from "react";
 

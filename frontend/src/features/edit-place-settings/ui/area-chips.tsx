@@ -1,5 +1,3 @@
-"use client";
-
 import { Button, FieldError, Input } from "@evinvest/uikit";
 import { X } from "lucide-react";
 import { useState } from "react";

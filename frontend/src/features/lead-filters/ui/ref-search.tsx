@@ -1,5 +1,3 @@
-"use client";
-
 import { InputGroup, InputGroupAddon, InputGroupInput, cn } from "@evinvest/uikit";
 import { Search } from "lucide-react";
 import { useState } from "react";

@@ -1,5 +1,3 @@
-"use client";
-
 import { Badge, type BadgeVariant } from "@evinvest/uikit";
 
 import { useLocale, useT } from "@/shared/i18n";

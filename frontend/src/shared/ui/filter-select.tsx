@@ -1,5 +1,3 @@
-"use client";
-
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@evinvest/uikit";
 import { useControlSize } from "./touch";
 

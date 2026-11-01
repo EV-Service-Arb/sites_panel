@@ -1,5 +1,3 @@
-"use client";
-
 import { Badge } from "@evinvest/uikit";
 
 import { ChannelIcon, type LeadEvent, MESSENGERS } from "@/entities/lead";

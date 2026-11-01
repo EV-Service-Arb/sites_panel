@@ -1,5 +1,3 @@
-"use client";
-
 import { Badge, Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@evinvest/uikit";
 import { type ReactNode, useEffect, useId, useRef } from "react";
 

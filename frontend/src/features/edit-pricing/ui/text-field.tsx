@@ -1,5 +1,3 @@
-"use client";
-
 import { Field, FieldDescription, FieldLabel, Input, cn } from "@evinvest/uikit";
 
 import { useT } from "@/shared/i18n";

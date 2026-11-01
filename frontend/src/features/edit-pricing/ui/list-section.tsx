@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@evinvest/uikit";
 import { Plus } from "lucide-react";
 import { type ReactNode, useId } from "react";

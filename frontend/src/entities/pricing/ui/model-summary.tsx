@@ -1,5 +1,3 @@
-"use client";
-
 import { useLocale, useT } from "@/shared/i18n";
 import { formatCents } from "@/shared/lib/format";
 

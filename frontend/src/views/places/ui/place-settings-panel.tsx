@@ -1,5 +1,3 @@
-"use client";
-
 import { Alert, AlertDescription, Badge, Settled, Skeleton, Tabs, TabsContent, TabsList, TabsTrigger } from "@evinvest/uikit";
 import { useCallback, useState } from "react";
 

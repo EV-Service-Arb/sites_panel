@@ -1,5 +1,3 @@
-"use client";
-
 import { Field, FieldLabel, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@evinvest/uikit";
 import { useId } from "react";
 

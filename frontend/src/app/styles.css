@@ -1,0 +1,65 @@
+/* What scripts/build.mjs compiles and scripts/scope-css.mjs scopes to the elements. No preflight and no fonts:
+   the host has both. The theme import stays unlayered: layered, it hides the spacing scale from the utility
+   generator and fractional steps compile to nothing (concierge web/styles/mfe.css). */
+@import "tailwindcss/theme.css";
+/* The kit's Sheet, Dialog and Popover enter and leave with tw-animate's classes. */
+@import "tw-animate-css";
+@import "@evinvest/uikit/styles/tokens.css";
+@import "tailwindcss/utilities.css" layer(evmfe-scope) important source(none);
+
+@source "../../src";
+/* The kit ships class literals in its bundle, which Tailwind's detection skips with the rest of node_modules. */
+@source "../../node_modules/@evinvest/uikit/dist";
+
+:root {
+  /* Grid tracks with no step on the spacing scale, used as grid-cols-(--name). */
+  --grid-payment: 1fr 1fr 7rem;
+  /* A new invoice: amount, memo (the widest), days, submit. */
+  --grid-invoice-form: 12rem minmax(0, 1fr) 8rem auto;
+  --grid-funnel-row: 1fr auto auto;
+  --grid-place-step: 6rem 1fr auto;
+  /* A place's live field read-only: its name, then its value. */
+  --grid-place-field: 7rem 1fr;
+  /* Pricing: the editor, and beside it the preview, JSON and history column. */
+  --grid-pricing: minmax(0, 1fr) 24rem;
+}
+
+/* A row a live update touched (views/leads, `data-flash`): "new" arrives and
+   glows, "odd"/"even" glow again on each later change — two names, because an
+   animation replays only when its name changes. The glow is colour alone, so
+   reduced motion keeps it and drops only the arrival's rise. */
+@keyframes panel-glow-odd {
+  from {
+    background-color: color-mix(in oklab, var(--color-primary-ink) 22%, transparent);
+  }
+}
+@keyframes panel-glow-even {
+  from {
+    background-color: color-mix(in oklab, var(--color-primary-ink) 22%, transparent);
+  }
+}
+@keyframes panel-arrive {
+  from {
+    opacity: 0;
+    translate: 0 var(--ev-rise, 8px);
+    background-color: color-mix(in oklab, var(--color-primary-ink) 22%, transparent);
+  }
+  30% {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+[data-flash="odd"] {
+  animation: panel-glow-odd 1.6s var(--ev-ease-out, ease-out);
+}
+[data-flash="even"] {
+  animation: panel-glow-even 1.6s var(--ev-ease-out, ease-out);
+}
+[data-flash="new"] {
+  animation: panel-arrive 2s var(--ev-ease-out, ease-out);
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-flash="new"] {
+    animation-name: panel-glow-odd;
+  }
+}

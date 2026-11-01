@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { createElement } from "react";
+import { type ReactElement, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
@@ -14,8 +14,10 @@ import { effectHint } from "@/features/edit-pricing/model/hints";
 import { modelOf } from "@/features/edit-pricing/model/serialize";
 import { ConflictAlert } from "@/features/edit-pricing/ui/conflict-alerts";
 import { TextField } from "@/features/edit-pricing/ui/text-field";
+import { LocaleProvider } from "@/shared/i18n";
 import { formatMoment } from "@/shared/lib/format";
 
+const render = (element: ReactElement) => renderToStaticMarkup(createElement(LocaleProvider, { value: "en" }, element));
 const cleaning = JSON.parse(readFileSync(new URL("./fixtures/pricing/valid/cleaning.json", import.meta.url), "utf8")) as PricingModel;
 const item = (model: PricingModel | null, updated_at: string | null = "2026-10-03T12:34:56Z"): PricingItem => ({
   brand_id: "vifnet",
@@ -87,14 +89,14 @@ describe("the last write's stamp", () => {
   });
 
   it("reads 'Taken off … by …' on the status card after a take-off, 'Saved …' after a save", () => {
-    const off = renderToStaticMarkup(createElement(PricingStatus, { item: item(null) }));
+    const off = render(createElement(PricingStatus, { item: item(null) }));
     expect(off).toMatch(/Taken off [^<]*56[^<]* by admin@example\.test/);
     expect(off).not.toMatch(/Saved /);
-    expect(renderToStaticMarkup(createElement(PricingStatus, { item: item(cleaning) }))).toMatch(/Saved [^<]*56[^<]* by admin@example\.test/);
+    expect(render(createElement(PricingStatus, { item: item(cleaning) }))).toMatch(/Saved [^<]*56[^<]* by admin@example\.test/);
   });
 
   it("reads 'Taken off' in the conflict alert when the write that won took the pricing off", () => {
-    const html = renderToStaticMarkup(createElement(ConflictAlert, { current: item(null), onTakeFresh: () => {}, onOverwrite: () => {} }));
+    const html = render(createElement(ConflictAlert, { current: item(null), onTakeFresh: () => {}, onOverwrite: () => {} }));
     expect(html).toMatch(/Taken off [^<]*56[^<]* by admin@example\.test\. Your draft is kept\./);
   });
 });
@@ -134,7 +136,7 @@ describe("the hint under an answer's effect", () => {
 
 describe("the editor's fields to a screen reader", () => {
   it("have one accessible name each across the whole form", () => {
-    const html = renderToStaticMarkup(createElement(PricingEditorForm, { editor: editorOf(item(cleaning)), fresher: null, onTakeFresh: () => {}, onReload: () => {} }));
+    const html = render(createElement(PricingEditorForm, { editor: editorOf(item(cleaning)), fresher: null, onTakeFresh: () => {}, onReload: () => {} }));
     const names = inputNames(html);
     expect(names.length).toBeGreaterThan(20);
     expect(names.filter((n, i) => names.indexOf(n) !== i)).toEqual([]);
@@ -145,7 +147,7 @@ describe("the editor's fields to a screen reader", () => {
   it("name a field's hint and its reasons in aria-describedby, by ids that exist", () => {
     const field = FIELD.optionValue("k1");
     const errors: FieldErrors = { byField: new Map([[field, [{ code: "money", vars: {} }, { text: "Too dear." }]]]), general: [], first: field };
-    const html = renderToStaticMarkup(createElement(TextField, { field, label: "Adds, €", hint: "0 changes nothing.", value: "x", onChange: () => {}, errors }));
+    const html = render(createElement(TextField, { field, label: "Adds, €", hint: "0 changes nothing.", value: "x", onChange: () => {}, errors }));
     const ids = [hintIdOf(field), messageIdOf(field, 0), messageIdOf(field, 1)];
     expect(attr(/<input\b[^>]*>/.exec(html)?.[0] ?? "", "aria-describedby")).toBe(ids.join(" "));
     for (const id of ids) expect(html).toContain(`id="${id}"`);
@@ -153,7 +155,7 @@ describe("the editor's fields to a screen reader", () => {
 
   it("carry no aria-describedby with neither a hint nor a reason", () => {
     expect(describedByOf("roundTo", false, 0)).toBeUndefined();
-    const html = renderToStaticMarkup(createElement(TextField, { field: "roundTo", label: "Round", value: "1", onChange: () => {}, errors: NO_FIELD_ERRORS }));
+    const html = render(createElement(TextField, { field: "roundTo", label: "Round", value: "1", onChange: () => {}, errors: NO_FIELD_ERRORS }));
     expect(html).not.toContain("aria-describedby");
   });
 });

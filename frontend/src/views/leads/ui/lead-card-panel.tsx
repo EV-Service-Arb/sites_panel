@@ -1,5 +1,3 @@
-"use client";
-
 import { Separator, Settled, Skeleton } from "@evinvest/uikit";
 import { useState } from "react";
 

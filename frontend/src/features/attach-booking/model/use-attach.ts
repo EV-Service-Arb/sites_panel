@@ -1,5 +1,3 @@
-"use client";
-
 import { toast } from "@evinvest/uikit";
 
 import { type UnmatchedBooking, attachBooking } from "@/entities/booking";

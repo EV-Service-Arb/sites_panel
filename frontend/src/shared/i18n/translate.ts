@@ -5,7 +5,7 @@ export type Vars = Record<string, string | number>;
 export type T = (key: MessageKey, vars?: Vars) => string;
 
 
-/** The panel speaks the reader's browser language when it is Russian, English otherwise. */
+/** A `lang` attribute's value read as a locale: Russian, or English for anything else. */
 export function localeOf(language: string | undefined): Locale {
   return language?.toLowerCase().startsWith("ru") ? "ru" : "en";
 }

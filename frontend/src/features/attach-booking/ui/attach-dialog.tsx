@@ -1,5 +1,3 @@
-"use client";
-
 import { Badge, Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, Skeleton } from "@evinvest/uikit";
 import { useState } from "react";
 

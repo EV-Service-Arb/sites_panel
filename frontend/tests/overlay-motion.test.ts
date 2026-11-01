@@ -52,6 +52,6 @@ describe("the kit's overlays", () => {
   });
 
   it("are no longer patched by the panel", () => {
-    expect(read("../app/globals.css")).not.toMatch(/data-slot[$^*]?="[a-z-]*(overlay|content)"/);
+    expect(read("../src/app/styles.css")).not.toMatch(/data-slot[$^*]?="[a-z-]*(overlay|content)"/);
   });
 });

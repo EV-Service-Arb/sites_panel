@@ -1,5 +1,3 @@
-"use client";
-
 import { Button, Card, CardContent, Settled, Skeleton } from "@evinvest/uikit";
 import type { ReactNode } from "react";
 

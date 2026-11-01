@@ -1,5 +1,3 @@
-"use client";
-
 import { Badge, type BadgeVariant, cn } from "@evinvest/uikit";
 import { CircleHelp, FileText, type LucideIcon, MessageCircle, PhoneIncoming, PhoneOutgoing, Send } from "lucide-react";
 

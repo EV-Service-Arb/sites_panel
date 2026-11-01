@@ -1,5 +1,3 @@
-"use client";
-
 import { Button, toast } from "@evinvest/uikit";
 
 import { type Lead, type Messenger, markMessaged, refOf } from "@/entities/lead";

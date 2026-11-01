@@ -1,30 +1,16 @@
-"use client";
+import { createContext, useContext, useMemo } from "react";
 
-import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { type Locale, type T, translator } from "./translate";
 
-import { type Locale, type T, localeOf, translator } from "./translate";
+const LocaleContext = createContext<Locale | null>(null);
 
-const subscribe = (onChange: () => void) => {
-  window.addEventListener("languagechange", onChange);
-  return () => window.removeEventListener("languagechange", onChange);
-};
+/** Set by each element from the closest `[lang]` around it. */
+export const LocaleProvider = LocaleContext.Provider;
 
-/** The export is prerendered in English; the browser's language takes over on hydration. */
 export function useLocale(): Locale {
-  return useSyncExternalStore(
-    subscribe,
-    () => localeOf(navigator.language),
-    () => "en",
-  );
-}
-
-/** Keeps `<html lang>` on the language the page is actually in (the export says "en"). */
-export function DocumentLang() {
-  const locale = useLocale();
-  useEffect(() => {
-    document.documentElement.lang = locale;
-  }, [locale]);
-  return null;
+  const locale = useContext(LocaleContext);
+  if (locale === null) throw new Error("useLocale outside an element root");
+  return locale;
 }
 
 export function useT(): T {

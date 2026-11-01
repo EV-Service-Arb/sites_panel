@@ -26,7 +26,7 @@ export interface LeadFilter {
 }
 
 export function fetchLeads(filter: LeadFilter, cursor: string | null, limit = 50): Promise<LeadPage> {
-  return http.get("/api/v1/leads", leadPageParser, {
+  return http.get("/leads", leadPageParser, {
     stage: filter.stage,
     brand: filter.brand,
     location: filter.location,
@@ -45,7 +45,7 @@ export function fetchLeads(filter: LeadFilter, cursor: string | null, limit = 50
 
 /** Counts for the stage segments: the place filter only, so a segment counts what tapping it would list. */
 export function fetchLeadCounts(filter: Pick<LeadFilter, "brand" | "location">): Promise<LeadCounts> {
-  return http.get("/api/v1/leads/counts", leadCountsParser, { brand: filter.brand, location: filter.location });
+  return http.get("/leads/counts", leadCountsParser, { brand: filter.brand, location: filter.location });
 }
 
 export function fetchLeadCard(ref: LeadRef): Promise<LeadCard> {
@@ -65,7 +65,7 @@ const createdParser = object({ brand: str, lead_id: str, event_id: str });
 
 export function createLead(lead: NewLead): Promise<{ brand: string; lead_id: string }> {
   const body = { brand: lead.brand, location: lead.location, need: lead.need, channel: lead.channel, ...(lead.phone ? { phone: lead.phone } : {}) };
-  return http.send("POST", "/api/v1/leads", body, createdParser);
+  return http.send("POST", "/leads", body, createdParser);
 }
 
 /** The stage bodies `POST …/stage` takes (`panel_server::api::StageBody`). */

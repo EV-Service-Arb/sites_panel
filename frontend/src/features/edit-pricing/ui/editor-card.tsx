@@ -1,5 +1,3 @@
-"use client";
-
 import { Button, Card, CardAction, CardContent, CardHeader, CardTitle } from "@evinvest/uikit";
 import { Trash2 } from "lucide-react";
 import type { ReactNode } from "react";

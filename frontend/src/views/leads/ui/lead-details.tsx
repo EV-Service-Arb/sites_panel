@@ -1,5 +1,3 @@
-"use client";
-
 import { Badge } from "@evinvest/uikit";
 
 import { ChannelBadge, type Lead, SlaBadge, StageBadge, SuspectBadge, contactOf, extrasOf } from "@/entities/lead";

@@ -4,7 +4,7 @@ import { type UnmatchedBooking, unmatchedListParser } from "../model/booking";
 
 /** The next slot first; one brand, or every brand for null. */
 export async function fetchUnmatched(brand: string | null, limit = 100): Promise<UnmatchedBooking[]> {
-  return (await http.get("/api/v1/bookings/unmatched", unmatchedListParser, { brand, limit })).bookings;
+  return (await http.get("/bookings/unmatched", unmatchedListParser, { brand, limit })).bookings;
 }
 
 /**
@@ -12,5 +12,5 @@ export async function fetchUnmatched(brand: string | null, limit = 100): Promise
  * lead of its brand; 409: an operator attached it there already.
  */
 export async function attachBooking(id: string, lead: string, idempotencyKey: string): Promise<void> {
-  await http.send("POST", `/api/v1/bookings/${encodeURIComponent(id)}/attach`, { lead }, ignoreBody, { [IDEMPOTENCY_HEADER]: idempotencyKey });
+  await http.send("POST", `/bookings/${encodeURIComponent(id)}/attach`, { lead }, ignoreBody, { [IDEMPOTENCY_HEADER]: idempotencyKey });
 }

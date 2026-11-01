@@ -1,5 +1,3 @@
-"use client";
-
 import { ChannelPreview, type PlaceSettingsView, bookingText, formatHours, messengersText } from "@/entities/place";
 import { useT } from "@/shared/i18n";
 

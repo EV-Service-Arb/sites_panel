@@ -11,12 +11,12 @@ export function matchesLive(match: LiveMatch, signal: LiveSignal): boolean {
   return typeof match === "function" ? match(signal.event) : match.includes(signal.event.topic);
 }
 
-export interface LiveBus {
+interface LiveBus {
   subscribe(listener: (signal: LiveSignal) => void): () => void;
   emit(signal: LiveSignal): void;
 }
 
-export function createLiveBus(): LiveBus {
+function createLiveBus(): LiveBus {
   const listeners = new Set<(signal: LiveSignal) => void>();
   return {
     subscribe(listener) {
@@ -32,5 +32,5 @@ export function createLiveBus(): LiveBus {
   };
 }
 
-/** One per tab: the shell's socket feeds it, every mounted reader listens. */
+/** One per page: the host's relayed messages feed it (host.ts), every mounted reader of both elements listens. */
 export const liveBus: LiveBus = createLiveBus();

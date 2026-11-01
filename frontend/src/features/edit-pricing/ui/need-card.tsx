@@ -1,5 +1,3 @@
-"use client";
-
 import { NEED_KINDS, type NeedKind } from "@/entities/pricing";
 import { useT } from "@/shared/i18n";
 

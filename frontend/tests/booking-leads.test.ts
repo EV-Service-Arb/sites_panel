@@ -121,7 +121,7 @@ describe("a slot as read", () => {
 
 describe("a refused booking write", () => {
   const failing = (status: number, body: unknown) =>
-    createHttp({ fetch: async () => new Response(JSON.stringify(body), { status }), cookie: () => "", onUnauthenticated: () => {} })
+    createHttp({ fetch: async () => new Response(JSON.stringify(body), { status }), cookie: () => "", host: () => ({ api: "", csrfCookie: "sa_csrf" }), onUnauthenticated: () => {} })
       .send("POST", "/x", {}, () => null)
       .catch((e: unknown) => e);
 
@@ -145,6 +145,7 @@ describe("the Idempotency-Key", () => {
         return new Response(JSON.stringify({ event_id: "e" }), { status: 201 });
       },
       cookie: () => "sa_csrf=c",
+      host: () => ({ api: "", csrfCookie: "sa_csrf" }),
       onUnauthenticated: () => {},
     });
     await http.send("POST", "/x", { action: "clear" }, () => null, { "idempotency-key": "k1" });

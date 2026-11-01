@@ -1,5 +1,3 @@
-"use client";
-
 import { BookingBadge, type Lead, wishText } from "@/entities/lead";
 import { BookingActions } from "@/features/manage-booking";
 import { useLocale, useT } from "@/shared/i18n";

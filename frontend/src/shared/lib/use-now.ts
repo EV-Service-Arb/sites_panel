@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect, useState } from "react";
 
 /** The time, redrawn every `everyMs`: for waits shown in minutes that must not freeze. */

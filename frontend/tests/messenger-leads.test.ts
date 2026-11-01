@@ -6,10 +6,7 @@ import ru from "../messages/ru.json";
 import { markMessaged } from "@/entities/lead/api/leads";
 import { CHANNELS, MESSENGERS, awaitingMessage, leadParser } from "@/entities/lead/model/lead";
 import { MESSENGER_SWITCHES } from "@/entities/place/model/settings";
-import { sourceKindLabel } from "@/entities/source/lib/kind";
-import { sourceParser } from "@/entities/source/model/source";
 import { leadFilterFrom, messageRefOf, narrows, paramsWith } from "@/features/lead-filters/model/params";
-import { translator } from "@/shared/i18n/translate";
 import { oneOfOr, parse } from "@/shared/lib/parse";
 
 const row = { brand: "aquafix", lead_id: "l1", stage: "created", manual: false, last_event_at: "2026-10-07T10:00:00Z" };
@@ -90,7 +87,7 @@ describe("marking a lead as messaged", () => {
       return new Response(JSON.stringify({ event_id: "e1" }), { status: 201 });
     });
     await markMessaged({ brand: "aquafix", lead: "l1" }, "whatsapp", "key-1");
-    expect(calls.map((c) => [c.init.method, c.url])).toEqual([["POST", "/api/v1/leads/aquafix/l1/messaged"]]);
+    expect(calls.map((c) => [c.init.method, c.url])).toEqual([["POST", "/api/sites/leads/aquafix/l1/messaged"]]);
     expect(JSON.parse(String(calls[0]?.init.body))).toEqual({ channel: "whatsapp" });
     expect(new Headers(calls[0]?.init.headers).get("Idempotency-Key")).toBe("key-1");
   });
@@ -155,13 +152,5 @@ describe("the channel badge's words", () => {
 
   it("exist in Russian for every channel the contract names", () => {
     expect(missing(ru)).toEqual([]);
-  });
-});
-
-describe("the bot source", () => {
-  it("is a kind the sources list reads, and says which bots it is", () => {
-    const source = parse(sourceParser, { key_id: "k1", kind: "bot", brands: ["aquafix"], created_at: "2026-10-07T10:00:00Z", revoked_at: null });
-    expect(sourceKindLabel(source.kind, translator("en"))).toBe("Bot (WhatsApp/Telegram)");
-    expect(sourceKindLabel("site", translator("en"))).toBe("site");
   });
 });

@@ -1,5 +1,3 @@
-"use client";
-
 import { ToggleGroup, ToggleGroupItem } from "@evinvest/uikit";
 
 import type { LeadCounts, Stage } from "@/entities/lead";

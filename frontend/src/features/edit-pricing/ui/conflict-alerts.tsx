@@ -1,5 +1,3 @@
-"use client";
-
 import { Alert, AlertDescription, AlertTitle, Button } from "@evinvest/uikit";
 
 import { type PricingItem, pricingStamp } from "@/entities/pricing";

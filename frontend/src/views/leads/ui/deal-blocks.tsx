@@ -1,5 +1,3 @@
-"use client";
-
 import { type Lead, PriceText, quotedPrice } from "@/entities/lead";
 import { useLocale, useT } from "@/shared/i18n";
 import { formatDay } from "@/shared/lib/format";

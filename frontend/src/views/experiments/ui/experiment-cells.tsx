@@ -1,5 +1,3 @@
-"use client";
-
 import { Badge, Button } from "@evinvest/uikit";
 import { ArrowUpRight } from "lucide-react";
 

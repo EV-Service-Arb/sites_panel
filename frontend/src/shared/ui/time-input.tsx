@@ -1,5 +1,3 @@
-"use client";
-
 import { Field, FieldLabel, Input } from "@evinvest/uikit";
 
 import { normaliseTime } from "@/shared/lib/clock";

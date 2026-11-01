@@ -8,7 +8,7 @@ export interface PlaceKey {
   slug: string;
 }
 
-const placePath = ({ brand, slug }: PlaceKey) => `/api/v1/places/${encodeURIComponent(brand)}/${encodeURIComponent(slug)}`;
+const placePath = ({ brand, slug }: PlaceKey) => `/places/${encodeURIComponent(brand)}/${encodeURIComponent(slug)}`;
 
 export function fetchPlaceSettings(key: PlaceKey): Promise<PlaceSettingsView> {
   return http.get(`${placePath(key)}/settings`, placeSettingsParser);
@@ -41,5 +41,5 @@ export function setPlaceWithdrawn(key: PlaceKey, withdrawn: boolean): Promise<Pl
 
 /** Admin only: a place no lead or visit has named yet. 409 `exists` when it is registered already. */
 export function addPlace(key: PlaceKey): Promise<PlaceSettingsView> {
-  return http.send("POST", "/api/v1/places", key, placeSettingsParser);
+  return http.send("POST", "/places", key, placeSettingsParser);
 }

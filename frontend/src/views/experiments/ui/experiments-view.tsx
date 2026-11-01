@@ -1,12 +1,9 @@
-"use client";
-
 import { Settled, Skeleton } from "@evinvest/uikit";
 
 import { fetchExperiments } from "@/entities/experiment";
 import { brandsOf, usePlaces } from "@/entities/place";
 import { may, useMe } from "@/entities/session";
 import { useFilterParams } from "@/features/funnel-filters";
-import { ROUTES } from "@/shared/config/routes";
 import { useT } from "@/shared/i18n";
 import { useResource } from "@/shared/lib/use-resource";
 import { EmptyState } from "@/shared/ui/empty-state";
@@ -35,7 +32,6 @@ export function ExperimentsView() {
   return (
     <ScreenFrame
       title={t("experiments.title")}
-      back={ROUTES.more}
       actions={<FilterSelect label={t("filter.brand")} allLabel={t("filter.brand.all")} value={brand} options={brands.map((b) => ({ value: b, label: b }))} onChange={(b) => update({ brand: b })} />}
     >
       <Settled loading={data.status === "loading"} skeleton={<Skeleton className="h-64 w-full" />} className="flex flex-col gap-4">

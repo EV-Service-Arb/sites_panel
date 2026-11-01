@@ -1,5 +1,3 @@
-"use client";
-
 import { ResourceError } from "@evinvest/uikit";
 
 import type { ApiFailure } from "@/shared/api";

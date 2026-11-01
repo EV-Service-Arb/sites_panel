@@ -1,5 +1,3 @@
-"use client";
-
 import { Alert, AlertDescription, AlertTitle, Button, DialogClose, DialogFooter, Field, FieldDescription, FieldError, FieldLabel, Input } from "@evinvest/uikit";
 import { useId, useState } from "react";
 

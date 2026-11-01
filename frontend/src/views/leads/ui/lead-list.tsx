@@ -1,5 +1,3 @@
-"use client";
-
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@evinvest/uikit";
 
 import { BookingLine, ChannelBadge, DealSummary, type Lead, SlaBadge, StageBadge, SuspectBadge, contactOf } from "@/entities/lead";

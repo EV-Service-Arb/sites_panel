@@ -1,5 +1,3 @@
-"use client";
-
 import { Button, Settled, Skeleton, toast } from "@evinvest/uikit";
 import { RefreshCw } from "lucide-react";
 
@@ -22,14 +20,6 @@ export function InvoicesView() {
   const me = useMe();
   const button = useButtonSize();
   const invoices = useResource("invoices", fetchInvoices, "invoices", { live: ["invoices"] });
-
-  if (!may(me, "sa:sites:work:read")) {
-    return (
-      <ScreenFrame title={t("invoices.title")}>
-        <ErrorState failure={{ kind: "forbidden", message: "" }} />
-      </ScreenFrame>
-    );
-  }
 
   // The popup's word is a hint: the row is read again from banking, and only the row says paid.
   const onPaySettled = (id: string, outcome: PayOutcome) => {

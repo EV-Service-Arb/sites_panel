@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@evinvest/uikit";
 import { ArrowDown, ArrowUp, Plus, X } from "lucide-react";
 

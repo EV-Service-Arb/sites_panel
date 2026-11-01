@@ -1,5 +1,3 @@
-"use client";
-
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import type { LeadRef } from "@/entities/lead";

@@ -1,5 +1,3 @@
-"use client";
-
 import { FieldError } from "@evinvest/uikit";
 
 import { useT } from "@/shared/i18n";

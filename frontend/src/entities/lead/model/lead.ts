@@ -118,7 +118,7 @@ export function decodeRef(raw: string | null): LeadRef | null {
 }
 
 export function leadPath(ref: LeadRef): string {
-  return `/api/v1/leads/${encodeURIComponent(ref.brand)}/${encodeURIComponent(ref.lead)}`;
+  return `/leads/${encodeURIComponent(ref.brand)}/${encodeURIComponent(ref.lead)}`;
 }
 
 /** What the customer left, the known fields picked out as text. */

@@ -1,5 +1,3 @@
-"use client";
-
 import { Badge, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, cn } from "@evinvest/uikit";
 
 import { BookingLine, ChannelBadge, DealSummary, type Lead, SlaBadge, StageBadge, SuspectBadge, contactOf } from "@/entities/lead";

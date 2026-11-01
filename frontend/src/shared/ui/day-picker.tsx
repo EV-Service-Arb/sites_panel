@@ -1,5 +1,3 @@
-"use client";
-
 import { Button, Calendar, Popover, PopoverContent, PopoverTrigger } from "@evinvest/uikit";
 import { CalendarDays } from "lucide-react";
 import { useState } from "react";

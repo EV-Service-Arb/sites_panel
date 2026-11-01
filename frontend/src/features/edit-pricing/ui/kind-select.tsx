@@ -1,5 +1,3 @@
-"use client";
-
 import { Field, FieldLabel, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@evinvest/uikit";
 
 import { useT } from "@/shared/i18n";

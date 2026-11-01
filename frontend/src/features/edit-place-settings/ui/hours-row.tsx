@@ -1,5 +1,3 @@
-"use client";
-
 import { Button, FieldDescription, FieldError, ToggleGroup, ToggleGroupItem } from "@evinvest/uikit";
 import { X } from "lucide-react";
 import { useId } from "react";

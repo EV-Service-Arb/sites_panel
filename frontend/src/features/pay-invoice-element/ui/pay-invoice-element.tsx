@@ -1,19 +1,14 @@
-"use client";
-
 import { Skeleton } from "@evinvest/uikit";
 import { useEffect, useRef } from "react";
 
-import { WALLET_API_VERSION, WALLET_SCOPE, WALLET_SCRIPT, WALLET_SCRIPT_INTEGRITY } from "@/shared/config/wallet-bundle";
+import { WALLET_SCOPE } from "@/shared/config/wallet-bundle";
 import { useLocale, useT } from "@/shared/i18n";
-import { useElementBundle } from "@/shared/mfe";
 
 import { type PayOutcome, WALLET_ACTION_EVENT, WALLET_RESULT_MESSAGE, payActionFromEvent, payResultFromEvent } from "../model/action";
+import { useWalletBundle } from "../model/bundle";
 import { openPayPopup, payNavigationHref } from "../model/popup";
 
 export const PAY_INVOICE_TAG = "mfe-banking-pay-invoice";
-
-// A stable object: the loader's effect is keyed on its fields.
-const BUNDLE = { minApiVersion: WALLET_API_VERSION, integrity: WALLET_SCRIPT_INTEGRITY, timeoutMs: 8000 } as const;
 
 /**
  * banking's `<mfe-banking-pay-invoice invoice scope="sa" actions="inline">`. The element pays in
@@ -27,7 +22,7 @@ const BUNDLE = { minApiVersion: WALLET_API_VERSION, integrity: WALLET_SCRIPT_INT
 export function PayInvoiceElement({ invoiceId, onSettled }: { invoiceId: string; onSettled: (outcome: PayOutcome) => void }) {
   const t = useT();
   const locale = useLocale();
-  const bundle = useElementBundle(PAY_INVOICE_TAG, WALLET_SCRIPT, BUNDLE);
+  const bundle = useWalletBundle(PAY_INVOICE_TAG);
   const hostRef = useRef<HTMLDivElement>(null);
   const settledRef = useRef(onSettled);
 

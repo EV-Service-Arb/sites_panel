@@ -1,5 +1,3 @@
-"use client";
-
 import { Badge, Card, CardContent, CardHeader, CardTitle, cn } from "@evinvest/uikit";
 
 import { type Funnel, biggestLoss } from "@/entities/funnel";

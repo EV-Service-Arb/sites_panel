@@ -1,5 +1,3 @@
-"use client";
-
 import { Card, CardContent } from "@evinvest/uikit";
 
 import { ModelSummary, type PricingItem, PricingStatus } from "@/entities/pricing";

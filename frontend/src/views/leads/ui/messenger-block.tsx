@@ -1,5 +1,3 @@
-"use client";
-
 import { Button, toast } from "@evinvest/uikit";
 import { Copy } from "lucide-react";
 

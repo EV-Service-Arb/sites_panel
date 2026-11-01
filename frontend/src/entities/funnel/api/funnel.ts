@@ -9,9 +9,9 @@ export interface FunnelFilter {
 }
 
 export function fetchFunnel(filter: FunnelFilter): Promise<Funnel> {
-  return http.get("/api/v1/funnel", funnelParser, { from: filter.from, to: filter.to, brand: filter.brand });
+  return http.get("/funnel", funnelParser, { from: filter.from, to: filter.to, brand: filter.brand });
 }
 
 export function fetchFunnelByLocation(filter: FunnelFilter): Promise<FunnelByLocation> {
-  return http.get("/api/v1/funnel", funnelByLocationParser, { from: filter.from, to: filter.to, brand: filter.brand, by: "location" });
+  return http.get("/funnel", funnelByLocationParser, { from: filter.from, to: filter.to, brand: filter.brand, by: "location" });
 }

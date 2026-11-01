@@ -1,5 +1,3 @@
-"use client";
-
 import { Badge, cn } from "@evinvest/uikit";
 
 import { useLocale, useT } from "@/shared/i18n";

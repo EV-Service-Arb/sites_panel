@@ -1,5 +1,3 @@
-"use client";
-
 import type { Paid } from "@/entities/funnel";
 import { useLocale, useT } from "@/shared/i18n";
 
