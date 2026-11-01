@@ -1,32 +1,36 @@
 /**
- * A stand-in for the panel's backend, for `next dev` without Rust, Postgres or
- * concierge: the `/api/v1` operator API and `/auth/*` over an in-memory set of
- * leads. Same shapes, same gate (401 without a session, CSRF on writes).
+ * A stand-in for the conductor and sites together, for working on the bundle without Rust: the harness page
+ * (dev/index.html, the conductor's part: it mounts both elements and relays the live socket), the bundle from
+ * dist/ at /sites/mfe/, sites' operator API at /api/sites over an in-memory set of leads, the conductor's live
+ * socket at /api/v1/live and a sign-in that is instant. Same gate as the conductor: 401 without a session, CSRF
+ * on writes.
  *
- *   npm run dev:stub                  # :3121, signed in as an operator
- *   STUB_ROLE=admin npm run dev:stub  # as an admin
- *   STUB_ME=403 npm run dev:stub      # the gate refusing: 401 | 403 | 503
- *   STUB_MIN_SAMPLE=2 npm run dev:stub  # percents (and bars) from 2 leads, not 30
- *   STUB_POSTHOG=off npm run dev:stub   # no PostHog project: the funnel and experiments without a PostHog link
- *   STUB_PLACES_CONFLICT=1 npm run dev:stub  # every place-settings save answers 409
- *   STUB_PRICING_CONFLICT=1 npm run dev:stub # every pricing save and removal answers 409
- *   STUB_PRICING_INVALID=inputs.zone.labels.en npm run dev:stub  # every pricing save and preview answers 422 there
- *   STUB_LIVE=off npm run dev:stub     # no /api/v1/live socket: the panel polls instead (4401 | 4403: close at once)
- *   STUB_LIVE_EVERY=5 npm run dev:stub # live activity every 5 s rather than every 20–40 s
- *   STUB_BOOKING_CONFLICT=1 npm run dev:stub # every booking write answers 409
+ *   npm run dev                       # build, then :3121 signed in as an operator; open http://127.0.0.1:3121/sites
+ *   STUB_ROLE=admin npm run dev       # as an admin
+ *   STUB_ME=403 npm run dev           # the gate refusing: 401 | 403 | 503
+ *   STUB_MIN_SAMPLE=2 npm run dev     # percents (and bars) from 2 leads, not 30
+ *   STUB_POSTHOG=off npm run dev      # no PostHog project: the funnel and experiments without a PostHog link
+ *   STUB_PLACES_CONFLICT=1 npm run dev  # every place-settings save answers 409
+ *   STUB_PRICING_CONFLICT=1 npm run dev # every pricing save and removal answers 409
+ *   STUB_PRICING_INVALID=inputs.zone.labels.en npm run dev  # every pricing save and preview answers 422 there
+ *   STUB_LIVE=off npm run dev         # no live socket: the page polls instead (4401 | 4403: close at once)
+ *   STUB_LIVE_EVERY=5 npm run dev     # live activity every 5 s rather than every 20–40 s
+ *   STUB_BOOKING_CONFLICT=1 npm run dev # every booking write answers 409
  *
  * Live: every write above is announced on the socket, and someone else is busy
  * too — a new lead every 20–40 s, now and then a lead moved on, a place saved,
  * vifnet's pricing saved, a landing re-declaring its experiments, a booking
  * without a lead, a provider moving a booked slot.
  *
- * then `npm run dev` in another shell. Data is made up and says so ("stub").
+ * Data is made up and says so ("stub"). After a change under src/, `npm run build` and reload.
  */
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
+import { extname, join } from "node:path";
 import type { Duplex } from "node:stream";
 
-import { ALIASES } from "../src/entities/session/model/generated.ts";
+import { PERMISSIONS } from "../src/shared/api/generated.ts";
 import { BOOKING_STATUSES, arriveUnmatched, bookingDto, bookingWrite, bookingsRoute, providerMoves } from "./stub-bookings.ts";
 import { changed, every, liveUpgrade } from "./stub-live.ts";
 import { type StubDeal, dealDto, estimate, fixed, flowParam, quote, seedDeals } from "./stub-deals.ts";
@@ -104,8 +108,6 @@ leads[12]!.events.push(event("lead.messaged", { channel: "telegram", message_ref
 seedDeals(leads);
 leads[5]!.payments.push({ billed: 23_100, commission: 2_310, currency: "EUR" });
 leads[7]!.payments.push({ billed: 208_000, commission: 20_800, currency: "EUR" }, { billed: 9_050, commission: 0, currency: "GBP" });
-
-const sources: Json[] = [{ key_id: "aquafix-site", kind: "site", brands: ["aquafix"], created_at: minsAgo(60 * 24 * 10), revoked_at: null }];
 
 function leadDto(l: StubLead): Json {
   const t = (k: string) => l.times[k] ?? null;
@@ -210,11 +212,14 @@ function find(brand: string, id: string): StubLead | undefined {
   return leads.find((l) => l.brand === brand && l.lead_id === id);
 }
 
-/** Never granted: the stub's role is fixed, so a request waits for good. */
-const accessRequests: { need: string; requested_at: string }[] = [];
+/** The `sa:operator` and `sa:admin` aliases, as the conductor's assertion carries them to sites. */
+const GRANTS = {
+  operator: ["sa:sites:analysis:read", "sa:sites:work:leads:edit", "sa:sites:work:pii:see", "sa:sites:work:read"],
+  admin: PERMISSIONS,
+};
 
 async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
-  const path = url.pathname.replace(/^\/api\/v1/, "");
+  const path = url.pathname.replace(/^\/api\/sites/, "");
   const write = req.method !== "GET";
   if (write && req.headers["x-sa-csrf"] !== CSRF) return send(res, 403, { error: "csrf" });
   if (ME_FAILURE === "403") return send(res, 403, { error: "no access to the panel" });
@@ -222,16 +227,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
   if (ME_FAILURE === "401" || !signedIn(req)) return send(res, 401, { error: "sign in" }, { "set-cookie": "sa_session=; Path=/; Max-Age=0" });
 
   // The stub signs anyone in, as the backend's dev sign-in does: it says so.
-  if (path === "/me") return send(res, 200, { user_id: USER_ID, permissions: ALIASES[`sa:${ROLE}`], email: "stub@example.test", preferred_name: `Stub ${ROLE}`, dev_sign_in: true });
-  if (path === "/access/requests/mine") return send(res, 200, { requests: accessRequests });
-  if (path === "/access/requests" && write) {
-    const { need } = (await readJson(req)) as { need: string };
-    const standing = accessRequests.find((r) => r.need === need);
-    if (standing) return send(res, 200, standing);
-    const made = { need, requested_at: new Date().toISOString() };
-    accessRequests.push(made);
-    return send(res, 201, made);
-  }
+  if (path === "/me") return send(res, 200, { sub: USER_ID, permissions: GRANTS[ROLE] });
   if (path === "/funnel") return send(res, 200, funnel(url.searchParams.get("brand"), url.searchParams.get("by")));
   if (path.startsWith("/experiments")) {
     const reply = experimentsRoute(req.method ?? "GET", path, url.searchParams, write ? await readJson(req) : {}, ROLE, `stub-${ROLE}@example.test`);
@@ -288,24 +284,6 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     changed("leads", l.brand, l.lead_id);
     return send(res, 201, { brand: l.brand, lead_id: l.lead_id, event_id: randomUUID() });
   }
-  if (path === "/sources" && ROLE !== "admin") return send(res, 403, { error: "your permissions do not allow this" });
-  if (path === "/sources" && req.method === "GET") return send(res, 200, { sources });
-  if (path === "/sources" && req.method === "POST") {
-    const b = await readJson(req);
-    if (sources.some((s) => s.key_id === b.key_id)) return send(res, 409, { error: `a source ${String(b.key_id)} exists already` });
-    sources.push({ key_id: b.key_id, kind: b.kind, brands: b.brands, created_at: iso(now()), revoked_at: null });
-    changed("sources");
-    return send(res, 201, { key_id: b.key_id, secret: `stub-secret-${randomUUID()}` });
-  }
-  const revoke = path.match(/^\/sources\/([^/]+)$/);
-  if (revoke && req.method === "DELETE") {
-    const s = sources.find((x) => x.key_id === decodeURIComponent(revoke[1]!));
-    if (!s) return send(res, 404, { error: "not found" });
-    s.revoked_at = iso(now());
-    changed("sources");
-    return send(res, 204);
-  }
-
   if (path.startsWith("/bookings/")) {
     const reply = bookingsRoute(req.method ?? "GET", path, url.searchParams, write ? await readJson(req) : {}, (brand, id) => !!find(brand, id));
     if (reply) {
@@ -409,18 +387,36 @@ every(LIVE_EVERY === null ? 180 : LIVE_EVERY * 6, () => {
   changed("pricing", "vifnet");
 });
 
+const DIST = new URL("../dist/", import.meta.url).pathname;
+const HARNESS = new URL("../dev/index.html", import.meta.url).pathname;
+const TYPES: Record<string, string> = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".txt": "text/plain" };
+
+async function serveFile(res: ServerResponse, file: string): Promise<void> {
+  const body = await readFile(file);
+  res.writeHead(200, { "content-type": TYPES[extname(file)] ?? "application/octet-stream", "cache-control": "no-store" });
+  res.end(body);
+}
+
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
   if (url.pathname === "/auth/login") {
     // No concierge: signing in is instant. Plain names, as the backend uses over http.
-    res.writeHead(303, { location: "/", "set-cookie": ["sa_session=stub; Path=/; HttpOnly; SameSite=Lax", `sa_csrf=${CSRF}; Path=/; SameSite=Lax`] });
+    res.writeHead(303, { location: url.searchParams.get("return_to") ?? "/sites", "set-cookie": ["sa_session=stub; Path=/; HttpOnly; SameSite=Lax", `sa_csrf=${CSRF}; Path=/; SameSite=Lax`] });
     return res.end();
   }
   if (url.pathname === "/auth/logout" && req.method === "POST") {
     return send(res, 204, undefined, { "set-cookie": ["sa_session=; Path=/; Max-Age=0", "sa_csrf=; Path=/; Max-Age=0"] });
   }
-  if (url.pathname.startsWith("/api/v1/")) {
+  if (url.pathname.startsWith("/api/sites/")) {
     api(req, res, url).catch((e: unknown) => send(res, 500, { error: String(e) }));
+    return;
+  }
+  if (url.pathname.startsWith("/sites/mfe/")) {
+    serveFile(res, join(DIST, url.pathname.slice("/sites/mfe/".length))).catch(() => send(res, 404, { error: "not found" }));
+    return;
+  }
+  if (url.pathname === "/" || url.pathname.startsWith("/sites")) {
+    serveFile(res, HARNESS).catch((e: unknown) => send(res, 500, { error: String(e) }));
     return;
   }
   send(res, 404, { error: "not found" });

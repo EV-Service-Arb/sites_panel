@@ -1,0 +1,68 @@
+<!doctype html>
+<!-- The conductor's part, as little of it as the elements need (README.md): served by scripts/dev-stub.ts. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sites — harness</title>
+    <style>
+      /* The host's preflight and page colours, roughly: the elements bring neither. */
+      @layer base, reamfe;
+      @layer base {
+        *, ::before, ::after { box-sizing: border-box; border: 0 solid; margin: 0; padding: 0; }
+        a { color: inherit; text-decoration: inherit; }
+        button, input, select, textarea { font: inherit; color: inherit; background: transparent; }
+        body { font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: var(--background); color: var(--ink); }
+      }
+      header { display: flex; gap: 1rem; align-items: flex-start; padding: 0.5rem 1rem; border-bottom: 1px solid var(--border); }
+      #nav { border: 1px solid var(--border); border-radius: 6px; width: 18rem; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong>Service-Arb</strong>
+      <div id="nav"><mfe-sites-nav api="/api/sites" base="/sites" csrf-cookie="sa_csrf"></mfe-sites-nav></div>
+      <a href="/elsewhere">Elsewhere</a>
+    </header>
+    <main id="page"></main>
+    <script type="module">
+      const live = { status: "connecting" };
+      const tell = (type, detail) => window.dispatchEvent(new CustomEvent(type, { detail }));
+      const status = (next) => {
+        live.status = next;
+        tell("sa:live-status", { status: next });
+      };
+      window.addEventListener("sa:live-status-request", () => tell("sa:live-status", { status: live.status }));
+      window.addEventListener("sa:title-count", (e) => (document.title = e.detail.count > 0 ? `(${e.detail.count}) Leads — Sites — harness` : "Sites — harness"));
+      window.addEventListener("sa:unauthenticated", () => location.assign(`/auth/login?return_to=${encodeURIComponent(location.pathname + location.search)}`));
+      window.addEventListener("ev:navigate", (e) => {
+        e.preventDefault();
+        history.pushState(null, "", e.detail.href);
+        mount();
+      });
+      window.addEventListener("popstate", () => mount());
+
+      function connect() {
+        const ws = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/api/v1/live`);
+        ws.onopen = () => status("live");
+        ws.onmessage = (m) => tell("sa:live", JSON.parse(m.data));
+        ws.onclose = () => {
+          status("reconnecting");
+          setTimeout(connect, 2000);
+        };
+      }
+      connect();
+
+      // The host's own router: the panel on /sites/*, nothing elsewhere.
+      function mount() {
+        const page = document.getElementById("page");
+        const onSites = location.pathname === "/sites" || location.pathname.startsWith("/sites/");
+        const panel = page.querySelector("mfe-sites-panel");
+        if (onSites && !panel) page.innerHTML = '<mfe-sites-panel api="/api/sites" base="/sites" csrf-cookie="sa_csrf"></mfe-sites-panel>';
+        if (!onSites) page.innerHTML = "<p style='padding:1rem'>Not a sites page.</p>";
+      }
+      mount();
+      await import("/sites/mfe/mfe-sites.js");
+    </script>
+  </body>
+</html>
