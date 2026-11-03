@@ -27,7 +27,7 @@ sa_auth = { git = "https://github.com/EV-Service-Arb/site_conductor", branch = "
 axum = "0.8"
 base64 = "0.22"
 chacha20poly1305 = "0.10"
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 color-eyre = "0.6"
 ev_lib = { version = "0.24.2", default-features = false }
 eyre = "0.6"

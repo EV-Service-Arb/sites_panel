@@ -37,7 +37,7 @@ tests/               vitest, in Node: the rules the screens obey live in plain m
 
 ```sh
 npm ci
-npm run dev          # build, then :3121 (STUB_PORT) — open /sites; STUB_ROLE=admin, STUB_ME=401|403|503,
+npm run dev          # build, then on STUB_PORT (the dev shell's) — open /sites; STUB_ROLE=admin, STUB_ME=401|403|503,
                      # STUB_MIN_SAMPLE=2, STUB_POSTHOG=off, STUB_PLACES_CONFLICT=1, STUB_LIVE=off,
                      # STUB_LIVE_EVERY=5, STUB_BOOKING_CONFLICT=1 (scripts/dev-stub.ts says what each does)
 ```

@@ -10,6 +10,8 @@
 
   outputs = { self, v_flakes }:
     let
+      # the first of sites' ten in SA_PORT_RANGE: site_conductor's docs/port_range.md
+      SA_PORTS = 52820;
       inherit (v_flakes) flake-utils pre-commit-hooks;
       manifest = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package;
       # The binary (crates/panel_server, `[[bin]] name`), the image and the release all go
@@ -26,8 +28,7 @@
         # would break every target on a mac, not just the ones that link.
         stdenv = if pkgs.stdenv.isDarwin then pkgs.stdenv else pkgs.stdenvAdapters.useMoldLinker pkgs.stdenv;
 
-        # Single source for the container's exposed port and the prod bind. The binary's
-        # own default (`panel_server::DEFAULT_BIND`) is the same port on 127.0.0.1.
+        # Single source for the container's exposed port and the prod bind.
         port = 59121;
 
         # `nix run .#gen`: the front end's mirror of the Rust (crates/panel_gen), committed.
@@ -325,6 +326,8 @@
             ] ++ pre-commit-check.enabledPackages ++ combined.enabledPackages;
 
             env = {
+              PANEL_BIND = "127.0.0.1:${toString SA_PORTS}";
+              STUB_PORT = toString (SA_PORTS + 3); # frontend/'s `npm run dev`
               RUST_BACKTRACE = 1;
               RUST_LIB_BACKTRACE = 0;
             };

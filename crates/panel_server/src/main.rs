@@ -23,7 +23,6 @@ use panel_core::{
 	place::{self, Editor},
 };
 use panel_server::{
-	DEFAULT_BIND,
 	capture::{self, CaptureApi},
 	conductor, google_calendar, http,
 	scope_ledger::{self, ScopeLedger},
@@ -49,7 +48,8 @@ enum Cmd {
 	Migrate,
 	/// The HTTP API.
 	Serve {
-		#[arg(long, default_value = DEFAULT_BIND)]
+		/// The dev shell sets PANEL_BIND to this machine's port.
+		#[arg(long, env = "PANEL_BIND")]
 		bind: SocketAddr,
 	},
 	/// Rebuild leads, calls and payments from the journal, judging every event against the

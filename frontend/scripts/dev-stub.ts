@@ -5,7 +5,7 @@
  * socket at /api/v1/live and a sign-in that is instant. Same gate as the conductor: 401 without a session, CSRF
  * on writes.
  *
- *   npm run dev                       # build, then :3121 signed in as an operator; open http://127.0.0.1:3121/sites
+ *   npm run dev                       # build, then on STUB_PORT (the dev shell's) signed in as an operator; open /sites there
  *   STUB_ROLE=admin npm run dev       # as an admin
  *   STUB_ME=403 npm run dev           # the gate refusing: 401 | 403 | 503
  *   STUB_MIN_SAMPLE=2 npm run dev     # percents (and bars) from 2 leads, not 30
@@ -38,7 +38,8 @@ import { addedPlaces, placeFlags, placeSettingsRoute, touchPlace } from "./stub-
 import { experimentsRoute } from "./stub-experiments.ts";
 import { pricingRoute, touchPricing } from "./stub-pricing.ts";
 
-const PORT = Number(process.env.STUB_PORT ?? 3121);
+if (!process.env.STUB_PORT) throw new Error("STUB_PORT: the port to serve on; the dev shell sets it");
+const PORT = Number(process.env.STUB_PORT);
 const ROLE = process.env.STUB_ROLE === "admin" ? "admin" : "operator";
 const ME_FAILURE = process.env.STUB_ME;
 const CSRF = "stub-csrf";

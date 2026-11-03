@@ -15,9 +15,9 @@ What sites_panel needs from whoever starts it:
 | `PANEL_MFE_DIR` | `frontend/dist` (`npm run build` in `frontend/`); unset, no `/mfe` |
 
 ```sh
-cargo r -p panel_server -- serve            # 127.0.0.1:59121
+cargo r -p panel_server -- serve            # on PANEL_BIND, the dev shell's
 cargo r -p panel_server -- place register aquafix royat
 ```
 
-The landings read their places, pricing and experiments from `http://127.0.0.1:59121/api/internal`
+The landings read their places, pricing and experiments from `<sites_panel>/api/internal`
 (`SITES_PANEL_INTERNAL_URL`, which they extend with `/brands/<brand>/…`) and send their leads to the conductor's ingest.
