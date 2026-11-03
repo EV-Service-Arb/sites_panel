@@ -30,8 +30,8 @@ crates/panel_core/                   no I/O: no database, network, clock or rand
   src/fact.rs                        the registered types, typed (Fact), and what each needs of
                                      its subject
   src/lead.rs                        Stage, and fold: a lead's facts → its stage and stage times
-  src/notify.rs                      the notes: the rules' names, the texts and their code
-                                     entities, the buttons
+  src/notify.rs                      the notes: the texts and their code entities, the buttons
+                                     (the rules and the wire shape are `sa_alerts`')
   src/experiment.rs                  a brand's experiments as configuration: a declaration
                                      checked, an admin's patch, the fold to declared / override /
                                      effective, the landings' rules for an override field
@@ -388,7 +388,7 @@ elsewhere tells the lead it left and the one it joined. `at` is when the write c
 
 ### Notifications
 
-What the conductor's Telegram tells of the sites. The fan-out here finds what is due; who gets
+What the conductor's alerts tell of the sites. The fan-out here finds what is due; who gets
 it, the rules' toggles, delivery, pacing, retries and the buttons' callback data are the
 conductor's.
 
@@ -400,8 +400,9 @@ fan-out (2 s)    new leads (their counted creation ≤ 1 h old, still `created`;
                  → `fanout` claims (rule, event) once and, in the same transaction, appends
                  one note to `notifications`
 GET /api/conductor/notifications?after=<seq>&limit=<1..500>
-                 {notes: [{seq, rule, event_id, created_at, text, text_pii | null,
-                  skip_user | null, buttons}], next}: the notes after `after`, oldest first
+                 `sa_alerts::NotePage` {notes: [{seq, rule, event_id, created_at, text,
+                  text_pii | null, skip_user | null, buttons}], next}: the notes after `after`,
+                  oldest first, each passing `Note::check` against sites' feed
 ```
 
 - **`seq`** is AUTOINCREMENT under the one writer, so it grows in commit order and is never

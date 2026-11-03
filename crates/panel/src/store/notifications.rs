@@ -3,7 +3,8 @@
 
 use eyre::WrapErr;
 use jiff::Timestamp;
-use panel_core::{fact::LeadSuspect, notify::Rule};
+use panel_core::fact::LeadSuspect;
+use sa_alerts::Rule;
 use sqlx::{SqliteConnection, types::Json};
 use uuid::Uuid;
 

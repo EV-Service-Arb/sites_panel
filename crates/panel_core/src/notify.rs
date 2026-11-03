@@ -2,42 +2,10 @@
 //! the rules' names, what a message says and the buttons under it. Who gets it, when and how is
 //! the conductor's.
 
-use std::fmt;
-
 use jiff::SignedDuration;
+use sa_alerts::Rule;
 
 use crate::fact::LeadSuspect;
-
-/// What a note is about; the conductor holds who may get each and whether it is on.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub enum Rule {
-	/// A lead came in: brand, location, what is needed and the phone, with buttons.
-	NewLead,
-	/// A lead has waited past [`crate::funnel::CONTACT_SLA`] for its first contact: once.
-	ContactOverdue,
-	/// A payment was recorded.
-	PaymentReceived,
-	/// A slot was booked, moved or canceled — by the customer through a provider, or by an
-	/// operator.
-	Booked,
-}
-
-impl Rule {
-	pub fn as_str(self) -> &'static str {
-		match self {
-			Self::NewLead => "new_lead",
-			Self::ContactOverdue => "contact_overdue",
-			Self::PaymentReceived => "payment_received",
-			Self::Booked => "booked",
-		}
-	}
-}
-
-impl fmt::Display for Rule {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.write_str(self.as_str())
-	}
-}
 
 /// The language of the messages (one per deployment, `TELEGRAM_LOCALE`).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

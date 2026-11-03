@@ -34,8 +34,9 @@ use panel::{
 };
 use panel_core::{
 	ids::BrandId,
-	notify::{Button, Locale, Rendered},
+	notify::{Button as SiteButton, Locale, Rendered},
 };
+use sa_alerts::{Call, Note, NotePage, NoteText, Origin};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::broadcast::{Receiver, error::RecvError};
@@ -172,53 +173,65 @@ struct NotesQuery {
 	limit: i64,
 }
 
-fn text(r: &Rendered) -> Value {
-	let entities: Vec<Value> = r.code.iter().map(|e| json!({"type": "code", "offset": e.offset, "length": e.length})).collect();
-	json!({ "text": r.text, "entities": entities })
+fn text(r: &Rendered) -> NoteText {
+	let entities = r.code.iter().map(|e| json!({"type": "code", "offset": e.offset, "length": e.length})).collect();
+	NoteText { text: r.text.clone(), entities }
 }
 
 /// A button's action, as the conductor calls it for the user who pressed.
-fn button(b: Button, (brand, lead): &(String, String), locale: Locale) -> Value {
+fn button(b: SiteButton, (brand, lead): &(String, String), locale: Locale) -> sa_alerts::Button {
 	let call = match b {
-		Button::Take => json!({"method": "POST", "path": format!("/api/v1/leads/{brand}/{lead}/stage"), "body": {"stage": "contacted"}}),
-		Button::NoAnswer => json!({"method": "POST", "path": format!("/api/v1/leads/{brand}/{lead}/no_answer"), "body": null}),
+		SiteButton::Take => Call {
+			method: "POST".into(),
+			path: format!("/api/v1/leads/{brand}/{lead}/stage"),
+			body: json!({"stage": "contacted"}),
+		},
+		SiteButton::NoAnswer => Call {
+			method: "POST".into(),
+			path: format!("/api/v1/leads/{brand}/{lead}/no_answer"),
+			body: Value::Null,
+		},
 	};
-	json!({
-		"id": b.as_str(),
-		"label": b.label(locale),
-		"pressed": b.pressed(locale),
-		"call": call,
-		"leaves": b.leaves().iter().map(|l| l.as_str()).collect::<Vec<_>>(),
-	})
+	sa_alerts::Button {
+		id: b.as_str().into(),
+		label: b.label(locale).into(),
+		pressed: b.pressed(locale).into(),
+		call,
+		leaves: b.leaves().iter().map(|left| left.as_str().into()).collect(),
+	}
 }
 
-fn note(n: &Notification, locale: Locale) -> ApiResult<Value> {
+fn note(n: &Notification, locale: Locale) -> ApiResult<Note> {
 	let buttons = match (&n.lead, n.buttons.as_slice()) {
 		(_, []) => Vec::new(),
-		(Some(lead), buttons) => buttons.iter().map(|b| button(*b, lead, locale)).collect(),
+		(Some(lead), buttons) => buttons.iter().map(|button| self::button(*button, lead, locale)).collect(),
 		(None, _) => return Err(ApiError::Internal(eyre::eyre!("note {} has buttons and no lead", n.seq))),
 	};
-	Ok(json!({
-		"seq": n.seq,
-		"rule": n.rule,
-		"event_id": n.event_id.to_string(),
-		"created_at": n.created_at.to_string(),
-		"text": text(&n.text),
-		"text_pii": n.text_pii.as_ref().map(text),
-		"skip_user": n.skip_user.map(|u| u.to_string()),
-		"buttons": buttons,
-	}))
+	let note = Note {
+		seq: n.seq,
+		rule: n.rule,
+		event_id: n.event_id,
+		created_at: n.created_at,
+		text: text(&n.text),
+		text_pii: n.text_pii.as_ref().map(text),
+		skip_user: n.skip_user,
+		buttons,
+		gmbs: Vec::new(),
+		photo: None,
+	};
+	note.check(Origin::Sites).map_err(|error| ApiError::Internal(error.into()))?;
+	Ok(note)
 }
 
-async fn notifications(State(r): State<Reads>, q: Result<Query<NotesQuery>, axum::extract::rejection::QueryRejection>) -> ApiResult<Json<Value>> {
+async fn notifications(State(r): State<Reads>, q: Result<Query<NotesQuery>, axum::extract::rejection::QueryRejection>) -> ApiResult<Json<NotePage>> {
 	let Query(q) = q.map_err(|e| ApiError::BadRequest(e.body_text()))?;
 	if !(1..=MAX_NOTES).contains(&q.limit) || q.after < 0 {
 		return Err(ApiError::BadRequest(format!("limit is 1–{MAX_NOTES}, after ≥ 0")));
 	}
 	let notes = r.panel.notifications(q.after, q.limit).await?;
-	let next = notes.last().map_or(q.after, |n| n.seq);
-	let notes = notes.iter().map(|n| note(n, r.locale)).collect::<ApiResult<Vec<_>>>()?;
-	Ok(Json(json!({ "notes": notes, "next": next })))
+	let next = notes.last().map_or(q.after, |note| note.seq);
+	let notes = notes.iter().map(|note| self::note(note, r.locale)).collect::<ApiResult<Vec<_>>>()?;
+	Ok(Json(NotePage { notes, next }))
 }
 
 async fn received(State(r): State<Reads>) -> ApiResult<Json<Value>> {

@@ -12,8 +12,9 @@ use jiff::{SignedDuration, Timestamp};
 use panel_core::{
 	funnel::CONTACT_SLA,
 	ids::{BrandId, LeadId},
-	notify::{BookingChange, LeadNote, Locale, Note, Rendered, Rule},
+	notify::{BookingChange, LeadNote, Locale, Note, Rendered},
 };
+use sa_alerts::Rule;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
@@ -54,7 +55,7 @@ const BATCH: i64 = 50;
 #[derive(Clone, Debug)]
 pub struct Notification {
 	pub seq: i64,
-	pub rule: String,
+	pub rule: Rule,
 	pub event_id: Uuid,
 	pub created_at: Timestamp,
 	pub text: Rendered,
@@ -258,7 +259,7 @@ impl Panel {
 					.collect::<eyre::Result<_>>()?;
 				Ok(Notification {
 					seq: n.seq,
-					rule: n.rule,
+					rule: n.rule.parse().wrap_err_with(|| format!("note {} has an unknown rule", n.seq))?,
 					event_id: n.event_id,
 					created_at: n.created_at,
 					text: texts.text.into(),

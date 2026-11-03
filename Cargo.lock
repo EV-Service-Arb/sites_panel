@@ -2430,6 +2430,7 @@ dependencies = [
  "panel",
  "panel_contracts",
  "panel_core",
+ "sa_alerts",
  "sa_auth",
  "serde",
  "serde_json",
@@ -2465,6 +2466,7 @@ version = "0.1.0"
 dependencies = [
  "ev_lib",
  "jiff",
+ "sa_alerts",
  "sa_auth",
  "serde_json",
  "thiserror",
@@ -2500,6 +2502,7 @@ dependencies = [
  "panel_core",
  "panel_server",
  "reqwest",
+ "sa_alerts",
  "sa_auth",
  "serde",
  "serde_json",
@@ -3198,9 +3201,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
+name = "sa_alerts"
+version = "0.1.0"
+source = "git+https://github.com/EV-Service-Arb/site_conductor?branch=main#a43ab07478fb76d5180d417aaee4f0bba4069405"
+dependencies = [
+ "jiff",
+ "sa_auth",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "sa_auth"
 version = "0.1.0"
-source = "git+https://github.com/EV-Service-Arb/site_conductor?branch=main#89163ef6547bec14516b537d13896da384b5c1a6"
+source = "git+https://github.com/EV-Service-Arb/site_conductor?branch=main#a43ab07478fb76d5180d417aaee4f0bba4069405"
 dependencies = [
  "base64 0.22.1",
  "concierge_iam",

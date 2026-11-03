@@ -22,6 +22,7 @@ hmac.workspace = true
 jiff.workspace = true
 panel_contracts.workspace = true
 panel_core.workspace = true
+sa_alerts.workspace = true
 sa_auth.workspace = true
 serde.workspace = true
 serde_json.workspace = true
