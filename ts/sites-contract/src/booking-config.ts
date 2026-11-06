@@ -1,6 +1,6 @@
 import { isBookingProvider, isPageProvider } from "./booking.js";
-import { BOOKING_LIMITS as LIMIT } from "./generated/booking.js";
-import type { BookingCode } from "./generated/codes.js";
+import { BOOKING_LIMITS as LIMIT } from "./generated/booking-limits.js";
+import type { BookingCode } from "./generated/booking-codes.js";
 import type { BookingConfig, PageProvider } from "./generated/types.js";
 import { at, isObject } from "./text.js";
 

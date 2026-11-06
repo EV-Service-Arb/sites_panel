@@ -1,11 +1,4 @@
-export * from "./generated/booking.js";
-export * from "./generated/codes.js";
-export * from "./generated/experiments.js";
-export * from "./generated/lead.js";
-export * from "./generated/place.js";
-export * from "./generated/pricing.js";
-export type * from "./generated/types.js";
-export * from "./generated/wire.js";
+export * from "./generated/index.js";
 export { bookingRequested, isBookingProvider, isLeadRef, isPageProvider, preferredDateInWindow, type BookingRequested } from "./booking.js";
 export { checkBookingConfig, checkBookingUrl, type BookingProblem } from "./booking-config.js";
 export { declarationProblem, parseLiveExperiments, type DeclarationProblem } from "./experiments.js";

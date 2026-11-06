@@ -8,7 +8,7 @@ the panel's front end.
 
 ```text
 src/generated/*.ts         panel_core's shapes, vocabularies and limits (`nix run .#gen`), a
-                           module per domain
+                           module per constant
 src/generated/wire.ts      the protos as protojson: the envelope, every type's properties
 src/*.ts                   the one TS implementation of what both sides run, held to
                            contracts/vectors with panel_core:

@@ -1,4 +1,4 @@
-import { EXPERIMENT_LIMITS } from "./generated/experiments.js";
+import { EXPERIMENT_LIMITS } from "./generated/experiment-limits.js";
 import type { LiveExperiments, LiveOverride } from "./generated/types.js";
 import type { ExperimentDeclaration } from "./generated/wire.js";
 import { charCount, isObject, trim } from "./text.js";

@@ -1,4 +1,4 @@
-import type { PricingInputKind } from "./generated/pricing.js";
+import type { PricingInputKind } from "./generated/input-kinds.js";
 import type { PricingInput, PricingModel } from "./generated/types.js";
 
 /** The answers to an estimate's inputs: input id → option id. */

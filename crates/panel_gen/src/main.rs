@@ -5,7 +5,7 @@
 
 mod wire;
 
-use std::path::Path;
+use std::{fs, path::Path};
 
 use ev_lib::ts_gen::Ts;
 use panel::experiment::LiveExperiments;
@@ -43,107 +43,17 @@ fn main() {
 	frontend(&root.join("frontend/src"));
 }
 
-/// One module per domain, so a page that reads one vocabulary bundles that module's constants
-/// alone: a bundler keeps a module's every export once one is used. The types are erased.
+/// Each constant a module of its own, the types one module (erased), and an index of them:
+/// a bundler keeps a module's every export once one is used, so a page bundles exactly the
+/// constants it reads.
 fn contract(dir: &Path) {
+	fs::remove_dir_all(dir).expect("generated/ is the generator's alone");
 	Ts::write(&dir.join("types.ts"), &[Ts::types::<(PricingModel, PlaceLive, LiveExperiments)>()]);
-	Ts::write(
-		&dir.join("pricing.ts"),
-		&[
-			Ts::Value {
-				name: "PRICING_FORMAT",
-				value: pricing::FORMAT.into(),
-			},
-			Ts::Const {
-				name: "PRICING_CURRENCY",
-				value: pricing::CURRENCY,
-			},
-			value("PRICING_LIMITS", pricing::LIMITS),
-			Ts::Union {
-				name: "INPUT_KINDS",
-				ty: "PricingInputKind",
-				items: InputKind::ALL.map(InputKind::as_str).into(),
-			},
-		],
-	);
-	Ts::write(
-		&dir.join("booking.ts"),
-		&[
-			words("BOOKING_PROVIDERS", Provider::ALL.map(Provider::as_str)),
-			words("PAGE_PROVIDERS", PageProvider::ALL.map(PageProvider::as_str)),
-			value("BOOKING_LIMITS", booking::LIMITS),
-			Ts::Union {
-				name: "BOOKING_STATUSES",
-				ty: "BookingStatus",
-				items: BookingStatus::ALL.map(BookingStatus::as_str).into(),
-			},
-			Ts::Union {
-				name: "DAY_PARTS",
-				ty: "DayPart",
-				items: DayPart::ALL.map(DayPart::as_str).into(),
-			},
-		],
-	);
-	Ts::write(
-		&dir.join("place.ts"),
-		&[
-			words("DAYS", DayOfWeek::ALL.map(DayOfWeek::as_str)),
-			words("MESSENGERS", Messenger::ALL.map(Messenger::as_str)),
-			Ts::Union {
-				name: "PLACE_FIELDS",
-				ty: "PlaceField",
-				items: FIELDS.into(),
-			},
-			value("PLACE_LIMITS", place::LIMITS),
-		],
-	);
-	Ts::write(
-		&dir.join("lead.ts"),
-		&[
-			value("LEAD_LIMITS", fact::LIMITS),
-			Ts::Union {
-				name: "LEAD_CHANNELS",
-				ty: "LeadChannel",
-				items: LeadChannel::ALL.map(LeadChannel::as_str).into(),
-			},
-			Ts::Union {
-				name: "SITE_CHANNELS",
-				ty: "SiteChannel",
-				items: LeadChannel::SITE.map(LeadChannel::as_str).into(),
-			},
-			Ts::Union {
-				name: "LEAD_SUSPECTS",
-				ty: "LeadSuspect",
-				items: LeadSuspect::ALL.map(LeadSuspect::as_str).into(),
-			},
-			Ts::Union {
-				name: "LEAD_FLOWS",
-				ty: "LeadFlow",
-				items: LeadFlow::ALL.map(LeadFlow::as_str).into(),
-			},
-		],
-	);
-	Ts::write(&dir.join("experiments.ts"), &[value("EXPERIMENT_LIMITS", experiment::LIMITS)]);
-	Ts::write(
-		&dir.join("codes.ts"),
-		&[
-			Ts::Union {
-				name: "PRICING_CODES",
-				ty: "PricingCode",
-				items: pricing::Code::ALL.map(pricing::Code::as_str).into(),
-			},
-			Ts::Union {
-				name: "BOOKING_CODES",
-				ty: "BookingCode",
-				items: booking::Code::ALL.map(booking::Code::as_str).into(),
-			},
-			Ts::Union {
-				name: "PLACE_CODES",
-				ty: "PlaceCode",
-				items: place::Code::ALL.map(place::Code::as_str).into(),
-			},
-		],
-	);
+	let site_events = panel::wire::REGISTERED
+		.iter()
+		.filter(|(ty, ..)| may_write(SourceKind::Site, ty))
+		.map(|(ty, version, _)| &*format!("{ty}@{version}").leak()) // Ts::Union takes &'static str; one-shot generator
+		.collect();
 	Ts::write(
 		&dir.join("wire.ts"),
 		&[
@@ -155,14 +65,96 @@ fn contract(dir: &Path) {
 			Ts::Union {
 				name: "SITE_EVENTS",
 				ty: "SiteEventKey",
-				items: panel::wire::REGISTERED
-					.iter()
-					.filter(|(ty, ..)| may_write(SourceKind::Site, ty))
-					.map(|(ty, version, _)| &*format!("{ty}@{version}").leak()) // Ts::Union takes &'static str; one-shot generator
-					.collect(),
+				items: site_events,
 			},
 		],
 	);
+	let constants = [
+		Ts::Value {
+			name: "PRICING_FORMAT",
+			value: pricing::FORMAT.into(),
+		},
+		Ts::Const {
+			name: "PRICING_CURRENCY",
+			value: pricing::CURRENCY,
+		},
+		value("PRICING_LIMITS", pricing::LIMITS),
+		Ts::Union {
+			name: "INPUT_KINDS",
+			ty: "PricingInputKind",
+			items: InputKind::ALL.map(InputKind::as_str).into(),
+		},
+		words("BOOKING_PROVIDERS", Provider::ALL.map(Provider::as_str)),
+		words("PAGE_PROVIDERS", PageProvider::ALL.map(PageProvider::as_str)),
+		value("BOOKING_LIMITS", booking::LIMITS),
+		Ts::Union {
+			name: "BOOKING_STATUSES",
+			ty: "BookingStatus",
+			items: BookingStatus::ALL.map(BookingStatus::as_str).into(),
+		},
+		Ts::Union {
+			name: "DAY_PARTS",
+			ty: "DayPart",
+			items: DayPart::ALL.map(DayPart::as_str).into(),
+		},
+		words("DAYS", DayOfWeek::ALL.map(DayOfWeek::as_str)),
+		words("MESSENGERS", Messenger::ALL.map(Messenger::as_str)),
+		Ts::Union {
+			name: "PLACE_FIELDS",
+			ty: "PlaceField",
+			items: FIELDS.into(),
+		},
+		value("PLACE_LIMITS", place::LIMITS),
+		value("LEAD_LIMITS", fact::LIMITS),
+		Ts::Union {
+			name: "LEAD_CHANNELS",
+			ty: "LeadChannel",
+			items: LeadChannel::ALL.map(LeadChannel::as_str).into(),
+		},
+		Ts::Union {
+			name: "SITE_CHANNELS",
+			ty: "SiteChannel",
+			items: LeadChannel::SITE.map(LeadChannel::as_str).into(),
+		},
+		Ts::Union {
+			name: "LEAD_SUSPECTS",
+			ty: "LeadSuspect",
+			items: LeadSuspect::ALL.map(LeadSuspect::as_str).into(),
+		},
+		Ts::Union {
+			name: "LEAD_FLOWS",
+			ty: "LeadFlow",
+			items: LeadFlow::ALL.map(LeadFlow::as_str).into(),
+		},
+		value("EXPERIMENT_LIMITS", experiment::LIMITS),
+		Ts::Union {
+			name: "PRICING_CODES",
+			ty: "PricingCode",
+			items: pricing::Code::ALL.map(pricing::Code::as_str).into(),
+		},
+		Ts::Union {
+			name: "BOOKING_CODES",
+			ty: "BookingCode",
+			items: booking::Code::ALL.map(booking::Code::as_str).into(),
+		},
+		Ts::Union {
+			name: "PLACE_CODES",
+			ty: "PlaceCode",
+			items: place::Code::ALL.map(place::Code::as_str).into(),
+		},
+	];
+	let mut modules = vec!["types".to_owned(), "wire".to_owned()];
+	for ts in constants {
+		let (Ts::Value { name, .. } | Ts::Const { name, .. } | Ts::Union { name, .. }) = &ts else {
+			unreachable!("a constant")
+		};
+		let module = name.to_lowercase().replace('_', "-");
+		Ts::write(&dir.join(format!("{module}.ts")), &[ts]);
+		modules.push(module);
+	}
+	modules.sort();
+	let index: String = modules.iter().map(|m| format!("export * from \"./{m}.js\";\n")).collect();
+	fs::write(dir.join("index.ts"), format!("// AUTO-GENERATED by `nix run .#gen` — do not edit.\n\n{index}")).expect("write the generated index");
 }
 
 /// The panel's own: what only its front end reads.

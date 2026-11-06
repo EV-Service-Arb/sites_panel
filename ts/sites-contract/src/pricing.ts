@@ -1,5 +1,8 @@
-import type { PricingCode } from "./generated/codes.js";
-import { INPUT_KINDS, PRICING_CURRENCY, PRICING_FORMAT, PRICING_LIMITS as LIMIT, type PricingInputKind } from "./generated/pricing.js";
+import type { PricingCode } from "./generated/pricing-codes.js";
+import { INPUT_KINDS, type PricingInputKind } from "./generated/input-kinds.js";
+import { PRICING_CURRENCY } from "./generated/pricing-currency.js";
+import { PRICING_FORMAT } from "./generated/pricing-format.js";
+import { PRICING_LIMITS as LIMIT } from "./generated/pricing-limits.js";
 import type { NeedPricing, PricingInput, PricingModel } from "./generated/types.js";
 import { effects, mulBp, type PricingLabels } from "./price.js";
 import { at, isDate, isObject, trim, type Json } from "./text.js";
