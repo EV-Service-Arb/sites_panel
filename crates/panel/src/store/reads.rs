@@ -181,6 +181,13 @@ macro_rules! lead_select {
 	};
 }
 
+macro_rules! overdue {
+	() => {
+		"l.stage = 'created' AND l.contacted_at IS NULL AND l.created_at < "
+	};
+}
+pub(super) use overdue;
+
 /// Which leads to list.
 #[derive(Clone, Debug, Default)]
 pub struct LeadFilter {
@@ -217,7 +224,9 @@ pub async fn leads(conn: &mut SqliteConnection, f: &LeadFilter) -> eyre::Result<
 	sqlx::query_as::<_, Row>(concat!(
 		lead_select!(),
 		"WHERE ($1 IS NULL OR l.stage = $1) AND ($2 IS NULL OR l.brand_id = $2) AND ($3 IS NULL OR l.location_id = $3) \
-		 AND ($4 IS NULL OR (l.stage = 'created' AND l.contacted_at IS NULL AND l.created_at < $4)) \
+		 AND ($4 IS NULL OR (",
+		overdue!(),
+		"$4)) \
 		 AND ($5 IS NULL OR (COALESCE(l.created_at, l.last_event_at), l.brand_id, l.lead_id) < ($5, $6, $7)) \
 		 AND ($9 IS NULL OR l.created_at >= $9) AND ($10 IS NULL OR l.created_at < $10) \
 		 AND ($11 IS NULL OR (l.suspect IS NOT NULL) = $11) AND ($12 IS NULL OR l.flow = $12) \
@@ -526,8 +535,11 @@ pub async fn places(conn: &mut SqliteConnection) -> eyre::Result<Vec<PlaceRow>> 
 /// them wait for their first contact since before `waiting_since_before`.
 pub async fn stage_counts(conn: &mut SqliteConnection, brand: Option<&BrandId>, location: Option<&LocationId>, waiting_since_before: Timestamp) -> eyre::Result<(Vec<(Stage, u64)>, u64)> {
 	let rows: Vec<(String, i64, i64)> = sqlx::query_as(
-		"SELECT stage, count(*), count(*) FILTER (WHERE stage = 'created' AND contacted_at IS NULL AND created_at < $3) \
-		 FROM leads WHERE ($1 IS NULL OR brand_id = $1) AND ($2 IS NULL OR location_id = $2) GROUP BY stage",
+		concat!(
+			"SELECT l.stage, count(*), count(*) FILTER (WHERE ",
+			overdue!(),
+			"$3) FROM leads l WHERE ($1 IS NULL OR l.brand_id = $1) AND ($2 IS NULL OR l.location_id = $2) GROUP BY l.stage"
+		),
 	)
 	.bind(brand.map(BrandId::as_str))
 	.bind(location.map(LocationId::as_str))

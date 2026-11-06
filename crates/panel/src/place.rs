@@ -3,8 +3,9 @@
 //! read, the caller's view of them checked, the new ones written and the change journaled.
 
 use eyre::WrapErr;
-use jiff::Timestamp;
+use jiff::{SignedDuration, Timestamp};
 use panel_core::{
+	funnel,
 	ids::{BrandId, LocationId},
 	place::{Change, ChangeKind, Editor, FieldErrors, PlaceSettings},
 };
@@ -221,10 +222,10 @@ impl Panel {
 		Ok(view(brand, slug, stored))
 	}
 
-	/// Every place with a GMB: `(gmb_id, brand, slug)`.
-	pub async fn gmbs(&self) -> eyre::Result<Vec<(i64, String, String)>> {
+	/// Every place with a GMB: `(gmb_id, brand, slug, leads in the last 7 days, overdue leads)`.
+	pub async fn gmbs(&self, now: Timestamp) -> eyre::Result<Vec<(i64, String, String, u32, u32)>> {
 		let mut conn = self.store.pool().acquire().await.wrap_err("a connection")?;
-		places::gmbs(&mut conn).await
+		places::gmbs(&mut conn, now - SignedDuration::from_hours(7 * 24), now - funnel::CONTACT_SLA).await
 	}
 
 	/// Takes a place off the sites (`true`) or puts it back (`false`); its settings are kept.

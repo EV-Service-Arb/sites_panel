@@ -12,7 +12,7 @@
 //! POST /api/v1/places/{brand}/{slug}/withdraw | /restore   admin  → 200 as GET
 //! PUT  /api/v1/places/{brand}/{slug}/gmb          admin    {gmb_id: n | null}
 //!                                                              → 200 as GET; 404; 409 {"error": "gmb_taken"}
-//! GET  /api/v1/gmbs                                            {"<gmb_id>": {brand, location}}
+//! GET  /api/v1/gmbs                                            {"<gmb_id>": {brand, location, leads_7d, overdue}}
 //! POST /api/v1/places                                admin    {brand, slug} → 201 as GET;
 //!                                                              409 {"error": "exists"}
 //! GET  /api/internal/brands/{brand}/locations/{slug}?locale    PlaceLive, `{}` when none or
@@ -310,10 +310,10 @@ async fn link_gmb(
 }
 
 async fn gmbs(State(panel): State<Panel>) -> PlaceResult<Json<Value>> {
-	let rows = panel.gmbs().await?;
+	let rows = panel.gmbs(Timestamp::now()).await?;
 	let by_id: serde_json::Map<String, Value> = rows
 		.into_iter()
-		.map(|(id, brand, location)| (id.to_string(), json!({ "brand": brand, "location": location })))
+		.map(|(id, brand, location, leads_7d, overdue)| (id.to_string(), json!({ "brand": brand, "location": location, "leads_7d": leads_7d, "overdue": overdue })))
 		.collect();
 	Ok(Json(Value::Object(by_id)))
 }

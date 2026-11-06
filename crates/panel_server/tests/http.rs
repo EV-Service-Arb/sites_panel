@@ -315,3 +315,48 @@ async fn a_bot_looks_a_lead_up_by_its_ref() {
 	assert_eq!(body["messaged_channel"], "telegram");
 	assert!(body["messaged_at"].is_string());
 }
+
+/// `/gmbs` counts, per linked place, the leads of the last week and those waiting too long,
+/// however old.
+#[tokio::test]
+async fn a_gmb_says_how_many_leads_came_and_how_many_wait() {
+	let db = TestDb::create().await;
+	let conductor = Conductor::new("k1");
+	let panel = panel(&db).await;
+	let now = Timestamp::now();
+	let ago = |d: jiff::SignedDuration| now - d;
+	let lead = |at: Timestamp, id: &str| messenger_lead(at, "aquafix", id, "whatsapp", "AQ-7K3F");
+	let contacted = event(
+		"lead.contacted",
+		ago(jiff::SignedDuration::from_hours(24 * 20)),
+		"panel",
+		json!({"brandId": "aquafix", "locationId": "royat", "leadId": "L-old"}),
+		json!({}),
+	);
+	let events = [
+		lead(ago(jiff::SignedDuration::from_hours(2)), "L-late"),
+		lead(ago(jiff::SignedDuration::from_mins(5)), "L-fresh"),
+		lead(ago(jiff::SignedDuration::from_hours(24 * 21)), "L-old"),
+	];
+	let got = panel
+		.ingest(&grant("aquafix-site", SourceKind::Site, &["aquafix"]), &batch("aquafix-site", &events), now)
+		.await
+		.unwrap();
+	assert!(got.iter().all(|v| v.outcome == panel::Outcome::Accepted { unregistered: false }), "{got:?}");
+	let got = panel
+		.ingest(&grant("aquafix-panel", SourceKind::Panel, &["aquafix"]), &batch("aquafix-panel", &[contacted]), now)
+		.await
+		.unwrap();
+	assert!(got.iter().all(|v| v.outcome == panel::Outcome::Accepted { unregistered: false }), "{got:?}");
+	let app = app(panel, &conductor);
+	let admin = As::user(panel::testing::admin());
+
+	let (status, body) = send(&app, &conductor, &admin, Method::POST, "/api/v1/places", Some(json!({"brand": "aquafix", "slug": "royat"})), &[]).await;
+	assert_eq!(status, StatusCode::CREATED, "{body}");
+	let (status, body) = send(&app, &conductor, &admin, Method::PUT, "/api/v1/places/aquafix/royat/gmb", Some(json!({"gmb_id": 7})), &[]).await;
+	assert_eq!(status, StatusCode::OK, "{body}");
+
+	let (status, body) = send(&app, &conductor, &admin, Method::GET, "/api/v1/gmbs", None, &[]).await;
+	assert_eq!(status, StatusCode::OK, "{body}");
+	assert_eq!(body, json!({"7": {"brand": "aquafix", "location": "royat", "leads_7d": 2, "overdue": 1}}));
+}

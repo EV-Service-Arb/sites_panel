@@ -479,8 +479,10 @@ POST /places                                  {brand, slug} → 201 as GET; 409 
                                               "exists"} once registered (by hand or an edit)
 PUT  /places/{brand}/{slug}/gmb               {gmb_id: n | null} → 200 as GET (with gmb_id); 404
                                               unknown place; 409 {"error": "gmb_taken"}
-GET  /gmbs                                    {"<gmb_id>": {brand, location}} for every
-                                              place with a gmb_id (Work read)
+GET  /gmbs                                    {"<gmb_id>": {brand, location, leads_7d, overdue}}
+                                              for every place with a gmb_id: its leads created in the
+                                              last 7 days, and all those past CONTACT_SLA uncontacted
+                                              (Work read)
 ```
 
 - **A place says which GMB it is the landing of** (`places.gmb_id`, the conductor's `gmbs.id`,
