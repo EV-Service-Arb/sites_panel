@@ -1,5 +1,5 @@
 //! A phone number as the funnel reads it: kitstart's `normalizePhone`
-//! (`ts/kitstart/src/core/phone.ts`), ported rule for rule, so a number the site stored and
+//! (EV-Service-Arb/sites_tools `ts/kitstart/src/core/phone.ts`), ported rule for rule, so a number the site stored and
 //! the same number typed into a booking form compare equal.
 //!
 //! One difference: kitstart runs NFKC first; here only what NFKC does to a phone number is

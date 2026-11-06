@@ -1,4 +1,4 @@
-//! A brand's price list as data (kitstart's `PricingModel`, `ts/kitstart/src/core/pricing`): what
+//! A brand's price list as data (kitstart's `PricingModel`, EV-Service-Arb/sites_tools `ts/kitstart/src/core/pricing`): what
 //! an `estimate` need costs for a set of enum answers, and what a `fixed` need costs outright.
 //! The panel stores it, serves it to the sites, and prices the editor's preview with its own
 //! [`price_of`] — so a preview is what the site shows only if the two agree to the cent.

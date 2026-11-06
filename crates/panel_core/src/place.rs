@@ -1,5 +1,5 @@
 //! A place's live settings: the half of a landing's place that the panel may change without a
-//! release (kitstart's `PlaceLive`, `ts/kitstart/src/core/place/live.ts`). A site fetches them
+//! release (kitstart's `PlaceLive`, EV-Service-Arb/sites_tools `ts/kitstart/src/core/place/live.ts`). A site fetches them
 //! and lays them over its baked config, field by field: whatever is left out, the site's own
 //! config supplies.
 //!

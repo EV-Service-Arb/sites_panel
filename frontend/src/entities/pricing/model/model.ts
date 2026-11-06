@@ -1,6 +1,6 @@
 /**
- * A brand's price list as data, the shape kitstart reads (EV-invest/lib
- * `ts/kitstart/src/core/pricing/model.ts` at b7ef642). The panel stores, edits
+ * A brand's price list as data, the shape kitstart reads (EV-Service-Arb/sites_tools
+ * `ts/kitstart/src/core/pricing/model.ts`, as of EV-invest/lib b7ef642). The panel stores, edits
  * and serves exactly this object: the site and the server refuse a model with
  * a field they do not know, so nothing of the editor's own rides along.
  *

@@ -519,7 +519,7 @@ basis points, every intermediate product rounded half up to the cent, the total 
 `validate.ts` and `price.ts`, held to the same fixtures.
 
 - **Vendored by sha.** `crates/panel_core/tests/fixtures/pricing/` is a copy of kitstart's
-  `ts/kitstart/test/fixtures/pricing` at the commit `SOURCE` names; `tests/pricing_fixtures.rs`
+  `ts/kitstart/test/fixtures/pricing` in EV-Service-Arb/sites_tools at the commit `SOURCE` names; `tests/pricing_fixtures.rs`
   accepts every `valid/*.json` (and reads it back unchanged), refuses every `invalid/*.json` at
   the field its name says, and prices every `cases.json` to the cent, `null` included. kitstart
   changing a fixture changes the contract: copy the directory of the new commit over this one,
