@@ -11,14 +11,15 @@ src/generated/contract.ts  panel_core's shapes, vocabularies and limits (`nix ru
 src/generated/wire.ts      the protos as protojson: the envelope, every type's properties
 src/*.ts                   the one TS implementation of what both sides run, held to
                            contracts/vectors with panel_core:
-  pricing    checkPricingModel, priceOf
-  booking    checkBookingConfig, checkBookingUrl, bookingRequested, isLeadRef
+  price      priceOf: what a page runs        pricing         checkPricingModel
+  booking    bookingRequested, isLeadRef      booking-config  checkBookingConfig, checkBookingUrl
   place      checkPlaceLive: a place's live settings, field by field
   phone      normalizePhone, phoneProblem
   ingest     siteEvent, ingestBody, uuidV7, isOpaqueId: the only way a site builds an event
   experiments parseLiveExperiments, declarationProblem
 ```
 
+A page bundles what it runs and not the panel's checks: they sit in modules of their own.
 Checks answer `{ path, code }` problems, never words: a site logs them, the panel's editor says
 each code in its own copy.
 

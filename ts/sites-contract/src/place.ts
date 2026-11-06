@@ -1,4 +1,4 @@
-import { checkBookingConfig } from "./booking.js";
+import { checkBookingConfig } from "./booking-config.js";
 import type { BookingCode, PlaceCode } from "./generated/codes.js";
 import { DAYS, MESSENGERS, PLACE_LIMITS as LIMIT } from "./generated/place.js";
 import type { Address, DayOfWeek, Geo, Messenger, OpeningHours, PlaceLive, Rating } from "./generated/types.js";
