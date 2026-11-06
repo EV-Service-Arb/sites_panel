@@ -534,13 +534,11 @@ pub async fn places(conn: &mut SqliteConnection) -> eyre::Result<Vec<PlaceRow>> 
 /// How many leads are at each stage (the stages none is at are absent), and how many of
 /// them wait for their first contact since before `waiting_since_before`.
 pub async fn stage_counts(conn: &mut SqliteConnection, brand: Option<&BrandId>, location: Option<&LocationId>, waiting_since_before: Timestamp) -> eyre::Result<(Vec<(Stage, u64)>, u64)> {
-	let rows: Vec<(String, i64, i64)> = sqlx::query_as(
-		concat!(
-			"SELECT l.stage, count(*), count(*) FILTER (WHERE ",
-			overdue!(),
-			"$3) FROM leads l WHERE ($1 IS NULL OR l.brand_id = $1) AND ($2 IS NULL OR l.location_id = $2) GROUP BY l.stage"
-		),
-	)
+	let rows: Vec<(String, i64, i64)> = sqlx::query_as(concat!(
+		"SELECT l.stage, count(*), count(*) FILTER (WHERE ",
+		overdue!(),
+		"$3) FROM leads l WHERE ($1 IS NULL OR l.brand_id = $1) AND ($2 IS NULL OR l.location_id = $2) GROUP BY l.stage"
+	))
 	.bind(brand.map(BrandId::as_str))
 	.bind(location.map(LocationId::as_str))
 	.bind(to_db(waiting_since_before))
