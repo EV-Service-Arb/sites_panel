@@ -1,18 +1,7 @@
 import { checkBookingConfig } from "./booking.js";
-import {
-  DAYS,
-  MESSENGERS,
-  PLACE_LIMITS as LIMIT,
-  type Address,
-  type BookingCode,
-  type DayOfWeek,
-  type Geo,
-  type Messenger,
-  type OpeningHours,
-  type PlaceCode,
-  type PlaceLive,
-  type Rating,
-} from "./generated/contract.js";
+import type { BookingCode, PlaceCode } from "./generated/codes.js";
+import { DAYS, MESSENGERS, PLACE_LIMITS as LIMIT } from "./generated/place.js";
+import type { Address, DayOfWeek, Geo, Messenger, OpeningHours, PlaceLive, Rating } from "./generated/types.js";
 import { at, charCount, hasControl, hasWhitespace, isDate, isObject, trim, type Json } from "./text.js";
 
 /** One thing wrong with a place's settings: its path (`phone`, `hours[0].opens`, `booking.providers.cal_com.url`) and why. */

@@ -1,5 +1,5 @@
 import type { BookingRequested } from "./booking.js";
-import type { LeadFlow, LeadSuspect, SiteChannel } from "./generated/contract.js";
+import type { LeadFlow, LeadSuspect, SiteChannel } from "./generated/lead.js";
 import { SCHEMA, type Event, type ExperimentsDeclaredV1, type IngestRequest, type LeadCreatedV1, type Registered, type SiteEventKey, type Subject } from "./generated/wire.js";
 
 /** `lead.created@1`'s properties, their vocabularies as the panel checks them. */

@@ -43,11 +43,13 @@ fn main() {
 	frontend(&root.join("frontend/src"));
 }
 
+/// One module per domain, so a page that reads one vocabulary bundles that module's constants
+/// alone: a bundler keeps a module's every export once one is used. The types are erased.
 fn contract(dir: &Path) {
+	Ts::write(&dir.join("types.ts"), &[Ts::types::<(PricingModel, PlaceLive, LiveExperiments)>()]);
 	Ts::write(
-		&dir.join("contract.ts"),
+		&dir.join("pricing.ts"),
 		&[
-			Ts::types::<(PricingModel, PlaceLive, LiveExperiments)>(),
 			Ts::Value {
 				name: "PRICING_FORMAT",
 				value: pricing::FORMAT.into(),
@@ -62,19 +64,14 @@ fn contract(dir: &Path) {
 				ty: "PricingInputKind",
 				items: InputKind::ALL.map(InputKind::as_str).into(),
 			},
-			Ts::Union {
-				name: "PRICING_CODES",
-				ty: "PricingCode",
-				items: pricing::Code::ALL.map(pricing::Code::as_str).into(),
-			},
+		],
+	);
+	Ts::write(
+		&dir.join("booking.ts"),
+		&[
 			words("BOOKING_PROVIDERS", Provider::ALL.map(Provider::as_str)),
 			words("PAGE_PROVIDERS", PageProvider::ALL.map(PageProvider::as_str)),
 			value("BOOKING_LIMITS", booking::LIMITS),
-			Ts::Union {
-				name: "BOOKING_CODES",
-				ty: "BookingCode",
-				items: booking::Code::ALL.map(booking::Code::as_str).into(),
-			},
 			Ts::Union {
 				name: "BOOKING_STATUSES",
 				ty: "BookingStatus",
@@ -85,6 +82,11 @@ fn contract(dir: &Path) {
 				ty: "DayPart",
 				items: DayPart::ALL.map(DayPart::as_str).into(),
 			},
+		],
+	);
+	Ts::write(
+		&dir.join("place.ts"),
+		&[
 			words("DAYS", DayOfWeek::ALL.map(DayOfWeek::as_str)),
 			words("MESSENGERS", Messenger::ALL.map(Messenger::as_str)),
 			Ts::Union {
@@ -93,12 +95,11 @@ fn contract(dir: &Path) {
 				items: FIELDS.into(),
 			},
 			value("PLACE_LIMITS", place::LIMITS),
-			Ts::Union {
-				name: "PLACE_CODES",
-				ty: "PlaceCode",
-				items: place::Code::ALL.map(place::Code::as_str).into(),
-			},
-			value("EXPERIMENT_LIMITS", experiment::LIMITS),
+		],
+	);
+	Ts::write(
+		&dir.join("lead.ts"),
+		&[
 			value("LEAD_LIMITS", fact::LIMITS),
 			Ts::Union {
 				name: "LEAD_CHANNELS",
@@ -119,6 +120,27 @@ fn contract(dir: &Path) {
 				name: "LEAD_FLOWS",
 				ty: "LeadFlow",
 				items: LeadFlow::ALL.map(LeadFlow::as_str).into(),
+			},
+		],
+	);
+	Ts::write(&dir.join("experiments.ts"), &[value("EXPERIMENT_LIMITS", experiment::LIMITS)]);
+	Ts::write(
+		&dir.join("codes.ts"),
+		&[
+			Ts::Union {
+				name: "PRICING_CODES",
+				ty: "PricingCode",
+				items: pricing::Code::ALL.map(pricing::Code::as_str).into(),
+			},
+			Ts::Union {
+				name: "BOOKING_CODES",
+				ty: "BookingCode",
+				items: booking::Code::ALL.map(booking::Code::as_str).into(),
+			},
+			Ts::Union {
+				name: "PLACE_CODES",
+				ty: "PlaceCode",
+				items: place::Code::ALL.map(place::Code::as_str).into(),
 			},
 		],
 	);

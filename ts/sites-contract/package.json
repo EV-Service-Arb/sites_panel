@@ -1,6 +1,6 @@
 {
   "name": "@evinvest/sites-contract",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "The Service-Arb sites ↔ panel contract in TS: the shapes and vocabularies generated from the panel's Rust and protos, and the one TS implementation of what both sides run — pricing, booking and place checks, phone numbers, the ingest events a site sends.",
   "license": "BlueOak-1.0.0",
   "publishConfig": {

@@ -1,14 +1,6 @@
-import {
-  INPUT_KINDS,
-  PRICING_CURRENCY,
-  PRICING_FORMAT,
-  PRICING_LIMITS as LIMIT,
-  type NeedPricing,
-  type PricingCode,
-  type PricingInput,
-  type PricingInputKind,
-  type PricingModel,
-} from "./generated/contract.js";
+import type { PricingCode } from "./generated/codes.js";
+import { INPUT_KINDS, PRICING_CURRENCY, PRICING_FORMAT, PRICING_LIMITS as LIMIT, type PricingInputKind } from "./generated/pricing.js";
+import type { NeedPricing, PricingInput, PricingModel } from "./generated/types.js";
 import { at, isDate, isObject, trim, type Json } from "./text.js";
 
 /**

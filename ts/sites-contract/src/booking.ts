@@ -1,14 +1,6 @@
-import {
-  BOOKING_LIMITS as LIMIT,
-  BOOKING_PROVIDERS,
-  DAY_PARTS,
-  PAGE_PROVIDERS,
-  type BookingCode,
-  type BookingConfig,
-  type BookingProvider,
-  type DayPart,
-  type PageProvider,
-} from "./generated/contract.js";
+import { BOOKING_LIMITS as LIMIT, BOOKING_PROVIDERS, DAY_PARTS, PAGE_PROVIDERS, type DayPart } from "./generated/booking.js";
+import type { BookingCode } from "./generated/codes.js";
+import type { BookingConfig, BookingProvider, PageProvider } from "./generated/types.js";
 import type { BookingRequestedV1 } from "./generated/wire.js";
 import { at, isDate, isObject } from "./text.js";
 
