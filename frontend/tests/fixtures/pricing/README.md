@@ -1,6 +1,6 @@
 # Pricing fixtures (vendored)
 
-Copied verbatim from EV-Service-Arb/sites_tools (as EV-invest/lib `b7ef642`),
+Copied verbatim from EV-Service-Arb/sites_tools `71d6451`,
 `ts/kitstart/test/fixtures/pricing/{valid,invalid}/` — the contract between
 kitstart and the panel (see that directory's README). `tests/pricing-model.test.ts`
 holds the editor's validator (`src/entities/pricing/model/check.ts`) to them.

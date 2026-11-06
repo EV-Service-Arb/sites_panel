@@ -36,7 +36,7 @@ fn configs(sub: &str) -> Vec<(String, Value)> {
 #[test]
 fn the_fixtures_are_pinned() {
 	let source = fs::read_to_string(dir("SOURCE")).unwrap();
-	assert!(source.starts_with("EV-Service-Arb/sites_tools"), "{source}");
+	assert!(source.starts_with("EV-Service-Arb/sites_tools@ac15069"), "{source}");
 	assert_eq!(configs("valid").len(), 14, "the vendored set");
 	assert_eq!(configs("invalid").len(), 56, "the vendored set");
 	let rules = read(&dir("rules.json"));

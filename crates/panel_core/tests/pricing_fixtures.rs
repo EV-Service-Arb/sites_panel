@@ -35,7 +35,7 @@ fn models(sub: &str) -> Vec<(String, Value)> {
 #[test]
 fn the_fixtures_are_pinned() {
 	let source = fs::read_to_string(dir("SOURCE")).unwrap();
-	assert!(source.starts_with("EV-Service-Arb/sites_tools"), "{source}");
+	assert!(source.starts_with("EV-Service-Arb/sites_tools@"), "{source}");
 	assert_eq!(models("valid").len(), 5, "the vendored set");
 	assert_eq!(models("invalid").len(), 33, "the vendored set");
 }

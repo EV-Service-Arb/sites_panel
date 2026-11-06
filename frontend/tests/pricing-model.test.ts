@@ -18,7 +18,7 @@ const cleaning = read("valid", "cleaning.json") as PricingModel;
 const LOCALES = ["fr", "en"];
 const TODAY = "2026-10-03";
 
-describe("the validator against kitstart's fixtures (b7ef642)", () => {
+describe("the validator against kitstart's fixtures (71d6451)", () => {
   it.each(names("valid"))("accepts valid/%s", (name) => {
     expect(checkPricingModel(read("valid", name)).problems).toEqual([]);
   });

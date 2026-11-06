@@ -14,7 +14,7 @@ import {
 
 /**
  * The editor's copy of kitstart's validator (`core/pricing/validate.ts` at
- * b7ef642), held to the same fixtures (`tests/fixtures/pricing/`). It answers
+ * 71d6451), held to the same fixtures (`tests/fixtures/pricing/`). It answers
  * codes rather than English, so the editor can say each in the reader's
  * language beside the field the path names.
  *
