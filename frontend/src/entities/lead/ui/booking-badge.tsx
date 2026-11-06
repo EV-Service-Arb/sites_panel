@@ -1,9 +1,10 @@
+import type { BookingStatus } from "@evinvest/sites-contract";
 import { Badge, type BadgeVariant } from "@evinvest/uikit";
 
 import { useLocale, useT } from "@/shared/i18n";
 
 import { bookingWhen } from "../lib/booking-text";
-import type { BookingStatus, LeadBooking } from "../model/booking";
+import type { LeadBooking } from "../model/booking";
 
 const VARIANT: Record<Exclude<BookingStatus, "none">, BadgeVariant> = {
   requested: "outline",

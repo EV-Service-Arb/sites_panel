@@ -41,6 +41,7 @@ fn sa(proto_root: &Path) -> Result<(), Box<dyn std::error::Error>> {
 	let protos = protos_in(&proto_root.join("sa/v1"))?;
 	let descriptors = protox::compile(&protos, [proto_root])?;
 	let encoded = descriptors.encode_to_vec();
+	fs::write(PathBuf::from(std::env::var_os("OUT_DIR").expect("cargo sets OUT_DIR")).join("sa.v1.fds"), &encoded)?;
 	prost_build::Config::new()
 		.compile_well_known_types()
 		.extern_path(".google.protobuf", "::pbjson_types")

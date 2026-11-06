@@ -1,10 +1,10 @@
-/** A wall-clock time, `HH:MM`, 00:00–23:59 (kitstart's own pattern). */
-const TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
+import { PLACE_LIMITS } from "@evinvest/sites-contract";
+
+const TIME = new RegExp(PLACE_LIMITS.time);
 
 /** Minutes since midnight of an `HH:MM`, or null when it is not one. */
 export function minutesOf(time: string): number | null {
-  const m = TIME.exec(time);
-  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+  return TIME.test(time) ? Number(time.slice(0, 2)) * 60 + Number(time.slice(3)) : null;
 }
 
 /** "8:00", "0800", "8h00", "8.00" → "08:00"; anything else stays as typed, for the problem to show. */

@@ -1,7 +1,6 @@
-import { NEED_KINDS, type NeedKind } from "@/entities/pricing";
 import { useT } from "@/shared/i18n";
 
-import type { NeedDraft } from "../model/draft";
+import { NEED_KINDS, type NeedDraft, type NeedKind } from "../model/draft";
 import { FIELD, domIdOf } from "../model/fields";
 import { removeNeed, updateNeed } from "../model/ops";
 import type { PricingEditor } from "../model/use-pricing-editor";

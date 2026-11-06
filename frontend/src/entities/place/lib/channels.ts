@@ -1,4 +1,6 @@
-import type { EditedFields, MessengerSwitch } from "../model/settings";
+import type { Messenger } from "@evinvest/sites-contract";
+
+import type { EditedFields } from "../model/settings";
 import { type LocalTime, isOpenAt } from "./hours";
 
 /** The ways a visitor reaches the place: a call, WhatsApp, the place's Telegram bot, or the form asking to be called back. */
@@ -22,7 +24,7 @@ const OPEN_ORDER: readonly Channel[] = ["call", "whatsapp", "telegram", "callbac
 const CLOSED_ORDER: readonly Channel[] = ["callback", "whatsapp", "telegram", "call"];
 
 /** Whether the landing shows a messenger's button: on unless the panel switched it off. */
-export function messengerOn(fields: Pick<EditedFields, "messengers">, messenger: MessengerSwitch): boolean {
+export function messengerOn(fields: Pick<EditedFields, "messengers">, messenger: Messenger): boolean {
   return fields.messengers?.[messenger] !== false;
 }
 

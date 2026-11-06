@@ -16,7 +16,9 @@ use panel_core::{
 	ids::BrandId,
 	place::Editor,
 };
-use serde_json::{Value, json};
+use serde::Serialize;
+use serde_json::json;
+use ts_rs::TS;
 
 use crate::{Panel, posthog::PosthogProject, store::experiments as stored};
 
@@ -41,12 +43,23 @@ pub enum ExperimentError {
 	Internal(#[from] eyre::Report),
 }
 
-/// The fields of an override a landing takes, as it is sent them.
-#[derive(Clone, Debug, Default, PartialEq)]
+/// The fields of an override a landing takes, as it is sent them: only those set, each valid
+/// against the experiment's current declaration.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, TS)]
+#[ts(optional_fields)]
 pub struct LiveOverride {
+	#[serde(skip_serializing_if = "Option::is_none")]
 	pub enabled: Option<bool>,
+	#[serde(skip_serializing_if = "Option::is_none")]
 	pub weights: Option<Vec<f64>>,
+	#[serde(skip_serializing_if = "Option::is_none")]
 	pub holdout: Option<f64>,
+}
+
+/// What a landing reads of its brand's experiments: the overrides of the current ones, by key.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, TS)]
+pub struct LiveExperiments {
+	pub experiments: BTreeMap<String, LiveOverride>,
 }
 
 /// A funnel `experiment_exposed` →
@@ -93,7 +106,7 @@ impl Panel {
 
 	/// What a brand's landings lay over their code: per current experiment, the override fields
 	/// that fit its declaration. Nothing for a brand the panel does not know.
-	pub async fn live_experiments(&self, brand: &BrandId) -> eyre::Result<BTreeMap<String, LiveOverride>> {
+	pub async fn live_experiments(&self, brand: &BrandId) -> eyre::Result<LiveExperiments> {
 		let mut conn = self.store.pool().acquire().await.wrap_err("a connection")?;
 		let mut out = BTreeMap::new();
 		for (_, s) in stored::list(&mut conn, Some(brand)).await? {
@@ -110,7 +123,7 @@ impl Panel {
 				out.insert(s.declared.key.clone(), o);
 			}
 		}
-		Ok(out)
+		Ok(LiveExperiments { experiments: out })
 	}
 
 	/// An admin's change to one experiment: journaled as `experiment.configured` when it changes
@@ -164,19 +177,4 @@ impl Panel {
 		let state = self.experiment(brand, &patch.key).await?.ok_or_else(|| eyre::eyre!("an experiment configured and gone"))?;
 		Ok(self.view(brand.clone(), state))
 	}
-}
-
-/// A JSON object of the override fields that are set, as a landing reads them.
-pub fn live_json(o: &LiveOverride) -> Value {
-	let mut v = json!({});
-	if let Some(e) = o.enabled {
-		v["enabled"] = json!(e);
-	}
-	if let Some(w) = &o.weights {
-		v["weights"] = json!(w);
-	}
-	if let Some(h) = o.holdout {
-		v["holdout"] = json!(h);
-	}
-	v
 }

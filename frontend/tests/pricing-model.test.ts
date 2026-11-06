@@ -1,8 +1,8 @@
 import { readFileSync, readdirSync } from "node:fs";
 
+import type { PricingModel } from "@evinvest/sites-contract";
 import { describe, expect, it } from "vitest";
 
-import { type PricingModel, checkPricingModel, missingLabels } from "@/entities/pricing";
 import { type PricingDraft, draftOf, emptyInput, emptyNeed, emptyOption, fingerprint } from "@/features/edit-pricing/model/draft";
 import { errorsOf } from "@/features/edit-pricing/model/errors";
 import { FIELD } from "@/features/edit-pricing/model/fields";
@@ -11,35 +11,12 @@ import { addInput, moveNeedInput, removeInput, setInputKind, toggleNeedInput } f
 import { fieldOfPath, segmentsOf } from "@/features/edit-pricing/model/paths";
 import { modelOf } from "@/features/edit-pricing/model/serialize";
 
-const FIXTURES = new URL("./fixtures/pricing/", import.meta.url);
+const FIXTURES = new URL("../../contracts/vectors/pricing/", import.meta.url);
 const read = (dir: string, name: string): unknown => JSON.parse(readFileSync(new URL(`${dir}/${name}`, FIXTURES), "utf8"));
 const names = (dir: string) => readdirSync(new URL(`${dir}/`, FIXTURES)).filter((n) => n.endsWith(".json"));
 const cleaning = read("valid", "cleaning.json") as PricingModel;
 const LOCALES = ["fr", "en"];
 const TODAY = "2026-10-03";
-
-describe("the validator against kitstart's fixtures (71d6451)", () => {
-  it.each(names("valid"))("accepts valid/%s", (name) => {
-    expect(checkPricingModel(read("valid", name)).problems).toEqual([]);
-  });
-
-  it.each(names("invalid"))("refuses invalid/%s whole", (name) => {
-    const { problems, model } = checkPricingModel(read("invalid", name));
-    expect(model).toBeNull();
-    expect(problems.length).toBeGreaterThan(0);
-  });
-
-  it("names the field, kitstart's way", () => {
-    expect(checkPricingModel(read("invalid", "unknown-field.json")).problems.map((p) => p.code)).toContain("unknownField");
-    expect(checkPricingModel(read("invalid", "need-unknown-input.json")).problems[0]).toMatchObject({ code: "noInput" });
-  });
-
-  it("asks for a label in every site locale", () => {
-    const enOnly = read("valid", "at-the-cap.json") as PricingModel;
-    expect(missingLabels(enOnly, ["en"])).toEqual([]);
-    expect(missingLabels(enOnly, ["fr", "en"]).map((p) => p.path)).toEqual(["inputs[0].labels.fr", "inputs[0].options[0].labels.fr", "inputs[1].labels.fr", "inputs[1].options[0].labels.fr"]);
-  });
-});
 
 describe("the draft serialised", () => {
   it("gives back the model it was read from, exactly: same keys, integers", () => {
@@ -167,7 +144,7 @@ describe("the editor's own checks", () => {
   it("does not say twice what the draft already faults", () => {
     const draft = { ...draftOf(null, TODAY), inputs: [emptyInput()] };
     const fields = modelOf(draft, LOCALES).problems.map((p) => p.field);
-    // kitstart's "a slug" and "at least one label" are covered by "required" and "label in fr/en".
+    // The contract's "a slug" and "at least one label" are covered by "required" and "label in fr/en".
     expect(fields.filter((f) => f === FIELD.inputId(draft.inputs[0]!.key))).toHaveLength(1);
     expect(fields).not.toContain(FIELD.inputLabels(draft.inputs[0]!.key));
   });
@@ -180,13 +157,13 @@ describe("a server path, onto the editor's field", () => {
   if (!zone || !bedrooms) throw new Error("fixture changed");
 
   it("reads index and slug segments alike", () => {
-    expect(segmentsOf("model.inputs[2].options.studio.labels.en")).toEqual(["inputs", 2, "options", "studio", "labels", "en"]);
+    expect(segmentsOf("inputs[2].options.studio.labels.en")).toEqual(["inputs", 2, "options", "studio", "labels", "en"]);
     expect(segmentsOf("needs.standard.inputs[2]")).toEqual(["needs", "standard", "inputs", 2]);
   });
 
   it.each([
     ["inputs.bedrooms.options.studio.labels.en", FIELD.optionLabel(bedrooms.options[0]!.key, "en")],
-    ["model.inputs[1].options[0].addCents", FIELD.optionValue(bedrooms.options[0]!.key)],
+    ["inputs[1].options[0].addCents", FIELD.optionValue(bedrooms.options[0]!.key)],
     ["inputs.zone.labels", FIELD.inputLabels(zone.key)],
     ["inputs[0].kind", FIELD.inputKind(zone.key)],
     ["inputs.zone.options[9]", FIELD.inputOptions(zone.key)],
@@ -202,14 +179,14 @@ describe("a server path, onto the editor's field", () => {
 
   it("leaves what no field holds for the top of the form", () => {
     expect(fieldOfPath("format", draft)).toBeNull();
-    expect(fieldOfPath("model", draft)).toBeNull();
+    expect(fieldOfPath("", draft)).toBeNull();
     const errors = errorsOf([], false, { field: null, path: "currency", message: "EUR" });
     expect(errors.general).toEqual([{ text: "currency: EUR" }]);
   });
 });
 
 describe("a pasted model", () => {
-  it("comes in whole when kitstart would take it", () => {
+  it("comes in whole when the contract takes it", () => {
     expect(importModel(JSON.stringify(cleaning))).toEqual({ kind: "ok", model: cleaning });
   });
 

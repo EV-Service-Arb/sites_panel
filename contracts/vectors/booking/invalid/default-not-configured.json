@@ -1,0 +1,16 @@
+{
+  "problems": [
+    {
+      "path": "default",
+      "code": "default_unset"
+    }
+  ],
+  "config": {
+    "default": "google_calendar",
+    "providers": {
+      "link": {
+        "url": "https://book.example.fr/vifnet"
+      }
+    }
+  }
+}

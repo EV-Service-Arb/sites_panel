@@ -1,0 +1,16 @@
+{
+  "problems": [
+    {
+      "path": "providers.cal_com.url",
+      "code": "cal_host"
+    }
+  ],
+  "config": {
+    "default": "cal_com",
+    "providers": {
+      "cal_com": {
+        "url": "https://book.example.fr/vifnet/menage"
+      }
+    }
+  }
+}

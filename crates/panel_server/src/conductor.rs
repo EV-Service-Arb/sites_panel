@@ -49,7 +49,7 @@ const PING_EVERY: Duration = Duration::from_secs(25);
 /// The most notes one read answers.
 const MAX_NOTES: i64 = 500;
 
-/// The most brands [`InternalReads`] keeps; kitstart sites are a handful.
+/// The most brands [`InternalReads`] keeps; the sites are a handful.
 const MAX_READ_BRANDS: usize = 256;
 
 #[derive(Clone, Copy)]

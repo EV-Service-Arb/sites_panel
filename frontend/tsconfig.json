@@ -16,7 +16,7 @@
     "allowImportingTsExtensions": true,
     "jsx": "react-jsx",
     "incremental": false,
-    "paths": { "@/*": ["./src/*"] }
+    "paths": { "@/*": ["./src/*"], "@evinvest/sites-contract": ["../ts/sites-contract/src/index.ts"] }
   },
   "include": ["**/*.ts", "**/*.tsx"],
   "exclude": ["node_modules", "dist", ".build"]

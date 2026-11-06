@@ -4,53 +4,44 @@
 //!
 //! Provider-agnostic on purpose: a provider is a word of a closed vocabulary with its own URL
 //! rule, and its adapter (a webhook it pushes, or a calendar the panel pulls) only ever hands
-//! the engine a normalized [`BookingEvent`].
+//! the engine a normalized [`BookingEvent`]. A place's config and `booking.requested` are held
+//! to `contracts/vectors/booking`.
 
-use std::fmt;
+use std::collections::BTreeMap;
 
 use jiff::{Timestamp, civil::Date};
-use serde_json::{Map, Value};
+use serde::Serialize;
+use serde_json::Value;
+use ts_rs::TS;
 
 use crate::{Invalid, ids::EventId};
 
-/// Where a slot is booked.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub enum Provider {
-	/// No external page: the site promises a call, and an operator records the slot.
-	Manual,
-	/// An external booking page on any https host; no adapter reads it back.
-	Link,
-	/// A Google Calendar appointment schedule; its bookings are pulled from the calendar.
-	GoogleCalendar,
-	/// Cal.com, ours (`cal.evinvest.ltd`) or the hosted cloud.
-	CalCom,
+vocabulary! {
+	/// Where a slot is booked.
+	#[ts(rename = "BookingProvider")]
+	pub enum Provider, "provider is not one of manual, link, google_calendar, cal_com" {
+		/// No external page: the site promises a call, and an operator records the slot.
+		Manual => "manual",
+		/// An external booking page on any https host; no adapter reads it back.
+		Link => "link",
+		/// A Google Calendar appointment schedule; its bookings are pulled from the calendar.
+		GoogleCalendar => "google_calendar",
+		/// Cal.com, ours (`cal.evinvest.ltd`) or the hosted cloud.
+		CalCom => "cal_com",
+	}
+}
+
+vocabulary! {
+	/// A provider with a page of its own, which a place configures: every one but `manual`,
+	/// which is always available.
+	pub enum PageProvider, "not one of link, google_calendar, cal_com" {
+		Link => "link",
+		GoogleCalendar => "google_calendar",
+		CalCom => "cal_com",
+	}
 }
 
 impl Provider {
-	pub const ALL: [Self; 4] = [Self::Manual, Self::Link, Self::GoogleCalendar, Self::CalCom];
-
-	pub fn as_str(self) -> &'static str {
-		match self {
-			Self::Manual => "manual",
-			Self::Link => "link",
-			Self::GoogleCalendar => "google_calendar",
-			Self::CalCom => "cal_com",
-		}
-	}
-
-	pub fn parse(raw: &str) -> Result<Self, Invalid> {
-		Self::ALL
-			.into_iter()
-			.find(|p| p.as_str() == raw)
-			.ok_or_else(|| Invalid::new("provider is not one of manual, link, google_calendar, cal_com"))
-	}
-
-	/// Whether a place configures it with a booking page of its own. `manual` is always
-	/// available, so never configured.
-	pub fn has_page(self) -> bool {
-		self != Self::Manual
-	}
-
 	/// Whether an adapter reports this provider's bookings (`booking.created`/`canceled`).
 	pub fn has_adapter(self) -> bool {
 		match self {
@@ -58,99 +49,204 @@ impl Provider {
 			Self::Manual | Self::Link => false,
 		}
 	}
+
+	pub fn page(self) -> Option<PageProvider> {
+		match self {
+			Self::Manual => None,
+			Self::Link => Some(PageProvider::Link),
+			Self::GoogleCalendar => Some(PageProvider::GoogleCalendar),
+			Self::CalCom => Some(PageProvider::CalCom),
+		}
+	}
 }
 
-impl fmt::Display for Provider {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.write_str(self.as_str())
+impl From<PageProvider> for Provider {
+	fn from(p: PageProvider) -> Self {
+		match p {
+			PageProvider::Link => Self::Link,
+			PageProvider::GoogleCalendar => Self::GoogleCalendar,
+			PageProvider::CalCom => Self::CalCom,
+		}
 	}
 }
 
 // ── a place's configuration ─────────────────────────────────────────────────────────────
 
-/// The longest booking URL.
-pub const MAX_URL: usize = 2048;
+/// The booking limits: the longest URL, the Cal.com hosts a page may be on, and the shape of
+/// the lead ref a site names its lead by.
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Limits {
+	pub max_url: usize,
+	/// Exact hostnames, lowercase; a subdomain is another host.
+	pub cal_com_hosts: [&'static str; 2],
+	/// A Cal.com user or event slug: one path segment, no dot segment.
+	pub cal_com_segment: &'static str,
+	/// `lead-<row>-<8 lowercase hex>`, the row 1 or more: [`is_lead_ref`].
+	pub lead_ref: &'static str,
+}
 
-/// The Cal.com hosts a place's `cal_com` page may be on (kitstart's `calComHosts` default,
-/// `rules.json` of the fixtures).
-pub const CAL_COM_HOSTS: [&str; 2] = ["cal.evinvest.ltd", "cal.com"];
+pub const LIMITS: Limits = Limits {
+	max_url: 2048,
+	cal_com_hosts: ["cal.evinvest.ltd", "cal.com"],
+	cal_com_segment: "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$",
+	lead_ref: "^lead-[1-9][0-9]{0,18}-[0-9a-f]{8}$",
+};
+
+vocabulary! {
+	/// Why a place's `booking`, or a part of it, is refused.
+	pub enum Code, "not a booking problem code" {
+		/// Not `{default, providers}`, or a part that is not the object it should be.
+		Shape => "shape",
+		UnknownKey => "unknown_key",
+		Required => "required",
+		ProviderUnknown => "provider_unknown",
+		ProviderShape => "provider_shape",
+		ProviderExtra => "provider_extra",
+		/// `manual` is always available, so never a key of `providers`.
+		Manual => "manual",
+		UrlType => "url_type",
+		DefaultUnknown => "default_unknown",
+		/// The default is a provider with a page the place does not configure.
+		DefaultUnset => "default_unset",
+		/// Too long, empty, or not printable ASCII.
+		Format => "format",
+		Scheme => "scheme",
+		Fragment => "fragment",
+		Backslash => "backslash",
+		Userinfo => "userinfo",
+		Ip => "ip",
+		Port => "port",
+		Host => "host",
+		Google => "google",
+		CalHost => "cal_host",
+		CalPath => "cal_path",
+	}
+}
+
+impl Code {
+	fn why(self) -> String {
+		match self {
+			Self::Shape => "must be {\"default\": …, \"providers\": {…}} of objects".into(),
+			Self::UnknownKey => "is not one of default, providers".into(),
+			Self::Required => "is required".into(),
+			Self::ProviderUnknown => "is not one of link, google_calendar, cal_com".into(),
+			Self::ProviderShape => "must be an object".into(),
+			Self::ProviderExtra => "is not a setting; only url".into(),
+			Self::Manual => "manual is always available and is never a key of providers".into(),
+			Self::UrlType => "must be a string".into(),
+			Self::DefaultUnknown => "is not one of manual, link, google_calendar, cal_com".into(),
+			Self::DefaultUnset => "must be manual or one of the providers set".into(),
+			Self::Format => format!("must be an https:// URL of at most {} printable ASCII characters, without spaces", LIMITS.max_url),
+			Self::Scheme => "must start with https://".into(),
+			Self::Fragment => "must have no fragment (#…)".into(),
+			Self::Backslash => "must have no backslash".into(),
+			Self::Userinfo => "must have no user or password".into(),
+			Self::Ip => "host must be a name, not an IP address".into(),
+			Self::Port => "must have no port".into(),
+			Self::Host => "host must be a domain name".into(),
+			Self::Google => "must be a Google appointment schedule: https://calendar.app.google/… or https://calendar.google.com/calendar/appointments/…".into(),
+			Self::CalHost => format!("must be a Cal.com page on {}", LIMITS.cal_com_hosts.join(" or ")),
+			Self::CalPath => "must be a Cal.com page /<user>/<event>".into(),
+		}
+	}
+}
+
+/// One thing wrong with a place's `booking`: where below it (`""` for the setting itself,
+/// `default`, `providers.cal_com.url`), and the code both checkers agree on.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Problem {
+	pub path: String,
+	pub code: Code,
+}
+
+impl Problem {
+	pub fn why(&self) -> String {
+		self.code.why()
+	}
+}
 
 /// `[A-Za-z0-9][A-Za-z0-9._-]{0,99}`: a Cal.com user or event slug.
 fn is_cal_segment(s: &str) -> bool {
 	(1..=100).contains(&s.len()) && s.starts_with(|c: char| c.is_ascii_alphanumeric()) && s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
 }
 
-/// Whether `url` may be a `provider`'s booking page: kitstart's URL rule (the fixtures'
-/// README, normative). Every provider with a page: at most [`MAX_URL`] printable ASCII; the
-/// literal `https://`; no `#` and no `\`; an authority without `@`, `:` or `[`; a dotted DNS
-/// name of two labels at least, whose last is not a number (`\d+`, `0x…`: an IPv4 address to a
-/// WHATWG parser); a query allowed. Hosts compare lowercase. Then by provider:
-/// `google_calendar` — `calendar.app.google/…` (a short link) or
-/// `calendar.google.com/calendar/appointments/…`; `cal_com` — a host of [`CAL_COM_HOSTS`]
-/// exactly, the path exactly `/<user>/<event>`; `link` — any host. `manual` has no page.
-pub fn check_url(provider: Provider, raw: &str) -> Result<(), String> {
-	if !provider.has_page() {
-		return Err(format!("{provider} takes no url"));
+/// Whether `url` may be `provider`'s booking page. Every provider with a page: at most
+/// `max_url` printable ASCII; the literal `https://`; no `#` and no `\`; an authority without
+/// `@`, `:` or `[`; a dotted DNS name of two labels at least, whose last is not a number
+/// (`\d+`, `0x…`: an IPv4 address to a WHATWG parser); a query allowed. Hosts compare
+/// lowercase. Then by provider: `google_calendar` — `calendar.app.google/…` (a short link) or
+/// `calendar.google.com/calendar/appointments/…`; `cal_com` — one of `cal_com_hosts` exactly,
+/// the path exactly `/<user>/<event>`; `link` — any host.
+pub fn check_url(provider: PageProvider, raw: &str) -> Result<(), Code> {
+	if raw.is_empty() || raw.len() > LIMITS.max_url || !raw.bytes().all(|b| b.is_ascii_graphic()) {
+		return Err(Code::Format);
 	}
-	if raw.is_empty() || raw.len() > MAX_URL || !raw.bytes().all(|b| b.is_ascii_graphic()) {
-		return Err(format!("must be an https:// URL of at most {MAX_URL} printable ASCII characters, without spaces"));
-	}
-	let rest = raw.strip_prefix("https://").ok_or("must start with https://")?;
+	let rest = raw.strip_prefix("https://").ok_or(Code::Scheme)?;
 	if raw.contains('#') {
-		return Err("must have no fragment (#…)".into());
+		return Err(Code::Fragment);
 	}
 	if raw.contains('\\') {
-		return Err("must have no backslash".into());
+		return Err(Code::Backslash);
 	}
 	let split = rest.find(['/', '?']).unwrap_or(rest.len());
 	let (host, tail) = rest.split_at(split);
 	if host.contains('@') {
-		return Err("must have no user or password".into());
+		return Err(Code::Userinfo);
 	}
 	if host.starts_with('[') {
-		return Err("host must be a name, not an IP address".into());
+		return Err(Code::Ip);
 	}
 	if host.contains(':') {
-		return Err("must have no port".into());
+		return Err(Code::Port);
 	}
 	let labels: Vec<&str> = host.split('.').collect();
 	let label_ok = |l: &&str| (1..=63).contains(&l.len()) && !l.starts_with('-') && !l.ends_with('-') && l.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-');
 	if host.len() > 253 || labels.len() < 2 || !labels.iter().all(label_ok) {
-		return Err("host must be a domain name".into());
+		return Err(Code::Host);
 	}
-	let last = labels.last().map(|l| l.to_ascii_lowercase()).unwrap_or_default();
+	let last = labels.last().expect("two labels at least").to_ascii_lowercase();
 	if last.bytes().all(|b| b.is_ascii_digit()) || last.starts_with("0x") {
-		return Err("host must be a name, not an IP address".into());
+		return Err(Code::Ip);
 	}
 	let host = host.to_ascii_lowercase();
-	let path = tail.split('?').next().unwrap_or_default();
+	let path = tail.split('?').next().expect("split yields a first part");
 	match provider {
-		Provider::Manual => Err("manual takes no url".into()),
-		Provider::Link => Ok(()),
-		Provider::GoogleCalendar => {
+		PageProvider::Link => Ok(()),
+		PageProvider::GoogleCalendar => {
 			const APPOINTMENTS: &str = "/calendar/appointments/";
 			let ok = (host == "calendar.app.google" && path.len() > 1) || (host == "calendar.google.com" && path.len() > APPOINTMENTS.len() && path.starts_with(APPOINTMENTS));
-			if ok {
-				Ok(())
-			} else {
-				Err("must be a Google appointment schedule: https://calendar.app.google/… or https://calendar.google.com/calendar/appointments/…".into())
-			}
+			if ok { Ok(()) } else { Err(Code::Google) }
 		}
-		Provider::CalCom => {
-			if !CAL_COM_HOSTS.contains(&host.as_str()) {
-				return Err(format!("must be a Cal.com page on {}", CAL_COM_HOSTS.join(" or ")));
+		PageProvider::CalCom => {
+			if !LIMITS.cal_com_hosts.contains(&host.as_str()) {
+				return Err(Code::CalHost);
 			}
 			let segments: Vec<&str> = path.strip_prefix('/').unwrap_or_default().split('/').collect();
-			if segments.len() == 2 && segments.iter().all(|s| is_cal_segment(s)) {
+			if path.starts_with('/') && segments.len() == 2 && segments.iter().all(|s| is_cal_segment(s)) {
 				Ok(())
 			} else {
-				Err("must be a Cal.com page /<user>/<event>".into())
+				Err(Code::CalPath)
 			}
 		}
 	}
 }
 
-/// kitstart's `leadRef`, the panel's lead id for a site's lead: `lead-<row>-<8 hex>`, the row
+/// A provider's booking page.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, TS)]
+pub struct BookingPage {
+	pub url: String,
+}
+
+/// A place's `booking` setting: the providers it has a page on, and the one it offers by
+/// default — `manual` or one of them. `manual` is always there, so never configured.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, TS)]
+pub struct BookingConfig {
+	pub default: Provider,
+	pub providers: BTreeMap<PageProvider, BookingPage>,
+}
+
+/// A site's `leadRef`, the panel's lead id for a site's lead: `lead-<row>-<8 hex>`, the row
 /// 1 or more, the hex lowercase.
 pub fn is_lead_ref(s: &str) -> bool {
 	let Some(rest) = s.strip_prefix("lead-") else { return false };
@@ -159,8 +255,8 @@ pub fn is_lead_ref(s: &str) -> bool {
 	row_ok && hex.len() == 8 && hex.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
-/// `booking.requested@1`'s properties, checked (the fixtures' README): a lead ref, a provider,
-/// and a wish — date, part of the day — for `manual` only.
+/// `booking.requested@1`'s properties, checked: a lead ref, a provider, and a wish — date,
+/// part of the day — for `manual` only.
 pub fn requested(lead_ref: &str, provider: &str, date: Option<Date>, part: Option<&str>) -> Result<(Provider, Option<Date>, Option<DayPart>), Invalid> {
 	if !is_lead_ref(lead_ref) {
 		return Err(Invalid::new("properties.lead_ref is not lead-<row>-<8 lowercase hex>"));
@@ -180,122 +276,100 @@ pub fn preferred_date_in_window(date: Date, today: Date) -> bool {
 	(-2..=366).contains(&days)
 }
 
-/// What was wrong inside a place's `booking`: `(path below the field, why)`, every one found
-/// — `.default`, `.providers.google_calendar.url`.
-pub type ConfigProblems = Vec<(String, String)>;
-
-/// A place's `booking` setting: `{default: <provider>, providers: {<provider>: {url}}}` —
-/// `manual` never among `providers`, it is always there — checked whole, every problem named by its path. `default` is `manual`
-/// or one of `providers`. Answers the setting as stored: the same object, its keys sorted.
-pub fn check_config(v: &Value) -> Result<Value, ConfigProblems> {
-	let mut bad = ConfigProblems::new();
+/// A place's `booking` setting checked whole, every problem named by its path below the
+/// setting.
+pub fn check_config(v: &Value) -> Result<BookingConfig, Vec<Problem>> {
+	let mut bad = Vec::new();
+	let mut fail = |path: &str, code: Code| bad.push(Problem { path: path.to_owned(), code });
 	let Value::Object(m) = v else {
-		return Err(vec![(String::new(), "must be {\"default\": …, \"providers\": {…}}".into())]);
+		fail("", Code::Shape);
+		return Err(bad);
 	};
-	for k in m.keys().filter(|k| !matches!(k.as_str(), "default" | "providers")) {
-		bad.push((String::new(), format!("{k} is not one of default, providers")));
+	if m.keys().any(|k| !matches!(k.as_str(), "default" | "providers")) {
+		fail("", Code::UnknownKey);
 	}
 	let default = match m.get("default") {
 		None => {
-			bad.push((".default".into(), "is required".into()));
+			fail("default", Code::Required);
 			None
 		}
-		Some(Value::String(s)) => match Provider::parse(s) {
-			Ok(p) => Some(p),
-			Err(e) => {
-				bad.push((".default".into(), e.0));
-				None
+		Some(raw) => {
+			let p = raw.as_str().and_then(|s| Provider::parse(s).ok());
+			if p.is_none() {
+				fail("default", Code::DefaultUnknown);
 			}
-		},
-		Some(_) => {
-			bad.push((".default".into(), "must be a provider's name".into()));
-			None
+			p
 		}
 	};
-	let mut providers = Map::new();
-	let mut named = Vec::new();
+	let mut providers = BTreeMap::new();
 	match m.get("providers") {
-		None => bad.push((".providers".into(), "is required; {} for none".into())),
+		None => fail("providers", Code::Required),
 		Some(Value::Object(ps)) =>
 			for (name, conf) in ps {
-				let path = format!(".providers.{name}");
+				let path = format!("providers.{name}");
 				let Ok(provider) = Provider::parse(name) else {
-					bad.push((path, "is not one of manual, link, google_calendar, cal_com".into()));
+					fail(&path, Code::ProviderUnknown);
 					continue;
 				};
 				let Value::Object(conf) = conf else {
-					bad.push((path, "must be an object".into()));
+					fail(&path, Code::ProviderShape);
 					continue;
 				};
-				if let Some(k) = conf.keys().find(|k| *k != "url") {
-					bad.push((path.clone(), format!("{k} is not a setting; only url")));
+				if conf.keys().any(|k| k != "url") {
+					fail(&path, Code::ProviderExtra);
 					continue;
 				}
-				match (provider, conf.get("url")) {
-					// Always there, so never configured: the README's rule.
-					(p, _) if !p.has_page() => bad.push((path, "manual is always available and is never a key of providers".into())),
-					(_, None) => bad.push((format!("{path}.url"), "is required".into())),
-					(_, Some(Value::String(url))) => match check_url(provider, url) {
+				let Some(page) = provider.page() else {
+					fail(&path, Code::Manual);
+					continue;
+				};
+				match conf.get("url") {
+					None => fail(&format!("{path}.url"), Code::Required),
+					Some(Value::String(url)) => match check_url(page, url) {
 						Ok(()) => {
-							providers.insert(name.clone(), serde_json::json!({ "url": url }));
-							named.push(provider);
+							providers.insert(page, BookingPage { url: url.clone() });
 						}
-						Err(why) => bad.push((format!("{path}.url"), why)),
+						Err(code) => fail(&format!("{path}.url"), code),
 					},
-					(_, Some(_)) => bad.push((format!("{path}.url"), "must be a string".into())),
+					Some(_) => fail(&format!("{path}.url"), Code::UrlType),
 				}
 			},
-		Some(_) => bad.push((".providers".into(), "must be an object of a provider's settings by its name".into())),
+		Some(_) => fail("providers", Code::Shape),
 	}
-	if let Some(d) = default
-		&& d.has_page()
-		&& !named.contains(&d)
-		&& !bad.iter().any(|(p, _)| p.starts_with(&format!(".providers.{d}")))
+	// A default whose own entry is refused is blamed there, not twice.
+	if let Some(page) = default.and_then(Provider::page)
+		&& !providers.contains_key(&page)
+		&& !bad.iter().any(|p| p.path.starts_with(&format!("providers.{page}")))
 	{
-		bad.push((".default".into(), "must be manual or one of the providers set".into()));
+		bad.push(Problem {
+			path: "default".into(),
+			code: Code::DefaultUnset,
+		});
 	}
-	match (bad.is_empty(), default) {
-		(true, Some(d)) => Ok(serde_json::json!({ "default": d.as_str(), "providers": providers })),
+	match default {
+		Some(default) if bad.is_empty() => Ok(BookingConfig { default, providers }),
 		_ => Err(bad),
 	}
 }
 
 // ── a lead's booking ────────────────────────────────────────────────────────────────────
 
-/// Where a lead's booking stands.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
-pub enum BookingStatus {
-	#[default]
-	None,
-	/// The site asked for a slot (`booking.requested`); nobody has one yet.
-	Requested,
-	Booked,
-	Canceled,
-	Done,
-	NoShow,
+vocabulary! {
+	/// Where a lead's booking stands.
+	#[derive(Default)]
+	pub enum BookingStatus, "booking status is not one of none, requested, booked, canceled, done, no_show" {
+		#[default]
+		None => "none",
+		/// The site asked for a slot (`booking.requested`); nobody has one yet.
+		Requested => "requested",
+		Booked => "booked",
+		Canceled => "canceled",
+		Done => "done",
+		NoShow => "no_show",
+	}
 }
 
 impl BookingStatus {
-	pub const ALL: [Self; 6] = [Self::None, Self::Requested, Self::Booked, Self::Canceled, Self::Done, Self::NoShow];
-
-	pub fn as_str(self) -> &'static str {
-		match self {
-			Self::None => "none",
-			Self::Requested => "requested",
-			Self::Booked => "booked",
-			Self::Canceled => "canceled",
-			Self::Done => "done",
-			Self::NoShow => "no_show",
-		}
-	}
-
-	pub fn parse(raw: &str) -> Result<Self, Invalid> {
-		Self::ALL
-			.into_iter()
-			.find(|s| s.as_str() == raw)
-			.ok_or_else(|| Invalid::new("booking status is not one of none, requested, booked, canceled, done, no_show"))
-	}
-
 	/// Whether an operator may do `action` to a booking that stands here: set a slot unless
 	/// it is done; clear one that is there to clear (not from none, not once done); close a
 	/// booked one only.
@@ -345,55 +419,26 @@ pub enum OperatorAction {
 	Close(Closed),
 }
 
-/// `as_str` and `parse` for a fieldless enum spelled on the wire as snake-case words.
-macro_rules! wire_enum {
-	($ty:ident, $refused:literal, { $($variant:ident => $wire:literal),+ $(,)? }) => {
-		impl $ty {
-			pub const ALL: [Self; [$(stringify!($variant)),+].len()] = [$(Self::$variant),+];
-
-			pub fn as_str(self) -> &'static str {
-				match self {
-					$(Self::$variant => $wire,)+
-				}
-			}
-
-			pub fn parse(raw: &str) -> Result<Self, Invalid> {
-				Self::ALL.into_iter().find(|v| v.as_str() == raw).ok_or_else(|| Invalid::new($refused))
-			}
-		}
-	};
+vocabulary! {
+	/// When in the day the visitor would like their slot.
+	pub enum DayPart, "properties.preferred_part is not one of morning, afternoon, evening" {
+		Morning => "morning",
+		Afternoon => "afternoon",
+		Evening => "evening",
+	}
 }
 
-/// When in the day the visitor would like their slot.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DayPart {
-	Morning,
-	Afternoon,
-	Evening,
+vocabulary! {
+	/// How a provider's booking was joined to its lead.
+	pub enum BookingMatch, "match is not one of ref, contact, manual" {
+		/// By the ref the booking page carried (the lead's id).
+		Ref => "ref",
+		/// By the attendee's phone or email, one lead of the brand within the window.
+		Contact => "contact",
+		/// By an operator: a slot typed in, or a provider's booking attached by hand.
+		Manual => "manual",
+	}
 }
-
-wire_enum!(DayPart, "properties.preferred_part is not one of morning, afternoon, evening", {
-	Morning => "morning",
-	Afternoon => "afternoon",
-	Evening => "evening",
-});
-
-/// How a provider's booking was joined to its lead.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum BookingMatch {
-	/// By the ref the booking page carried (the lead's id).
-	Ref,
-	/// By the attendee's phone or email, one lead of the brand within the window.
-	Contact,
-	/// By an operator: a slot typed in, or a provider's booking attached by hand.
-	Manual,
-}
-
-wire_enum!(BookingMatch, "match is not one of ref, contact, manual", {
-	Ref => "ref",
-	Contact => "contact",
-	Manual => "manual",
-});
 
 /// A lead's booking now.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -644,91 +689,9 @@ pub fn fold_external(items: &mut [(Timestamp, EventId, ExternalItem)]) -> Option
 #[cfg(test)]
 mod tests {
 	use jiff::SignedDuration;
-	use serde_json::json;
 	use uuid::Uuid;
 
 	use super::*;
-
-	/// The contract's URL rules, as a table: (provider, url, accepted).
-	const URLS: &[(Provider, &str, bool)] = &[
-		(Provider::GoogleCalendar, "https://calendar.app.google/AbCd1234XyZ", true),
-		(Provider::GoogleCalendar, "https://calendar.google.com/calendar/appointments/schedules/AcZssZ3x", true),
-		(Provider::GoogleCalendar, "https://calendar.google.com/calendar/appointments/AcZ?gv=true", true),
-		(Provider::GoogleCalendar, "https://calendar.app.google/", false),
-		(Provider::GoogleCalendar, "https://calendar.google.com/calendar/r", false),
-		(Provider::GoogleCalendar, "https://calendar.google.com/calendar/appointments/", false),
-		(Provider::GoogleCalendar, "https://evil.calendar.app.google.example/x", false),
-		(Provider::GoogleCalendar, "https://calendly.com/aquafix/30min", false),
-		(Provider::CalCom, "https://cal.evinvest.ltd/aquafix/devis", true),
-		(Provider::CalCom, "https://cal.com/vifnet/menage", true),
-		(Provider::CalCom, "https://app.cal.com/vifnet/menage", false),
-		(Provider::CalCom, "https://cal.com/", false),
-		(Provider::Link, "https://booking.example.fr/rdv?x=1", true),
-		(Provider::Link, "https://example.fr", true),
-		(Provider::Link, "http://example.fr/rdv", false),
-		(Provider::Link, "ftp://example.fr/rdv", false),
-		(Provider::Link, "javascript:alert(1)", false),
-		(Provider::Link, "https://user:pw@example.fr/rdv", false),
-		(Provider::Link, "https://user@example.fr/rdv", false),
-		(Provider::Link, "https://example.fr:8443/rdv", false),
-		(Provider::Link, "https://example.fr/rdv#ref", false),
-		(Provider::Link, "https://127.0.0.1/rdv", false),
-		(Provider::Link, "https://127.1/rdv", false),
-		(Provider::Link, "https://0x7f.0.0.1/rdv", false),
-		(Provider::Link, "https://[::1]/rdv", false),
-		(Provider::Link, "https://localhost/rdv", false),
-		(Provider::Link, "https://Example.fr/rdv", true),
-		(Provider::Link, "https://example.fr\\rdv", false),
-		(Provider::CalCom, "https://cal.com/vifnet/menage/", false),
-		(Provider::CalCom, "https://cal.com/vifnet", false),
-		(Provider::CalCom, "https://Cal.Com/vifnet/menage", true),
-		(Provider::Link, "https://exa mple.fr/rdv", false),
-		(Provider::Link, "https://exämple.fr/rdv", false),
-		(Provider::Link, "https://-a.fr/rdv", false),
-		(Provider::Link, "https://", false),
-		(Provider::Link, "", false),
-		(Provider::Manual, "https://example.fr", false),
-	];
-
-	#[test]
-	fn urls_by_provider() {
-		for (provider, url, ok) in URLS {
-			assert_eq!(check_url(*provider, url).is_ok(), *ok, "{provider} {url}: {:?}", check_url(*provider, url));
-		}
-		let long = format!("https://example.fr/{}", "a".repeat(MAX_URL));
-		assert!(check_url(Provider::Link, &long).is_err());
-		let fits = format!("https://example.fr/{}", "a".repeat(MAX_URL - "https://example.fr/".len()));
-		assert!(check_url(Provider::Link, &fits).is_ok());
-	}
-
-	#[test]
-	fn configs() {
-		let good = json!({
-			"default": "google_calendar",
-			"providers": {"google_calendar": {"url": "https://calendar.app.google/AbCd"}},
-		});
-		assert_eq!(check_config(&good).unwrap(), good);
-		assert!(check_config(&json!({"default": "manual", "providers": {}})).is_ok(), "manual needs no entry");
-		for (body, path) in [
-			(json!({"default": "calendly", "providers": {}}), ".default"),
-			(json!({"default": "link", "providers": {}}), ".default"),
-			(json!({"providers": {}}), ".default"),
-			(json!({"default": "manual"}), ".providers"),
-			(json!({"default": "manual", "providers": {"manual": {"url": "https://x.fr"}}}), ".providers.manual"),
-			(json!({"default": "manual", "providers": {"manual": {}}}), ".providers.manual"),
-			(json!({"default": "manual", "providers": {"link": {}}}), ".providers.link.url"),
-			(json!({"default": "manual", "providers": {"link": {"url": "http://x.fr"}}}), ".providers.link.url"),
-			(json!({"default": "manual", "providers": {"link": {"url": "https://x.fr", "label": "x"}}}), ".providers.link"),
-			(json!({"default": "manual", "providers": {"calendly": {"url": "https://calendly.com/x"}}}), ".providers.calendly"),
-			(json!({"default": "manual", "providers": {}, "ab": true}), ""),
-			(json!("manual"), ""),
-		] {
-			let problems = check_config(&body).unwrap_err();
-			assert!(problems.iter().any(|(p, _)| p == path), "{body}: {problems:?}");
-		}
-		let bad_default_and_url = check_config(&json!({"default": "cal_com", "providers": {"cal_com": {"url": "https://x.fr/a"}}})).unwrap_err();
-		assert_eq!(bad_default_and_url.len(), 1, "the default is not blamed for its provider's url: {bad_default_and_url:?}");
-	}
 
 	fn at(m: i64) -> Timestamp {
 		"2026-10-05T08:00:00Z".parse::<Timestamp>().unwrap() + SignedDuration::from_mins(m)
@@ -817,19 +780,6 @@ mod tests {
 		let b = fold_external(&mut items).unwrap();
 		assert_eq!((b.start, b.canceled, b.lead), (at(200), true, Some(("L-1".into(), BookingMatch::Manual))));
 		assert_eq!((b.created_event, b.first_event, b.last_event), (id(2), id(1), id(4)));
-	}
-
-	#[test]
-	fn lead_refs_and_wishes() {
-		assert!(is_lead_ref("lead-42-0a1b2c3d"));
-		for bad in ["lead-0-0a1b2c3d", "lead-42-0A1B2C3D", "42", "lead-42-0a1b2c3", "lead-042-0a1b2c3d", "lead--0a1b2c3d"] {
-			assert!(!is_lead_ref(bad), "{bad}");
-		}
-		let today: Date = "2026-10-05".parse().unwrap();
-		assert!(preferred_date_in_window("2026-10-03".parse().unwrap(), today));
-		assert!(!preferred_date_in_window("2026-10-02".parse().unwrap(), today));
-		assert!(preferred_date_in_window("2027-10-06".parse().unwrap(), today));
-		assert!(!preferred_date_in_window("2027-10-07".parse().unwrap(), today));
 	}
 
 	#[test]

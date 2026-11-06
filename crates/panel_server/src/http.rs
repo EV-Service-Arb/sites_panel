@@ -18,7 +18,7 @@
 //!
 //! Answers: `207` with a verdict per event (protojson `sa.v1.IngestResponse`); `409` with
 //! `Retry-After` and the same verdicts when an event names what has not arrived yet (a
-//! `booking.requested` before its `lead.created`: `deferred`) — kitstart's outbox retries a
+//! `booking.requested` before its `lead.created`: `deferred`) — the site's outbox retries a
 //! 409 for `booking.requested`, and what was journaled of the batch is a duplicate then;
 //! `401` without a source's assertion for this body; `400` for a body that is not a batch; `408`
 //! for a body too slow to arrive; `413` past [`MAX_BODY`]; `503` when shedding load; `500` for
@@ -302,7 +302,7 @@ async fn ingest(State(ingest): State<Ingest>, req: Request) -> Response {
 				})
 				.collect();
 			if deferred {
-				// A 207's `rejected` is final to kitstart's outbox; a 409 (or 425) on
+				// A 207's `rejected` is final to a site's outbox; a 409 (or 425) on
 				// `booking.requested` it sends again (lib#185). Not a 5xx: nothing failed here.
 				let mut res = (StatusCode::CONFLICT, Json(IngestResponse { results })).into_response();
 				res.headers_mut().insert(header::RETRY_AFTER, HeaderValue::from_static(DEFERRED_RETRY_AFTER));

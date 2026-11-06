@@ -1,4 +1,4 @@
-import type { PricingModel } from "../model/model";
+import type { PricingModel } from "@evinvest/sites-contract";
 
 /** The parts of a model a history row names when it says what a save changed. */
 export const MODEL_PARTS = ["validFrom", "general", "inputs", "needs"] as const;

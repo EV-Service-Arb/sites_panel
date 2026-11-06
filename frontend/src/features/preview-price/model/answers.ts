@@ -1,11 +1,11 @@
-import type { PricingAnswers, PricingModel } from "@/entities/pricing";
+import type { PricingInputs, PricingModel } from "@evinvest/sites-contract";
 
 /**
  * The answers to send for `need`: the ones picked, where the model still has
  * them, else each asked input's first option — so a price shows at once and
  * survives an option being renamed in the draft.
  */
-export function answersFor(model: PricingModel, need: string, picked: PricingAnswers): Record<string, string> {
+export function answersFor(model: PricingModel, need: string, picked: PricingInputs): Record<string, string> {
   const pricing = Object.hasOwn(model.needs, need) ? model.needs[need] : undefined;
   if (pricing?.kind !== "estimate") return {};
   const out: Record<string, string> = {};

@@ -1,20 +1,21 @@
+import type { OpeningHours } from "@evinvest/sites-contract";
 import { describe, expect, it } from "vitest";
 
 import { channelPreview } from "@/entities/place/lib/channels";
 import { diffLineText, diffSettings } from "@/entities/place/lib/diff";
-import { formatDays, formatHours, isOpenAt, localTimeOf } from "@/entities/place/lib/hours";
+import { formatDays, formatHours, localTimeOf } from "@/entities/place/lib/hours";
 import { placesParser } from "@/entities/place/model/place";
-import { type HoursRow, type PlaceSettings, historyParser, placeSettingsParser, settingsParser, settingsToWire } from "@/entities/place/model/settings";
-import { addArea, draftChanged, draftOf, editedOf, looksLikeE164, settingsOf } from "@/features/edit-place-settings/model/draft";
+import { type PlaceSettings, historyParser, placeSettingsParser, settingsParser, settingsToWire } from "@/entities/place/model/settings";
+import { addArea, draftChanged, draftOf, draftProblems, editedOf, settingsOf } from "@/features/edit-place-settings/model/draft";
 import { fieldErrorsOf } from "@/features/edit-place-settings/model/field-errors";
-import { addHoursRow, hoursDraftOf, hoursOf, normaliseTime, removeHoursRow, rowNotes, rowProblems, updateHoursRow } from "@/features/edit-place-settings/model/hours-draft";
+import { addHoursRow, hoursDraftOf, hoursOf, normaliseTime, removeHoursRow, rowProblems, updateHoursRow } from "@/features/edit-place-settings/model/hours-draft";
 import { createHttp } from "@/shared/api/http";
 import { translator } from "@/shared/i18n/translate";
 import { parse } from "@/shared/lib/parse";
 
 const en = translator("en");
 
-const weekdays: HoursRow = { days: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"], opens: "08:00", closes: "19:00" };
+const weekdays: OpeningHours = { days: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"], opens: "08:00", closes: "19:00" };
 const address = { street: "12 rue Paul Bert", postalCode: "69003", locality: "Lyon" };
 
 const settings = (o: unknown): PlaceSettings => parse(settingsParser, o);
@@ -92,9 +93,9 @@ describe("the hours editor", () => {
   it("names what stops a row from saving", () => {
     const [row] = hoursDraftOf([{ days: [], opens: "8", closes: "08:00" }]);
     if (!row) throw new Error("no row");
-    expect(rowProblems([row], row).map((p) => p.kind)).toEqual(["no_days", "bad_opens"]);
+    expect(rowProblems([row], row).map((p) => p.code)).toEqual(["empty", "time"]);
     const same = { ...row, days: ["Monday" as const], opens: "08:00" };
-    expect(rowProblems([same], same).map((p) => p.kind)).toEqual(["same_time"]);
+    expect(rowProblems([same], same).map((p) => p.code)).toEqual(["closes_before_opens"]);
   });
 
   it("allows a lunch break, refuses rows whose times overlap on a day", () => {
@@ -104,16 +105,16 @@ describe("the hours editor", () => {
     ]);
     expect(split.flatMap((r) => rowProblems(split, r))).toEqual([]);
     const clash = updateHoursRow(split, split[1]?.key ?? -1, { opens: "11:00" });
-    expect(rowProblems(clash, clash[0] ?? split[0]!)).toEqual([{ kind: "overlap", days: ["Monday"] }]);
+    expect(rowProblems(clash, clash[0] ?? split[0]!)).toEqual([{ code: "overlap", days: ["Monday"] }]);
   });
 
-  it("notes a row past midnight, and counts it on the next day", () => {
+  it("refuses a row past midnight, as the server does: a night is two rows", () => {
     const night = hoursDraftOf([
       { days: ["Friday"], opens: "20:00", closes: "02:00" },
       { days: ["Saturday"], opens: "01:00", closes: "05:00" },
     ]);
-    expect(rowNotes(night[0]!)).toEqual(["overnight"]);
-    expect(rowProblems(night, night[1]!)).toEqual([{ kind: "overlap", days: ["Saturday"] }]);
+    expect(rowProblems(night, night[0]!)).toEqual([{ code: "closes_before_opens" }]);
+    expect(rowProblems(night, night[1]!)).toEqual([]);
   });
 });
 
@@ -130,9 +131,10 @@ describe("the form draft", () => {
     expect(editedOf({ ...draft, phone: "  ", serviceArea: [] })).toEqual({});
   });
 
-  it("warns on a number that is not E.164, never on an empty one", () => {
-    expect(["+33 6 12 34 56 78", "+33612345678", ""].map(looksLikeE164)).toEqual([true, true, true]);
-    expect(["0612345678", "+0612345678", "+33"].map(looksLikeE164)).toEqual([false, false, false]);
+  it("refuses a number that is not E.164 on its field, never an empty one", () => {
+    const problems = (phone: string) => [...draftProblems({ ...draftOf({}), phone })];
+    expect(["+33 6 12 34 56 78", "+33612345678", ""].map(problems)).toEqual([[], [], []]);
+    expect(["0612345678", "+0612345678", "+33"].map(problems)).toEqual([[["phone", "e164"]], [["phone", "e164"]], [["phone", "e164"]]]);
   });
 
   it("adds a commune once, whatever its case or spacing", () => {
@@ -218,12 +220,6 @@ describe("the channel preview", () => {
     const p = channelPreview({ hours }, { day: "Monday", minutes: 10 * 60 });
     expect(p.slots.find((s) => s.channel === "call")).toEqual({ channel: "call", value: null, from: "site" });
     expect(p.slots.find((s) => s.channel === "whatsapp")).toEqual({ channel: "whatsapp", value: null, from: "site" });
-  });
-
-  it("reads hours past midnight as open into the next morning", () => {
-    const night = [{ days: ["Friday" as const], opens: "20:00", closes: "02:00" }];
-    expect(isOpenAt(night, { day: "Saturday", minutes: 60 })).toBe(true);
-    expect(isOpenAt(night, { day: "Saturday", minutes: 3 * 60 })).toBe(false);
   });
 
   it("tells the time on the place's clock, not the browser's", () => {

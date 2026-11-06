@@ -1,0 +1,14 @@
+{
+  "problems": [
+    {
+      "path": "providers.manual",
+      "code": "manual"
+    }
+  ],
+  "config": {
+    "default": "manual",
+    "providers": {
+      "manual": {}
+    }
+  }
+}

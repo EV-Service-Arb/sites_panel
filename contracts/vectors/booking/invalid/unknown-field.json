@@ -1,0 +1,13 @@
+{
+  "problems": [
+    {
+      "path": "",
+      "code": "unknown_key"
+    }
+  ],
+  "config": {
+    "default": "manual",
+    "providers": {},
+    "embed": true
+  }
+}

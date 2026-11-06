@@ -1,0 +1,16 @@
+{
+  "problems": [
+    {
+      "path": "providers.link.url",
+      "code": "host"
+    }
+  ],
+  "config": {
+    "default": "link",
+    "providers": {
+      "link": {
+        "url": "https://localhost/vifnet"
+      }
+    }
+  }
+}

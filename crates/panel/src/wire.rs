@@ -335,7 +335,7 @@ pub fn check(key: &TypeKey, kind: SourceKind, properties: &Value, subject: &Subj
 				return Checked::Invalid(Invalid::new("properties of booking.requested hold no null"));
 			}
 			props::<v1::BookingRequestedV1>(key, properties).and_then(|p| {
-				// The site names its lead twice, in the subject and as kitstart's leadRef: they
+				// The site names its lead twice, in the subject and as its leadRef: they
 				// must be the one id, or the booking would join another lead than it says.
 				let date = p.preferred_date.as_deref().map(|d| day("properties.preferred_date", d)).transpose()?;
 				let (provider, preferred_date, preferred_part) = booking::requested(&p.lead_ref, &p.provider, date, p.preferred_part.as_deref())?;

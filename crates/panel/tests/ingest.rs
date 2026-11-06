@@ -839,3 +839,27 @@ async fn the_bot_kind_migration_keeps_the_journal_and_its_keys() {
 	assert!(migrator.undo(&pool, BOT_KIND - 1).await.is_err(), "a database with a bot's key does not go back");
 	assert_eq!(count(&pool, "SELECT count(*) FROM sources").await, 3, "and loses nothing trying");
 }
+
+/// `contracts/vectors/ingest`: what `@evinvest/sites-contract`'s `siteEvent` writes, as the
+/// panel reads it — every event accepted under its site's key, a lead before its booking.
+#[tokio::test]
+async fn the_bodies_a_site_sends() {
+	let db = TestDb::create().await;
+	let panel = panel(&db).await;
+	let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../contracts/vectors/ingest");
+	let mut vectors: Vec<Value> = std::fs::read_dir(&dir)
+		.unwrap()
+		.map(|e| e.unwrap().path())
+		.filter(|p| p.file_name().is_some_and(|n| n != "declarations.json"))
+		.map(|p| serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap())
+		.collect();
+	vectors.sort_by_key(|v| v["key"] != "lead.created@1");
+	assert!(vectors.len() > 1);
+	for v in vectors {
+		let head = &v["head"];
+		let key = grant(head["sourceId"].as_str().unwrap(), SourceKind::Site, &[head["subject"]["brandId"].as_str().unwrap()]);
+		let now = head["occurredAt"].as_str().unwrap().parse::<Timestamp>().unwrap() + SignedDuration::from_mins(1);
+		let verdicts = panel.ingest(&key, &serde_json::to_vec(&v["body"]).unwrap(), now).await.unwrap();
+		assert_eq!(outcomes(&verdicts), [ACCEPTED], "{}", v["name"]);
+	}
+}

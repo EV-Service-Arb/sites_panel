@@ -1,0 +1,52 @@
+{
+  "name": "a form's lead, from a place",
+  "key": "lead.created@1",
+  "head": {
+    "id": "0199b3a0-6c00-7000-8000-000000000001",
+    "occurredAt": "2026-10-05T08:00:00.000Z",
+    "sourceId": "aquafix-site",
+    "subject": {
+      "brandId": "aquafix",
+      "locationId": "royat",
+      "leadId": "lead-42-0a1b2c3d"
+    }
+  },
+  "properties": {
+    "channel": "form"
+  },
+  "pii": {
+    "name": "Jeanne Martin",
+    "phone": "+33612345678",
+    "need": "Chauffe-eau",
+    "locality": "63130"
+  },
+  "body": {
+    "events": [
+      {
+        "id": "0199b3a0-6c00-7000-8000-000000000001",
+        "schema": "sa.funnel.v1",
+        "type": "lead.created",
+        "typeVersion": 1,
+        "occurredAt": "2026-10-05T08:00:00.000Z",
+        "source": {
+          "kind": "site",
+          "id": "aquafix-site"
+        },
+        "subject": {
+          "brandId": "aquafix",
+          "locationId": "royat",
+          "leadId": "lead-42-0a1b2c3d"
+        },
+        "properties": {
+          "channel": "form"
+        },
+        "pii": {
+          "name": "Jeanne Martin",
+          "phone": "+33612345678",
+          "need": "Chauffe-eau",
+          "locality": "63130"
+        }
+      }
+    ]
+  }
+}

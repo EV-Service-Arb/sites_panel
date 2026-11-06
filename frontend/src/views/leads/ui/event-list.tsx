@@ -1,6 +1,7 @@
+import { MESSENGERS } from "@evinvest/sites-contract";
 import { Badge } from "@evinvest/uikit";
 
-import { ChannelIcon, type LeadEvent, MESSENGERS } from "@/entities/lead";
+import { ChannelIcon, type LeadEvent } from "@/entities/lead";
 import { useLocale, useT } from "@/shared/i18n";
 import { formatDateTime } from "@/shared/lib/format";
 

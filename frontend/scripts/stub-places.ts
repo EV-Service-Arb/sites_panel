@@ -1,12 +1,14 @@
 /**
  * Place settings for the dev stub: the live site data a place's page merges
  * over its baked config (SA-PANEL-PLACE-SETTINGS-SPEC.md, "Session API
- * contract"). In memory, validated roughly as the backend validates, with a
+ * contract"). In memory, validated by the contract's `checkPlaceLive`, with a
  * journal for the history and the reverts.
  *
  *   STUB_PLACES_CONFLICT=1   every save and revert answers 409, as if someone saved first
  */
 import { randomUUID } from "node:crypto";
+
+import { checkPlaceLive } from "@evinvest/sites-contract";
 
 type Json = Record<string, unknown>;
 
@@ -31,9 +33,6 @@ interface Change {
 }
 
 const ALWAYS_CONFLICT = process.env.STUB_PLACES_CONFLICT === "1";
-const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
-const E164 = /^\+[1-9]\d{6,14}$/;
 
 const iso = () => new Date().toISOString();
 
@@ -86,51 +85,9 @@ function view(brand: string, slug: string, role: string): Json {
   return { brand, slug, withdrawn: p.withdrawn, settings: p.settings, updated_at: p.updated_at, updated_by: p.updated_by, can_edit: role === "admin" };
 }
 
-/** The backend refuses rather than drops, so the editor sees why: one reason per field. */
+/** The backend refuses rather than drops, so the editor sees why: one reason per path. */
 function invalid(s: Json): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const k of ["phone", "whatsapp"]) {
-    if (s[k] !== undefined && !(typeof s[k] === "string" && E164.test(s[k]))) out[k] = "must be E.164, e.g. +33612345678";
-  }
-  if (s.hours !== undefined) {
-    const rows = Array.isArray(s.hours) ? s.hours : null;
-    if (!rows || rows.length === 0) out.hours = "must be a non-empty list";
-    rows?.forEach((r: Json, i) => {
-      if (!Array.isArray(r.days) || r.days.length === 0 || !r.days.every((d) => DAYS.includes(String(d)))) out[`hours[${i}].days`] = "must name at least one day, Monday…Sunday";
-      if (!TIME.test(String(r.opens))) out[`hours[${i}].opens`] = "must be HH:MM";
-      if (!TIME.test(String(r.closes))) out[`hours[${i}].closes`] = "must be HH:MM";
-    });
-  }
-  if (s.telegram !== undefined && !(typeof s.telegram === "string" && /^[A-Za-z][A-Za-z0-9_]{3,31}$/.test(s.telegram))) {
-    out.telegram = "must be a bot's username without the @: a letter, then 3 to 31 of letters, digits and _";
-  }
-  if (s.messengers !== undefined) {
-    const m = s.messengers;
-    if (typeof m !== "object" || m === null || Array.isArray(m)) out.messengers = 'must be an object like {"whatsapp": true, "telegram": false}';
-    else
-      for (const [k, on] of Object.entries(m)) {
-        if (k !== "whatsapp" && k !== "telegram") out[`messengers.${k}`] = "is not a messenger; one of whatsapp, telegram";
-        else if (typeof on !== "boolean") out[`messengers.${k}`] = "must be true or false";
-      }
-  }
-  Object.assign(out, invalidBooking(s.booking));
-  if (s.serviceArea !== undefined && !(Array.isArray(s.serviceArea) && s.serviceArea.length > 0 && s.serviceArea.every((n) => typeof n === "string" && n.trim()))) {
-    out.serviceArea = "must be a non-empty list of commune names";
-  }
-  return out;
-}
-
-/** Roughly the backend's booking rules: enough for the panel's 422 on a booking field to be seen. */
-function invalidBooking(b: unknown): Record<string, string> {
-  if (b === undefined) return {};
-  if (typeof b !== "object" || b === null) return { booking: "must be {\"default\": …, \"providers\": {…}}" };
-  const { default: def, providers = {} } = b as { default?: unknown; providers?: Record<string, { url?: unknown }> };
-  const out: Record<string, string> = {};
-  for (const [p, conf] of Object.entries(providers)) {
-    if (typeof conf?.url !== "string" || !conf.url.startsWith("https://")) out[`booking.providers.${p}.url`] = "must start with https://";
-  }
-  if (def !== "manual" && !(typeof def === "string" && def in providers)) out["booking.default"] = "must be manual or one of the providers set";
-  return out;
+  return Object.fromEntries(checkPlaceLive(s).problems.map((p) => [p.path, `${p.code} (stub)`]));
 }
 
 function write(key: string, by: string, change: (p: StubPlace) => void): void {

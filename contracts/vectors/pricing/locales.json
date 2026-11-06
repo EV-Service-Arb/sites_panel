@@ -1,0 +1,158 @@
+[
+  {
+    "name": "labelled in the one locale asked",
+    "locales": [
+      "fr"
+    ],
+    "model": {
+      "format": 1,
+      "currency": "EUR",
+      "validFrom": "2026-10-01",
+      "roundToCents": 1,
+      "minimumCents": 0,
+      "inputs": [
+        {
+          "id": "z",
+          "kind": "add",
+          "labels": {
+            "fr": "Z",
+            "en": "Z"
+          },
+          "options": [
+            {
+              "id": "a",
+              "labels": {
+                "fr": "A"
+              },
+              "addCents": 1
+            }
+          ]
+        }
+      ],
+      "needs": {}
+    },
+    "problems": []
+  },
+  {
+    "name": "an option without its en label",
+    "locales": [
+      "fr",
+      "en"
+    ],
+    "model": {
+      "format": 1,
+      "currency": "EUR",
+      "validFrom": "2026-10-01",
+      "roundToCents": 1,
+      "minimumCents": 0,
+      "inputs": [
+        {
+          "id": "z",
+          "kind": "add",
+          "labels": {
+            "fr": "Z",
+            "en": "Z"
+          },
+          "options": [
+            {
+              "id": "a",
+              "labels": {
+                "fr": "A"
+              },
+              "addCents": 1
+            }
+          ]
+        }
+      ],
+      "needs": {}
+    },
+    "problems": [
+      {
+        "path": "inputs[0].options[0].labels.en",
+        "code": "labelMissing"
+      }
+    ]
+  },
+  {
+    "name": "no de label anywhere",
+    "locales": [
+      "de"
+    ],
+    "model": {
+      "format": 1,
+      "currency": "EUR",
+      "validFrom": "2026-10-01",
+      "roundToCents": 1,
+      "minimumCents": 0,
+      "inputs": [
+        {
+          "id": "z",
+          "kind": "add",
+          "labels": {
+            "fr": "Z",
+            "en": "Z"
+          },
+          "options": [
+            {
+              "id": "a",
+              "labels": {
+                "fr": "A"
+              },
+              "addCents": 1
+            }
+          ]
+        }
+      ],
+      "needs": {}
+    },
+    "problems": [
+      {
+        "path": "inputs[0].labels.de",
+        "code": "labelMissing"
+      },
+      {
+        "path": "inputs[0].options[0].labels.de",
+        "code": "labelMissing"
+      }
+    ]
+  },
+  {
+    "name": "an invalid model is refused for itself",
+    "locales": [
+      "fr"
+    ],
+    "model": {
+      "format": 1,
+      "currency": "USD",
+      "validFrom": "2026-10-01",
+      "roundToCents": 1,
+      "minimumCents": 0,
+      "inputs": [
+        {
+          "id": "z",
+          "kind": "add",
+          "labels": {
+            "fr": "Z",
+            "en": "Z"
+          },
+          "options": [
+            {
+              "id": "a",
+              "labels": {
+                "fr": "A"
+              },
+              "addCents": 1
+            }
+          ]
+        }
+      ],
+      "needs": {}
+    },
+    "problems": [
+      {
+        "path": "currency",
+        "code": "currency"
+      }
+    ]
+  }
+]

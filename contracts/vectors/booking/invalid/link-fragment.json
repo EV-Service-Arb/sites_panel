@@ -1,0 +1,16 @@
+{
+  "problems": [
+    {
+      "path": "providers.link.url",
+      "code": "fragment"
+    }
+  ],
+  "config": {
+    "default": "link",
+    "providers": {
+      "link": {
+        "url": "https://book.example.fr/vifnet#slots"
+      }
+    }
+  }
+}

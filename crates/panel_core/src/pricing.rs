@@ -1,24 +1,19 @@
-//! A brand's price list as data (kitstart's `PricingModel`, EV-Service-Arb/sites_tools `ts/kitstart/src/core/pricing`): what
-//! an `estimate` need costs for a set of enum answers, and what a `fixed` need costs outright.
-//! The panel stores it, serves it to the sites, and prices the editor's preview with its own
-//! [`price_of`] — so a preview is what the site shows only if the two agree to the cent.
+//! A brand's price list as data: what an `estimate` need costs for a set of enum answers, and
+//! what a `fixed` need costs outright. The panel stores it, serves it to the sites, and prices
+//! the editor's preview with [`price_of`]; the sites price with `@evinvest/sites-contract`'s
+//! `priceOf`. Both are held to `contracts/vectors/pricing` (its README is the normative text).
 //!
-//! What holds them together is kitstart's fixtures, vendored by commit in
-//! `tests/fixtures/pricing/` (their README is the normative text): every valid model accepted,
-//! every invalid one refused whole, every case priced to the cent. The checks here follow
-//! kitstart's `validate.ts` rule for rule and say where, with kitstart's paths
-//! (`model.needs.standard.inputs[2]`); the arithmetic follows `price.ts` step for step, on
-//! integers only.
-//!
-//! One difference that cannot be helped: JSON objects are read into sorted maps here, in
-//! insertion order there, so when a model has several problems the first one named may differ
-//! — never whether there is one.
+//! Problems are named by path from the model's root (`needs.standard.inputs[2]`) and a
+//! [`Code`]. JSON objects are read into sorted maps here, in insertion order in TS, so when a
+//! model has several problems the first one named may differ — never which there are.
 
 use std::collections::BTreeMap;
 
-use serde_json::{Map, Value, json};
+use serde::{Serialize, Serializer};
+use serde_json::{Map, Value};
+use ts_rs::TS;
 
-use crate::Invalid;
+use crate::{Invalid, safe_integer};
 
 /// The model's format; a model of another is refused whole.
 pub const FORMAT: i64 = 1;
@@ -30,21 +25,40 @@ pub const DEFAULT_LOCALES: [&str; 2] = ["fr", "en"];
 /// More than any site will speak; a bound, not a plan.
 pub const MAX_LOCALES: usize = 8;
 
-/// kitstart's `PRICING_LIMITS`.
-pub mod limits {
-	pub const MAX_LABEL: usize = 120;
-	pub const MAX_INPUTS: usize = 32;
-	pub const MAX_OPTIONS: usize = 32;
-	pub const MAX_NEEDS: usize = 64;
+/// The model's limits. Every amount, and every step of the dearest combination, stays at or
+/// under `max_price_cents`, so each product fits a double exactly and an `i64` with room to
+/// spare.
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Limits {
+	pub max_label: usize,
+	pub max_inputs: usize,
+	pub max_options: usize,
+	pub max_needs: usize,
 	/// Per need: what a lead's `estimate_inputs` may carry.
-	pub const MAX_NEED_INPUTS: usize = 12;
-	pub const MAX_PRICE_CENTS: i64 = 100_000_000;
+	pub max_need_inputs: usize,
+	pub max_price_cents: i64,
 	/// ×10 at most.
-	pub const MAX_MULTIPLY_BP: i64 = 100_000;
-	pub const MAX_DISCOUNT_BP: i64 = 10_000;
+	pub max_multiply_bp: i64,
+	pub max_discount_bp: i64,
+	/// An id, an option or a need: `^[a-z0-9_-]{1,40}$`.
+	pub slug: &'static str,
+	/// A label's locale: `fr`, `en`, `fr-FR`.
+	pub locale: &'static str,
 }
 
-use limits::*;
+pub const LIMITS: Limits = Limits {
+	max_label: 120,
+	max_inputs: 32,
+	max_options: 32,
+	max_needs: 64,
+	max_need_inputs: 12,
+	max_price_cents: 100_000_000,
+	max_multiply_bp: 100_000,
+	max_discount_bp: 10_000,
+	slug: "^[a-z0-9_-]{1,40}$",
+	locale: "^[a-z]{2}(-[A-Z]{2})?$",
+};
 
 /// 10 000 basis points: ×1.
 const BP: i64 = 10_000;
@@ -52,27 +66,77 @@ const BP: i64 = 10_000;
 /// A label per locale (`{fr: "Studio", en: "Studio"}`); the page picks its own.
 pub type Labels = BTreeMap<String, String>;
 
-/// What an input's options do to the price, and when: every `add` first, then every
-/// `multiply`, then every `discount`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum InputKind {
-	/// `addCents`, added to the base.
-	Add,
-	/// `multiplyBp`: the subtotal times this, in basis points (11 000 is ×1.1).
-	Multiply,
-	/// `discountBp`: taken off the subtotal, in basis points (1 000 is 10 % off).
-	Discount,
+/// `format`, always [`FORMAT`]: a model of another is not one.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct Format;
+
+impl Serialize for Format {
+	fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+		s.serialize_i64(FORMAT)
+	}
+}
+
+/// `currency`, always [`CURRENCY`].
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct Currency;
+
+impl Serialize for Currency {
+	fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+		s.serialize_str(CURRENCY)
+	}
+}
+
+/// Adds `addCents` to the base.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AddOption {
+	pub id: String,
+	pub labels: Labels,
+	#[ts(type = "number")]
+	pub add_cents: i64,
+}
+
+/// The subtotal times `multiplyBp`, in basis points: 11 000 is ×1.1.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct MultiplyOption {
+	pub id: String,
+	pub labels: Labels,
+	#[ts(type = "number")]
+	pub multiply_bp: i64,
+}
+
+/// `discountBp` taken off the subtotal, in basis points: 1 000 is 10 % off.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscountOption {
+	pub id: String,
+	pub labels: Labels,
+	#[ts(type = "number")]
+	pub discount_bp: i64,
+}
+
+/// An enum the visitor answers: bedrooms, a surface band, a zone, a frequency. Its kind says
+/// what its options do, and when: every `add` first, then every `multiply`, then every
+/// `discount`.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, TS)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum PricingInput {
+	Add { id: String, labels: Labels, options: Vec<AddOption> },
+	Multiply { id: String, labels: Labels, options: Vec<MultiplyOption> },
+	Discount { id: String, labels: Labels, options: Vec<DiscountOption> },
+}
+
+vocabulary! {
+	/// What an input's options do to the price.
+	pub enum InputKind, "add, multiply or discount" {
+		Add => "add",
+		Multiply => "multiply",
+		Discount => "discount",
+	}
 }
 
 impl InputKind {
-	pub fn as_str(self) -> &'static str {
-		match self {
-			Self::Add => "add",
-			Self::Multiply => "multiply",
-			Self::Discount => "discount",
-		}
-	}
-
 	/// The field an option of this kind carries its effect in.
 	pub fn effect_field(self) -> &'static str {
 		match self {
@@ -84,56 +148,98 @@ impl InputKind {
 
 	fn effect_max(self) -> i64 {
 		match self {
-			Self::Add => MAX_PRICE_CENTS,
-			Self::Multiply => MAX_MULTIPLY_BP,
-			Self::Discount => MAX_DISCOUNT_BP,
-		}
-	}
-
-	fn parse(raw: &Value) -> Option<Self> {
-		match raw.as_str()? {
-			"add" => Some(Self::Add),
-			"multiply" => Some(Self::Multiply),
-			"discount" => Some(Self::Discount),
-			_ => None,
+			Self::Add => LIMITS.max_price_cents,
+			Self::Multiply => LIMITS.max_multiply_bp,
+			Self::Discount => LIMITS.max_discount_bp,
 		}
 	}
 }
 
-/// One choice of an input: its slug, its words, and its effect (in the unit its input's kind
-/// says).
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PricingOption {
-	pub id: String,
-	pub labels: Labels,
-	pub effect: i64,
-}
+impl PricingInput {
+	pub fn id(&self) -> &str {
+		match self {
+			Self::Add { id, .. } | Self::Multiply { id, .. } | Self::Discount { id, .. } => id,
+		}
+	}
 
-/// An enum the visitor answers: bedrooms, a surface band, a zone, a frequency.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PricingInput {
-	pub id: String,
-	pub kind: InputKind,
-	pub labels: Labels,
-	pub options: Vec<PricingOption>,
+	pub fn kind(&self) -> InputKind {
+		match self {
+			Self::Add { .. } => InputKind::Add,
+			Self::Multiply { .. } => InputKind::Multiply,
+			Self::Discount { .. } => InputKind::Discount,
+		}
+	}
+
+	pub fn labels(&self) -> &Labels {
+		match self {
+			Self::Add { labels, .. } | Self::Multiply { labels, .. } | Self::Discount { labels, .. } => labels,
+		}
+	}
+
+	/// Each option's id, labels and effect, in the unit [`PricingInput::kind`] says.
+	pub fn options(&self) -> Vec<(&str, &Labels, i64)> {
+		match self {
+			Self::Add { options, .. } => options.iter().map(|o| (o.id.as_str(), &o.labels, o.add_cents)).collect(),
+			Self::Multiply { options, .. } => options.iter().map(|o| (o.id.as_str(), &o.labels, o.multiply_bp)).collect(),
+			Self::Discount { options, .. } => options.iter().map(|o| (o.id.as_str(), &o.labels, o.discount_bp)).collect(),
+		}
+	}
+
+	fn new(kind: InputKind, id: String, labels: Labels, options: Vec<(String, Labels, i64)>) -> Self {
+		match kind {
+			InputKind::Add => Self::Add {
+				id,
+				labels,
+				options: options.into_iter().map(|(id, labels, add_cents)| AddOption { id, labels, add_cents }).collect(),
+			},
+			InputKind::Multiply => Self::Multiply {
+				id,
+				labels,
+				options: options.into_iter().map(|(id, labels, multiply_bp)| MultiplyOption { id, labels, multiply_bp }).collect(),
+			},
+			InputKind::Discount => Self::Discount {
+				id,
+				labels,
+				options: options.into_iter().map(|(id, labels, discount_bp)| DiscountOption { id, labels, discount_bp }).collect(),
+			},
+		}
+	}
 }
 
 /// How one need is priced.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, TS)]
+#[serde(tag = "kind", rename_all = "lowercase", rename_all_fields = "camelCase")]
 pub enum NeedPricing {
 	/// A base and the inputs the visitor answers, in the order the form asks them.
-	Estimate { base_cents: i64, inputs: Vec<String> },
+	Estimate {
+		#[ts(type = "number")]
+		base_cents: i64,
+		inputs: Vec<String>,
+	},
 	/// One price, exactly: neither rounded nor raised to the minimum.
-	Fixed { cents: i64 },
+	Fixed {
+		#[ts(type = "number")]
+		cents: i64,
+	},
 }
 
-/// A checked model. Only [`PricingModel::parse`] makes one, so every value in it is within
-/// the limits — which is what keeps [`price_of`] within an `i64` with room to spare.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// A checked model, in its wire shape: every value within the limits, which keeps a price
+/// within an `i64` and a double alike. Only [`PricingModel::parse`] makes one.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct PricingModel {
-	/// `YYYY-MM-DD`, a day the calendar has: when the prices hold from.
+	#[ts(type = "1")]
+	pub format: Format,
+	#[ts(type = "\"EUR\"")]
+	pub currency: Currency,
+	/// `YYYY-MM-DD`, a day the calendar has: when the prices hold from. Stored with every lead
+	/// priced by it.
 	pub valid_from: String,
+	/// The estimate's total is rounded half up to a multiple of this (1 = to the cent).
+	#[ts(type = "number")]
 	pub round_to_cents: i64,
+	/// An estimate never comes out below this, after the rounding.
+	#[ts(type = "number")]
 	pub minimum_cents: i64,
 	pub inputs: Vec<PricingInput>,
 	/// By the brand's need slug; a need not here is a quote.
@@ -143,24 +249,42 @@ pub struct PricingModel {
 /// The answers to an estimate's inputs: input id → option id.
 pub type PricingInputs = BTreeMap<String, String>;
 
-/// One thing wrong with a model: where (kitstart's path, `model.inputs[0].options[2].addCents`)
-/// and why (kitstart's words).
+vocabulary! {
+	/// Why a model, or a part of it, is refused.
+	pub enum Code, "not a pricing problem code" {
+		Object => "object",
+		Missing => "missing",
+		UnknownField => "unknownField",
+		Format => "format",
+		Currency => "currency",
+		Date => "date",
+		Int => "int",
+		Slug => "slug",
+		Labels => "labels",
+		Locale => "locale",
+		Label => "label",
+		List => "list",
+		Duplicate => "duplicate",
+		Kind => "kind",
+		NeedKind => "needKind",
+		NoInput => "noInput",
+		Dearest => "dearest",
+		LabelMissing => "labelMissing",
+	}
+}
+
+/// One thing wrong with a model: where (`inputs[0].options[2].addCents`, `""` for the model
+/// itself), the code both checkers agree on, and why in words.
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
-#[error("{path}: {why}")]
+#[error("{}: {why}", if path.is_empty() { "model" } else { path })]
 pub struct Problem {
 	pub path: String,
+	pub code: Code,
 	pub why: String,
 }
 
-/// Collects problems at a path, as kitstart's `Check` does.
-#[derive(Default)]
-struct Check {
-	problems: Vec<Problem>,
-}
-
-/// kitstart's `isObject`: an object, not an array or null.
-fn object(v: &Value) -> Option<&Map<String, Value>> {
-	v.as_object()
+fn at(path: &str, key: &str) -> String {
+	if path.is_empty() { key.to_owned() } else { format!("{path}.{key}") }
 }
 
 /// `^[a-z0-9_-]{1,40}$`.
@@ -179,8 +303,7 @@ pub fn is_locale(s: &str) -> bool {
 	}
 }
 
-/// `YYYY-MM-DD` of ASCII digits, and a day the (proleptic Gregorian) calendar has — what
-/// kitstart's `isDate` accepts.
+/// `YYYY-MM-DD` of ASCII digits, and a day the (proleptic Gregorian) calendar has.
 pub fn is_date(s: &str) -> bool {
 	let b = s.as_bytes();
 	let digits = |r: std::ops::Range<usize>| b[r].iter().all(u8::is_ascii_digit);
@@ -200,45 +323,35 @@ pub fn is_date(s: &str) -> bool {
 	(1..=days).contains(&day)
 }
 
-/// JavaScript's `Number.isSafeInteger`, on a JSON number: `100.0` and `1e2` are the integer
-/// 100 there, as they are here.
-fn safe_integer(v: &Value) -> Option<i64> {
-	const MAX_SAFE: i64 = (1 << 53) - 1;
-	let n = match v {
-		Value::Number(n) => n,
-		_ => return None,
-	};
-	if let Some(i) = n.as_i64() {
-		return (-MAX_SAFE..=MAX_SAFE).contains(&i).then_some(i);
-	}
-	if n.is_u64() {
-		return None;
-	}
-	let f = n.as_f64()?;
-	// A float within ±2^53 with no fraction is exactly an integer, so the cast is exact.
-	(f.fract() == 0.0 && f.abs() <= MAX_SAFE as f64).then_some(f as i64)
-}
-
-/// `v` as text the way JavaScript counts it: in UTF-16 code units.
+/// Text as JavaScript counts it: in UTF-16 code units.
 fn js_len(s: &str) -> usize {
 	s.encode_utf16().count()
 }
 
+#[derive(Default)]
+struct Check {
+	problems: Vec<Problem>,
+}
+
 impl Check {
-	fn fail(&mut self, path: impl Into<String>, why: impl Into<String>) {
-		self.problems.push(Problem { path: path.into(), why: why.into() });
+	fn fail(&mut self, path: impl Into<String>, code: Code, why: impl Into<String>) {
+		self.problems.push(Problem {
+			path: path.into(),
+			code,
+			why: why.into(),
+		});
 	}
 
 	/// Only these keys, all of them required.
 	fn keys(&mut self, path: &str, v: &Map<String, Value>, required: &[&str]) {
 		for key in required {
 			if !v.contains_key(*key) {
-				self.fail(format!("{path}.{key}"), "missing");
+				self.fail(at(path, key), Code::Missing, "missing");
 			}
 		}
 		for key in v.keys() {
 			if !required.contains(&key.as_str()) {
-				self.fail(format!("{path}.{key}"), "unknown field");
+				self.fail(at(path, key), Code::UnknownField, "unknown field");
 			}
 		}
 	}
@@ -247,7 +360,7 @@ impl Check {
 		match v.and_then(safe_integer) {
 			Some(n) if (min..=max).contains(&n) => n,
 			_ => {
-				self.fail(path, format!("an integer from {min} to {max}"));
+				self.fail(path, Code::Int, format!("an integer from {min} to {max}"));
 				min
 			}
 		}
@@ -257,28 +370,28 @@ impl Check {
 		match v.and_then(Value::as_str) {
 			Some(s) if is_slug(s) => s.to_owned(),
 			_ => {
-				self.fail(path, "a slug, [a-z0-9_-]{1,40}");
+				self.fail(path, Code::Slug, "a slug, [a-z0-9_-]{1,40}");
 				String::new()
 			}
 		}
 	}
 
 	fn labels(&mut self, path: &str, v: Option<&Value>) -> Labels {
-		let Some(m) = v.and_then(object).filter(|m| !m.is_empty()) else {
-			self.fail(path, "an object of labels by locale, at least one");
+		let Some(m) = v.and_then(Value::as_object).filter(|m| !m.is_empty()) else {
+			self.fail(path, Code::Labels, "an object of labels by locale, at least one");
 			return Labels::new();
 		};
 		let mut out = Labels::new();
 		for (locale, text) in m {
 			if !is_locale(locale) {
-				self.fail(format!("{path}.{locale}"), "not a locale (fr, en, fr-FR)");
+				self.fail(at(path, locale), Code::Locale, "not a locale (fr, en, fr-FR)");
 				continue;
 			}
 			match text.as_str() {
-				Some(t) if !t.trim().is_empty() && js_len(t) <= MAX_LABEL => {
+				Some(t) if !t.trim().is_empty() && js_len(t) <= LIMITS.max_label => {
 					out.insert(locale.clone(), t.to_owned());
 				}
-				_ => self.fail(format!("{path}.{locale}"), format!("a label of 1 to {MAX_LABEL} characters")),
+				_ => self.fail(at(path, locale), Code::Label, format!("a label of 1 to {} characters", LIMITS.max_label)),
 			}
 		}
 		out
@@ -288,7 +401,7 @@ impl Check {
 		match v.and_then(Value::as_array) {
 			Some(a) if (min..=max).contains(&a.len()) => a,
 			_ => {
-				self.fail(path, format!("a list of {min} to {max}"));
+				self.fail(path, Code::List, format!("a list of {min} to {max}"));
 				&[]
 			}
 		}
@@ -297,72 +410,68 @@ impl Check {
 	fn unique<'a>(&mut self, path: &str, ids: impl IntoIterator<Item = &'a str>) {
 		let mut seen = std::collections::BTreeSet::new();
 		if let Some(dup) = ids.into_iter().filter(|id| !id.is_empty()).find(|id| !seen.insert(*id)) {
-			self.fail(path, format!("\"{dup}\" is listed twice"));
+			self.fail(path, Code::Duplicate, format!("\"{dup}\" is listed twice"));
 		}
 	}
 
 	fn input(&mut self, path: &str, v: &Value) -> Option<PricingInput> {
-		let Some(v) = object(v) else {
-			self.fail(path, "an object");
+		let Some(v) = v.as_object() else {
+			self.fail(path, Code::Object, "an object");
 			return None;
 		};
 		self.keys(path, v, &["id", "kind", "labels", "options"]);
-		let id = self.slug(&format!("{path}.id"), v.get("id"));
-		let labels = self.labels(&format!("{path}.labels"), v.get("labels"));
-		let Some(kind) = v.get("kind").and_then(InputKind::parse) else {
-			self.fail(format!("{path}.kind"), "add, multiply or discount");
+		let id = self.slug(&at(path, "id"), v.get("id"));
+		let labels = self.labels(&at(path, "labels"), v.get("labels"));
+		let Some(kind) = v.get("kind").and_then(Value::as_str).and_then(|k| InputKind::parse(k).ok()) else {
+			self.fail(at(path, "kind"), Code::Kind, "add, multiply or discount");
 			return None;
 		};
 		let effect = kind.effect_field();
 		let mut options = Vec::new();
-		for (i, o) in self.list(&format!("{path}.options"), v.get("options"), 1, MAX_OPTIONS).iter().enumerate() {
-			let at = format!("{path}.options[{i}]");
-			let Some(o) = object(o) else {
-				self.fail(&at, "an object");
-				options.push(PricingOption {
-					id: String::new(),
-					labels: Labels::new(),
-					effect: 0,
-				});
+		for (i, o) in self.list(&at(path, "options"), v.get("options"), 1, LIMITS.max_options).iter().enumerate() {
+			let there = format!("{path}.options[{i}]");
+			let Some(o) = o.as_object() else {
+				self.fail(&there, Code::Object, "an object");
+				options.push((String::new(), Labels::new(), 0));
 				continue;
 			};
-			self.keys(&at, o, &["id", "labels", effect]);
-			options.push(PricingOption {
-				id: self.slug(&format!("{at}.id"), o.get("id")),
-				labels: self.labels(&format!("{at}.labels"), o.get("labels")),
-				effect: self.int(&format!("{at}.{effect}"), o.get(effect), 0, kind.effect_max()),
-			});
+			self.keys(&there, o, &["id", "labels", effect]);
+			options.push((
+				self.slug(&at(&there, "id"), o.get("id")),
+				self.labels(&at(&there, "labels"), o.get("labels")),
+				self.int(&at(&there, effect), o.get(effect), 0, kind.effect_max()),
+			));
 		}
-		self.unique(&format!("{path}.options"), options.iter().map(|o| o.id.as_str()));
-		Some(PricingInput { id, kind, labels, options })
+		self.unique(&at(path, "options"), options.iter().map(|(id, ..)| id.as_str()));
+		Some(PricingInput::new(kind, id, labels, options))
 	}
 
 	fn need(&mut self, path: &str, v: &Value, inputs: &[PricingInput]) -> Option<NeedPricing> {
-		let Some(v) = object(v) else {
-			self.fail(path, "an object");
+		let Some(v) = v.as_object() else {
+			self.fail(path, Code::Object, "an object");
 			return None;
 		};
 		match v.get("kind").and_then(Value::as_str) {
 			Some("fixed") => {
 				self.keys(path, v, &["kind", "cents"]);
 				return Some(NeedPricing::Fixed {
-					cents: self.int(&format!("{path}.cents"), v.get("cents"), 0, MAX_PRICE_CENTS),
+					cents: self.int(&at(path, "cents"), v.get("cents"), 0, LIMITS.max_price_cents),
 				});
 			}
 			Some("estimate") => {}
 			_ => {
-				self.fail(format!("{path}.kind"), "estimate or fixed");
+				self.fail(at(path, "kind"), Code::NeedKind, "estimate or fixed");
 				return None;
 			}
 		}
 		self.keys(path, v, &["kind", "baseCents", "inputs"]);
-		let base_cents = self.int(&format!("{path}.baseCents"), v.get("baseCents"), 0, MAX_PRICE_CENTS);
-		let listed = self.list(&format!("{path}.inputs"), v.get("inputs"), 0, MAX_NEED_INPUTS);
+		let base_cents = self.int(&at(path, "baseCents"), v.get("baseCents"), 0, LIMITS.max_price_cents);
+		let listed = self.list(&at(path, "inputs"), v.get("inputs"), 0, LIMITS.max_need_inputs);
 		let ids: Vec<String> = listed.iter().enumerate().map(|(i, id)| self.slug(&format!("{path}.inputs[{i}]"), Some(id))).collect();
-		self.unique(&format!("{path}.inputs"), ids.iter().map(String::as_str));
+		self.unique(&at(path, "inputs"), ids.iter().map(String::as_str));
 		for (i, id) in ids.iter().enumerate() {
-			if !id.is_empty() && !inputs.iter().any(|input| input.id == *id) {
-				self.fail(format!("{path}.inputs[{i}]"), format!("no input \"{id}\""));
+			if !id.is_empty() && !inputs.iter().any(|input| input.id() == id) {
+				self.fail(format!("{path}.inputs[{i}]"), Code::NoInput, format!("no input \"{id}\""));
 			}
 		}
 		Some(NeedPricing::Estimate { base_cents, inputs: ids })
@@ -372,63 +481,63 @@ impl Check {
 	/// and rounding half up is monotonic — walked step by step: if no step of it passes the
 	/// cap, no combination does.
 	fn dearest(&mut self, path: &str, base_cents: i64, asked: &[String], inputs: &[PricingInput]) {
-		let asked: Vec<&PricingInput> = asked.iter().filter_map(|id| inputs.iter().find(|i| i.id == *id)).collect();
-		let max = |i: &PricingInput| match i.kind {
-			InputKind::Add | InputKind::Multiply => i.options.iter().map(|o| o.effect).max().unwrap_or(0),
+		let asked: Vec<&PricingInput> = asked.iter().filter_map(|id| inputs.iter().find(|i| i.id() == id)).collect();
+		let max = |i: &PricingInput| match i.kind() {
+			InputKind::Add | InputKind::Multiply => i.options().iter().map(|(.., effect)| *effect).max().expect("an input has an option at least"),
 			InputKind::Discount => 0,
 		};
 		let mut total = base_cents;
-		let mut over = total > MAX_PRICE_CENTS;
-		for i in asked.iter().filter(|i| i.kind == InputKind::Add) {
+		let mut over = total > LIMITS.max_price_cents;
+		for i in asked.iter().filter(|i| i.kind() == InputKind::Add) {
 			total += max(i);
-			over |= total > MAX_PRICE_CENTS;
+			over |= total > LIMITS.max_price_cents;
 		}
-		for i in asked.iter().filter(|i| i.kind == InputKind::Multiply) {
+		for i in asked.iter().filter(|i| i.kind() == InputKind::Multiply) {
 			total = mul_bp(total, max(i));
-			over |= total > MAX_PRICE_CENTS;
+			over |= total > LIMITS.max_price_cents;
 		}
 		if over {
-			self.fail(path, format!("its dearest combination passes {MAX_PRICE_CENTS} cents"));
+			self.fail(path, Code::Dearest, format!("its dearest combination passes {} cents", LIMITS.max_price_cents));
 		}
 	}
 }
 
 impl PricingModel {
-	/// The model `value` is, or every reason it is not one (kitstart's `pricingProblems`):
-	/// taken whole or not at all, unknown fields refused rather than ignored.
+	/// The model `value` is, or every reason it is not one: taken whole or not at all, unknown
+	/// fields refused rather than ignored.
 	pub fn parse(value: &Value) -> Result<Self, Vec<Problem>> {
 		let mut c = Check::default();
-		let Some(v) = object(value) else {
-			c.fail("model", "an object");
+		let Some(v) = value.as_object() else {
+			c.fail("", Code::Object, "an object");
 			return Err(c.problems);
 		};
-		c.keys("model", v, &["format", "currency", "validFrom", "roundToCents", "minimumCents", "inputs", "needs"]);
+		c.keys("", v, &["format", "currency", "validFrom", "roundToCents", "minimumCents", "inputs", "needs"]);
 		if v.get("format").and_then(safe_integer) != Some(FORMAT) {
-			c.fail("model.format", FORMAT.to_string());
+			c.fail("format", Code::Format, FORMAT.to_string());
 		}
 		if v.get("currency").and_then(Value::as_str) != Some(CURRENCY) {
-			c.fail("model.currency", CURRENCY);
+			c.fail("currency", Code::Currency, CURRENCY);
 		}
 		let valid_from = v.get("validFrom").and_then(Value::as_str).filter(|d| is_date(d));
 		if valid_from.is_none() {
-			c.fail("model.validFrom", "a date, YYYY-MM-DD");
+			c.fail("validFrom", Code::Date, "a date, YYYY-MM-DD");
 		}
-		let round_to_cents = c.int("model.roundToCents", v.get("roundToCents"), 1, MAX_PRICE_CENTS);
-		let minimum_cents = c.int("model.minimumCents", v.get("minimumCents"), 0, MAX_PRICE_CENTS);
-		let listed = c.list("model.inputs", v.get("inputs"), 0, MAX_INPUTS);
-		let inputs: Vec<PricingInput> = listed.iter().enumerate().filter_map(|(i, input)| c.input(&format!("model.inputs[{i}]"), input)).collect();
-		c.unique("model.inputs", inputs.iter().map(|i| i.id.as_str()));
+		let round_to_cents = c.int("roundToCents", v.get("roundToCents"), 1, LIMITS.max_price_cents);
+		let minimum_cents = c.int("minimumCents", v.get("minimumCents"), 0, LIMITS.max_price_cents);
+		let listed = c.list("inputs", v.get("inputs"), 0, LIMITS.max_inputs);
+		let inputs: Vec<PricingInput> = listed.iter().enumerate().filter_map(|(i, input)| c.input(&format!("inputs[{i}]"), input)).collect();
+		c.unique("inputs", inputs.iter().map(PricingInput::id));
 		let mut needs = BTreeMap::new();
-		match v.get("needs").and_then(object) {
-			None => c.fail("model.needs", "an object by need slug"),
+		match v.get("needs").and_then(Value::as_object) {
+			None => c.fail("needs", Code::Object, "an object by need slug"),
 			Some(entries) => {
-				if entries.len() > MAX_NEEDS {
-					c.fail("model.needs", format!("at most {MAX_NEEDS}"));
+				if entries.len() > LIMITS.max_needs {
+					c.fail("needs", Code::List, format!("at most {}", LIMITS.max_needs));
 				}
 				for (slug, need) in entries {
-					let path = format!("model.needs.{slug}");
+					let path = format!("needs.{slug}");
 					if !is_slug(slug) {
-						c.fail(&path, "the need must be a slug, [a-z0-9_-]{1,40}");
+						c.fail(&path, Code::Slug, "the need must be a slug, [a-z0-9_-]{1,40}");
 					}
 					if let Some(pricing) = c.need(&path, need, &inputs) {
 						needs.insert(slug.clone(), pricing);
@@ -441,11 +550,13 @@ impl PricingModel {
 		}
 		for (slug, pricing) in &needs {
 			if let NeedPricing::Estimate { base_cents, inputs: asked } = pricing {
-				c.dearest(&format!("model.needs.{slug}"), *base_cents, asked, &inputs);
+				c.dearest(&format!("needs.{slug}"), *base_cents, asked, &inputs);
 			}
 		}
 		match valid_from {
 			Some(valid_from) if c.problems.is_empty() => Ok(Self {
+				format: Format,
+				currency: Currency,
 				valid_from: valid_from.to_owned(),
 				round_to_cents,
 				minimum_cents,
@@ -456,75 +567,40 @@ impl PricingModel {
 		}
 	}
 
-	/// A model a site can show (kitstart's `pricingProblemsFor`): valid, and every input and
-	/// option labelled in each of `locales` — a site refuses a model with an option it has no
-	/// words for.
+	/// A model a site can show: valid, and every input and option labelled in each of
+	/// `locales` — a site refuses a model with an option it has no words for.
 	pub fn parse_for(value: &Value, locales: &[String]) -> Result<Self, Vec<Problem>> {
 		let model = Self::parse(value)?;
 		let missing = model.unlabelled(locales);
 		if missing.is_empty() { Ok(model) } else { Err(missing) }
 	}
 
-	/// Every label `locales` lacks, by kitstart's path.
+	/// Every label `locales` lacks, at the path the label would be.
 	pub fn unlabelled(&self, locales: &[String]) -> Vec<Problem> {
 		let mut out = Vec::new();
 		let mut labelled = |path: String, labels: &Labels| {
 			for locale in locales {
 				if !labels.contains_key(locale) {
 					out.push(Problem {
-						path: format!("{path}.labels"),
+						path: format!("{path}.labels.{locale}"),
+						code: Code::LabelMissing,
 						why: format!("no \"{locale}\" label"),
 					});
 				}
 			}
 		};
 		for (i, input) in self.inputs.iter().enumerate() {
-			labelled(format!("model.inputs[{i}]"), &input.labels);
-			for (j, o) in input.options.iter().enumerate() {
-				labelled(format!("model.inputs[{i}].options[{j}]"), &o.labels);
+			labelled(format!("inputs[{i}]"), input.labels());
+			for (j, (_, labels, _)) in input.options().into_iter().enumerate() {
+				labelled(format!("inputs[{i}].options[{j}]"), labels);
 			}
 		}
 		out
 	}
 
-	/// The model in kitstart's wire shape; [`PricingModel::parse`] reads it back unchanged.
+	/// The model in its wire shape; [`PricingModel::parse`] reads it back unchanged.
 	pub fn to_json(&self) -> Value {
-		let inputs: Vec<Value> = self
-			.inputs
-			.iter()
-			.map(|i| {
-				let options: Vec<Value> = i
-					.options
-					.iter()
-					.map(|o| {
-						let mut option = json!({ "id": o.id, "labels": o.labels });
-						option[i.kind.effect_field()] = json!(o.effect);
-						option
-					})
-					.collect();
-				json!({ "id": i.id, "kind": i.kind.as_str(), "labels": i.labels, "options": options })
-			})
-			.collect();
-		let needs: Map<String, Value> = self
-			.needs
-			.iter()
-			.map(|(slug, n)| {
-				let n = match n {
-					NeedPricing::Estimate { base_cents, inputs } => json!({ "kind": "estimate", "baseCents": base_cents, "inputs": inputs }),
-					NeedPricing::Fixed { cents } => json!({ "kind": "fixed", "cents": cents }),
-				};
-				(slug.clone(), n)
-			})
-			.collect();
-		json!({
-			"format": FORMAT,
-			"currency": CURRENCY,
-			"validFrom": self.valid_from,
-			"roundToCents": self.round_to_cents,
-			"minimumCents": self.minimum_cents,
-			"inputs": inputs,
-			"needs": needs,
-		})
+		serde_json::to_value(self).expect("a model is plain data")
 	}
 }
 
@@ -532,9 +608,7 @@ impl PricingModel {
 /// Every operand is non-negative in a checked model, so the floor is the integer division.
 pub fn mul_bp(cents: i64, bp: i64) -> i64 {
 	let n = i128::from(cents) * i128::from(bp) + i128::from(BP / 2);
-	// A checked model keeps every step at or under MAX_PRICE_CENTS × 10, so this never
-	// saturates; saturating instead of panicking keeps an unchecked caller's bug a wrong price.
-	i64::try_from(n / i128::from(BP)).unwrap_or(i64::MAX)
+	i64::try_from(n / i128::from(BP)).expect("a checked model keeps every step within MAX_PRICE_CENTS × 10")
 }
 
 /// Half up to a multiple of `step` (≥ 1).
@@ -543,7 +617,7 @@ pub fn round_to(cents: i64, step: i64) -> i64 {
 	if rest * 2 >= step { cents - rest + step } else { cents - rest }
 }
 
-/// What `need` costs for these answers, in cents — kitstart's `priceOf`, step for step:
+/// What `need` costs for these answers, in cents:
 ///
 /// 1. the need's base, plus every `add` input, in the need's input order;
 /// 2. times every `multiply` input, in order, each product rounded half up to the cent at once;
@@ -562,10 +636,10 @@ pub fn price_of(model: &PricingModel, need: &str, answers: &PricingInputs) -> Op
 	};
 	let mut chosen = Vec::with_capacity(asked.len());
 	for id in asked {
-		let input = model.inputs.iter().find(|i| i.id == *id)?;
+		let input = model.inputs.iter().find(|i| i.id() == id)?;
 		let answer = answers.get(id)?;
-		let option = input.options.iter().find(|o| o.id == *answer)?;
-		chosen.push((input.kind, option.effect));
+		let (.., effect) = input.options().into_iter().find(|(o, ..)| o == answer)?;
+		chosen.push((input.kind(), effect));
 	}
 	let of = |kind: InputKind| chosen.iter().filter(move |(k, _)| *k == kind).map(|(_, effect)| *effect);
 	let mut total = base_cents;
@@ -605,10 +679,12 @@ pub fn default_locales() -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+	use serde_json::json;
+
 	use super::*;
 
 	#[test]
-	fn arithmetic_matches_kitstarts() {
+	fn arithmetic() {
 		assert_eq!(mul_bp(101, 15_000), 152, "151.5 half up");
 		assert_eq!(mul_bp(105, 9_000), 95, "94.5 half up");
 		assert_eq!(mul_bp(105, 6_667), 70);
@@ -642,49 +718,5 @@ mod tests {
 		assert_eq!(safe_integer(&json!(1.5)), None);
 		assert_eq!(safe_integer(&json!(u64::MAX)), None);
 		assert_eq!(safe_integer(&json!("100")), None);
-	}
-
-	#[test]
-	fn labels_are_counted_in_utf16_and_must_not_be_blank() {
-		let model = |label: &str| {
-			json!({
-				"format": 1, "currency": "EUR", "validFrom": "2026-10-01", "roundToCents": 1, "minimumCents": 0,
-				"inputs": [{"id": "z", "kind": "add", "labels": {"fr": label}, "options": [{"id": "a", "labels": {"fr": "A"}, "addCents": 1}]}],
-				"needs": {},
-			})
-		};
-		assert!(PricingModel::parse(&model(&"é".repeat(120))).is_ok());
-		// 60 astral characters are 120 UTF-16 units, 61 are 122.
-		assert!(PricingModel::parse(&model(&"😀".repeat(60))).is_ok());
-		let e = PricingModel::parse(&model(&"😀".repeat(61))).unwrap_err();
-		assert_eq!(e[0].path, "model.inputs[0].labels.fr");
-		assert_eq!(PricingModel::parse(&model("  ")).unwrap_err()[0].why, "a label of 1 to 120 characters");
-	}
-
-	#[test]
-	fn problems_name_the_field() {
-		let bad = json!({
-			"format": 1, "currency": "EUR", "validFrom": "2026-10-01", "roundToCents": 1, "minimumCents": 0,
-			"inputs": [{"id": "z", "kind": "add", "labels": {"fr": "Z"}, "options": [{"id": "a", "labels": {"fr": "A"}, "addCents": 1}]}],
-			"needs": {"standard": {"kind": "estimate", "baseCents": 1, "inputs": ["z", "q", "z"]}},
-		});
-		let e = PricingModel::parse(&bad).unwrap_err();
-		assert_eq!(
-			e.iter().map(ToString::to_string).collect::<Vec<_>>(),
-			["model.needs.standard.inputs: \"z\" is listed twice", "model.needs.standard.inputs[1]: no input \"q\""]
-		);
-		assert_eq!(PricingModel::parse(&json!([])).unwrap_err()[0].to_string(), "model: an object");
-	}
-
-	#[test]
-	fn a_site_wants_every_label_in_its_locales() {
-		let model = json!({
-			"format": 1, "currency": "EUR", "validFrom": "2026-10-01", "roundToCents": 1, "minimumCents": 0,
-			"inputs": [{"id": "z", "kind": "add", "labels": {"fr": "Z", "en": "Z"}, "options": [{"id": "a", "labels": {"fr": "A"}, "addCents": 1}]}],
-			"needs": {},
-		});
-		assert!(PricingModel::parse_for(&model, &["fr".to_owned()]).is_ok());
-		let e = PricingModel::parse_for(&model, &default_locales()).unwrap_err();
-		assert_eq!(e[0].to_string(), "model.inputs[0].options[0].labels: no \"en\" label");
 	}
 }

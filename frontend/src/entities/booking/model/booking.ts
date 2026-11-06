@@ -1,4 +1,5 @@
-import { BOOKING_PROVIDERS } from "@/shared/config/booking";
+import { BOOKING_PROVIDERS } from "@evinvest/sites-contract";
+
 import { type Infer, arrayOf, nullable, object, oneOf, str } from "@/shared/lib/parse";
 
 /** What an attendee left at the provider, for the roles that see it; each part may be missing. */

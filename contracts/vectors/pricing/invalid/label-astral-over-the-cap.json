@@ -1,0 +1,34 @@
+{
+  "problems": [
+    {
+      "path": "inputs[0].labels.fr",
+      "code": "label"
+    }
+  ],
+  "model": {
+    "format": 1,
+    "currency": "EUR",
+    "validFrom": "2026-10-01",
+    "roundToCents": 1,
+    "minimumCents": 0,
+    "inputs": [
+      {
+        "id": "z",
+        "kind": "add",
+        "labels": {
+          "fr": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+        },
+        "options": [
+          {
+            "id": "a",
+            "labels": {
+              "fr": "A"
+            },
+            "addCents": 1
+          }
+        ]
+      }
+    ],
+    "needs": {}
+  }
+}

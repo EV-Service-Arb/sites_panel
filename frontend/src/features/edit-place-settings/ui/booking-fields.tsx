@@ -1,11 +1,11 @@
+import { BOOKING_PROVIDERS, type BookingProvider, PAGE_PROVIDERS, type PageProvider } from "@evinvest/sites-contract";
 import { Field, FieldDescription, FieldError, FieldLabel, FieldLegend, FieldSet, Input, Select, SelectContent, SelectItem, SelectTrigger } from "@evinvest/uikit";
 import { useId } from "react";
 
-import { BOOKING_PROVIDERS, type BookingProvider, PAGE_PROVIDERS, type PageProvider } from "@/shared/config/booking";
 import { useT } from "@/shared/i18n";
 import { useControlSize } from "@/shared/ui/touch";
 
-import { type BookingDraft, bookingDraftProblems, urlKey } from "../model/booking-draft";
+import { type BookingDraft, urlKey } from "../model/booking-draft";
 
 const SITE_OWN = "__site__";
 
@@ -18,24 +18,19 @@ const PLACEHOLDER: Record<PageProvider, string> = {
 export interface BookingFieldsProps {
   draft: BookingDraft;
   onChange: (draft: BookingDraft) => void;
-  /** The server's 422 reasons by key (`booking.default`, `booking.providers.link.url`, …). */
-  serverErrors: Readonly<Record<string, string>>;
+  /** The reasons by key (`booking.default`, `booking.providers.link.url`, …): the server's, else the form's own. */
+  errors: Readonly<Record<string, string>>;
 }
 
-/**
- * The booking a place offers: its default, and a page per provider that has
- * one. Checked as typed by the server's own rules, so a refused link is said
- * on its field before the save; the server's reason wins when it gives one.
- */
-export function BookingFields({ draft, onChange, serverErrors }: BookingFieldsProps) {
+/** The booking a place offers: its default, and a page per provider that has one. */
+export function BookingFields({ draft, onChange, errors }: BookingFieldsProps) {
   const t = useT();
   const id = useId();
   const size = useControlSize();
-  const problems = bookingDraftProblems(draft);
-  const reason = (key: string) => serverErrors[key] ?? (problems.has(key) ? t(`placeSettings.booking.problem.${problems.get(key) ?? "shape"}`) : null);
+  const reason = (key: string) => errors[key] ?? null;
   const shown = new Set(["booking.default", ...PAGE_PROVIDERS.map(urlKey)]);
   // Keys the fields below do not show (the whole setting, a provider entry): said under the legend.
-  const rest = [...new Set([...Object.keys(serverErrors), ...problems.keys()])].filter((k) => (k === "booking" || k.startsWith("booking.")) && !shown.has(k));
+  const rest = Object.keys(errors).filter((k) => (k === "booking" || k.startsWith("booking.")) && !shown.has(k));
   const pick = (v: string) => onChange({ ...draft, default: BOOKING_PROVIDERS.find((p) => p === v) ?? null });
   const defaultReason = reason("booking.default");
 

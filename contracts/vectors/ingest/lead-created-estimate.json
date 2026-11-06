@@ -1,0 +1,68 @@
+{
+  "name": "an estimate, priced, suspect, from WhatsApp",
+  "key": "lead.created@1",
+  "head": {
+    "id": "0199b3a0-6c00-7000-8000-000000000002",
+    "occurredAt": "2026-10-05T08:00:00.000Z",
+    "sourceId": "vifnet-site",
+    "subject": {
+      "brandId": "vifnet",
+      "locationId": "lyon-3",
+      "leadId": "lead-7-c0ffee01"
+    }
+  },
+  "properties": {
+    "channel": "whatsapp",
+    "message_ref": "VF-7K3F",
+    "flow": "estimate",
+    "quoted_cents": 8400,
+    "pricing_valid_from": "2026-10-01",
+    "estimate_inputs": {
+      "bedrooms": "t3",
+      "frequency": "biweekly"
+    },
+    "suspect": "too_fast",
+    "analytics_id": "0199b39f-1d2e-7a4b-9c3d-5e6f7a8b9c0d"
+  },
+  "pii": {
+    "phone": "+33612345678",
+    "need": "Ménage"
+  },
+  "body": {
+    "events": [
+      {
+        "id": "0199b3a0-6c00-7000-8000-000000000002",
+        "schema": "sa.funnel.v1",
+        "type": "lead.created",
+        "typeVersion": 1,
+        "occurredAt": "2026-10-05T08:00:00.000Z",
+        "source": {
+          "kind": "site",
+          "id": "vifnet-site"
+        },
+        "subject": {
+          "brandId": "vifnet",
+          "locationId": "lyon-3",
+          "leadId": "lead-7-c0ffee01"
+        },
+        "properties": {
+          "channel": "whatsapp",
+          "message_ref": "VF-7K3F",
+          "flow": "estimate",
+          "quoted_cents": 8400,
+          "pricing_valid_from": "2026-10-01",
+          "estimate_inputs": {
+            "bedrooms": "t3",
+            "frequency": "biweekly"
+          },
+          "suspect": "too_fast",
+          "analytics_id": "0199b39f-1d2e-7a4b-9c3d-5e6f7a8b9c0d"
+        },
+        "pii": {
+          "phone": "+33612345678",
+          "need": "Ménage"
+        }
+      }
+    ]
+  }
+}

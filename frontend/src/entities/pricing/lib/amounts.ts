@@ -1,6 +1,6 @@
-import { formatCents, parseMoney } from "@/shared/lib/format";
+import { PRICING_CURRENCY, type PricingInputKind } from "@evinvest/sites-contract";
 
-import { PRICING_CURRENCY, type PricingInputKind } from "../model/model";
+import { formatCents, parseMoney } from "@/shared/lib/format";
 
 /**
  * The model keeps hundredths everywhere: cents of a euro, basis points of a

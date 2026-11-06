@@ -29,9 +29,9 @@ fn admin() -> Editor {
 	}
 }
 
-/// kitstart's `valid/cleaning.json`: labelled in fr and en.
+/// The vectors' `valid/cleaning.json`: labelled in fr and en.
 fn cleaning() -> Value {
-	let raw = include_str!("../../panel_core/tests/fixtures/pricing/valid/cleaning.json");
+	let raw = include_str!("../../../contracts/vectors/pricing/valid/cleaning.json");
 	serde_json::from_str(raw).unwrap()
 }
 
@@ -75,7 +75,7 @@ async fn a_model_is_saved_whole_and_checked_against_what_was_read() {
 	let PricingError::Invalid(problems) = panel.set_pricing(&admin(), &brand, &half, Expected::Any, now()).await.unwrap_err() else {
 		panic!("refused whole")
 	};
-	assert_eq!(problems[0].path, "model.needs.standard.inputs[1]");
+	assert_eq!(problems[0].path, "needs.standard.inputs[1]");
 	assert_eq!(panel.pricing(&brand).await.unwrap(), next, "nothing written");
 
 	let removed = panel.remove_pricing(&admin(), &brand, Expected::At(next.updated_at), now()).await.unwrap();
@@ -102,13 +102,13 @@ async fn every_label_must_be_in_the_brands_locales() {
 	let panel = panel(&db).await;
 	let brand = brand();
 	// Labelled in English only.
-	let raw = include_str!("../../panel_core/tests/fixtures/pricing/valid/at-the-cap.json");
+	let raw = include_str!("../../../contracts/vectors/pricing/valid/at-the-cap.json");
 	let english: Value = serde_json::from_str(raw).unwrap();
 
 	let PricingError::Invalid(problems) = panel.set_pricing(&admin(), &brand, &english, Expected::Any, now()).await.unwrap_err() else {
 		panic!("no fr label")
 	};
-	assert_eq!(problems[0].to_string(), "model.inputs[0].labels: no \"fr\" label");
+	assert_eq!(problems[0].to_string(), "inputs[0].labels.fr: no \"fr\" label");
 	let en = panel.set_brand_locales(&admin(), &brand, &["en".to_owned()], now()).await.unwrap();
 	assert_eq!(en.locales, ["en"]);
 	panel.set_pricing(&admin(), &brand, &english, Expected::Any, now()).await.unwrap();

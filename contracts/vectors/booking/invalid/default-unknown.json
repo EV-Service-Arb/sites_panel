@@ -1,0 +1,12 @@
+{
+  "problems": [
+    {
+      "path": "default",
+      "code": "default_unknown"
+    }
+  ],
+  "config": {
+    "default": "phone",
+    "providers": {}
+  }
+}

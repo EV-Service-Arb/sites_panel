@@ -31,7 +31,8 @@
         # Single source for the container's exposed port and the prod bind.
         port = 59121;
 
-        # `nix run .#gen`: the front end's mirror of the Rust (crates/panel_gen), committed.
+        # `nix run .#gen`: the TS mirror of the Rust (crates/panel_gen) — the front end's and
+        # `@evinvest/sites-contract`'s — committed.
         gen = pkgs.writeShellApplication {
           name = "gen";
           runtimeInputs = [ rust pkgs.git ];
@@ -50,7 +51,7 @@
               generated = {
                 enable = true;
                 name = "regenerate derived files";
-                entry = "bash -c '${gen}/bin/gen && git add -A frontend/src/entities/lead/model/generated.ts frontend/src/shared/config/generated.ts frontend/src/shared/api/generated.ts'";
+                entry = "bash -c '${gen}/bin/gen && git add -A frontend/src/entities/lead/model/generated.ts frontend/src/shared/config/generated.ts frontend/src/shared/api/generated.ts ts/sites-contract/src/generated'";
                 pass_filenames = false;
                 require_serial = true;
               };
@@ -68,6 +69,11 @@
           enable = true;
           lastSupportedVersion = "nightly-2026-09-03";
           containerRelease = { registry = "ghcr.io/ev-service-arb"; };
+          # ts/sites-contract: `@evinvest/sites-contract-vX.Y.Z` tags publish it
+          npmRelease = {
+            scope = "evinvest";
+            packagesDir = "ts";
+          };
           jobs.default = true;
           lfs = false;
         };
@@ -114,10 +120,19 @@
         frontend = pkgs.buildNpmPackage {
           pname = "${pname}-frontend";
           version = manifest.version;
+          # with the sources of @evinvest/sites-contract, which frontend/ imports by path
           src = lib.cleanSourceWith {
-            src = lib.cleanSource ./frontend;
-            filter = path: _type: !(builtins.elem (baseNameOf path) [ "node_modules" "dist" ]);
+            src = lib.cleanSource ./.;
+            filter =
+              path: type:
+              let
+                rel = lib.removePrefix "${toString ./.}/" (toString path);
+                under = dir: rel == dir || lib.hasPrefix "${dir}/" rel;
+              in
+              !(builtins.elem (baseNameOf path) [ "node_modules" "dist" ".build" ])
+              && (under "frontend" || under "ts/sites-contract/src" || (type == "directory" && builtins.elem rel [ "ts" "ts/sites-contract" ]));
           };
+          sourceRoot = "source/frontend";
           npmDepsHash = "sha256-8Dr9hgPyz/OvBjM5+yFenhWI4FoC+1Gcefw3bypoe+A=";
           installPhase = ''
             runHook preInstall
@@ -243,8 +258,10 @@
             nix build .#frontend              the front end's bundle
             nix run .#publish -- major|minor|patch [note]
                                               tag the next vX.Y.Z and push it: CI ships the image
-            nix run .#gen                     the front end's mirror of the Rust types
-                                              (pre-commit runs it too)
+            nix run .#gen                     the TS mirror of the Rust types: the front end's
+                                              and @evinvest/sites-contract's (pre-commit runs it)
+            git tag @evinvest/sites-contract-vX.Y.Z && git push origin <tag>
+                                              publish ts/sites-contract (its package.json at X.Y.Z)
             nix run .#help                    this
             cargo test                        every test; the database ones on throwaway
                                               SQLite files, nothing to set up

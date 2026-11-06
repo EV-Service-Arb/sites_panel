@@ -13,7 +13,7 @@ export interface FieldErrors {
 
 const owner = (key: string): FieldKey | null => EDITED_KEYS.find((f) => key === f || key.startsWith(`${f}.`) || key.startsWith(`${f}[`)) ?? null;
 
-/** A 422's `fields` sorted onto the form. */
+/** Reasons by path (a 422's `fields`, the form's own) sorted onto the form. */
 export function fieldErrorsOf(fields: Record<string, string>): FieldErrors {
   const out: FieldErrors = { byField: {}, other: [], byKey: fields };
   for (const [key, reason] of Object.entries(fields)) {
@@ -23,5 +23,3 @@ export function fieldErrorsOf(fields: Record<string, string>): FieldErrors {
   }
   return out;
 }
-
-export const NO_ERRORS: FieldErrors = { byField: {}, other: [], byKey: {} };

@@ -303,9 +303,9 @@ message ExperimentMetricsV1 {
 
 // booking.requested@1 — from a site (source.kind site), after the lead's lead.created: the
 // visitor asked for a slot through `provider`, with an optional wish. No free text, no null.
-// subject.lead_id required, and `lead_ref` is that same id: kitstart's leadRef,
-// `lead-<row>-<8 lowercase hex>`, row ≥ 1. Rules normative in kitstart's
-// test/fixtures/booking/README.md. Arriving before its lead.created, the batch is answered
+// subject.lead_id required, and `lead_ref` is that same id: the site's leadRef,
+// `lead-<row>-<8 lowercase hex>`, row ≥ 1. Rules normative in
+// contracts/vectors/booking/README.md. Arriving before its lead.created, the batch is answered
 // 409 (`deferred`) for the outbox to send again.
 message BookingRequestedV1 {
   string lead_ref = 1;

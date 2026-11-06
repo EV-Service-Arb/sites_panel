@@ -30,8 +30,11 @@ import { type IncomingMessage, type ServerResponse, createServer } from "node:ht
 import { extname, join } from "node:path";
 import type { Duplex } from "node:stream";
 
+import { BOOKING_STATUSES, LEAD_CHANNELS, LEAD_LIMITS } from "@evinvest/sites-contract";
+
+import { MANUAL_CHANNELS } from "../src/entities/lead/model/generated.ts";
 import { PERMISSIONS } from "../src/shared/api/generated.ts";
-import { BOOKING_STATUSES, arriveUnmatched, bookingDto, bookingWrite, bookingsRoute, providerMoves } from "./stub-bookings.ts";
+import { arriveUnmatched, bookingDto, bookingWrite, bookingsRoute, providerMoves } from "./stub-bookings.ts";
 import { changed, every, liveUpgrade } from "./stub-live.ts";
 import { type StubDeal, dealDto, estimate, fixed, flowParam, quote, seedDeals } from "./stub-deals.ts";
 import { addedPlaces, placeFlags, placeSettingsRoute, touchPlace } from "./stub-places.ts";
@@ -46,9 +49,7 @@ const CSRF = "stub-csrf";
 const MIN_SAMPLE = Number(process.env.STUB_MIN_SAMPLE ?? 30);
 const LIVE_EVERY = process.env.STUB_LIVE_EVERY ? Number(process.env.STUB_LIVE_EVERY) : null;
 const USER_ID = "00000000-0000-7000-8000-000000000001";
-const CHANNELS = ["form", "phone_inbound", "callback", "whatsapp", "telegram"];
-const MANUAL_CHANNELS = ["phone_inbound", "whatsapp", "telegram"];
-const MESSAGE_REF = /^[A-Z]{2,4}-[0-9A-HJKMNP-TV-Z]{4,8}$/;
+const MESSAGE_REF = new RegExp(LEAD_LIMITS.messageRef);
 
 type Json = Record<string, unknown>;
 const now = () => new Date();
@@ -259,7 +260,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     const booking = q.get("booking");
     if (booking !== null && !BOOKING_STATUSES.some((s) => s === booking)) return send(res, 400, { error: "booking status is not one of none, requested, booked, canceled, done, no_show" });
     const channel = q.get("channel");
-    if (channel !== null && !CHANNELS.includes(channel)) return send(res, 400, { error: "channel is not one of form, phone_inbound, callback, whatsapp, telegram" });
+    if (channel !== null && !LEAD_CHANNELS.some((c) => c === channel)) return send(res, 400, { error: "channel is not one of form, phone_inbound, callback, whatsapp, telegram" });
     const ref = q.get("message_ref")?.trim().toUpperCase() ?? null;
     if (ref !== null && !MESSAGE_REF.test(ref)) return send(res, 400, { error: "message_ref is not like AQ-7K3F" });
     const list = leads
@@ -279,7 +280,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     const l = makeLead(leads.length + 1, "created", 0, { need: b.need, ...(b.phone ? { phone: b.phone } : {}) }, String(b.location), String(b.brand));
     l.lead_id = `p-${randomUUID()}`;
     l.manual = true;
-    if (b.channel !== undefined && !MANUAL_CHANNELS.includes(String(b.channel))) return send(res, 400, { error: "channel is one of phone_inbound, whatsapp, telegram" });
+    if (b.channel !== undefined && !MANUAL_CHANNELS.some((c) => c === b.channel)) return send(res, 400, { error: "channel is one of phone_inbound, whatsapp, telegram" });
     l.channel = b.channel === undefined ? "phone_inbound" : String(b.channel);
     leads.push(l);
     changed("leads", l.brand, l.lead_id);

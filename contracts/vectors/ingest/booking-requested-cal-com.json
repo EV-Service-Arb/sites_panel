@@ -1,0 +1,40 @@
+{
+  "name": "a Cal.com page opened",
+  "key": "booking.requested@1",
+  "head": {
+    "id": "0199b3a0-6c00-7000-8000-000000000012",
+    "occurredAt": "2026-10-05T08:00:00.000Z",
+    "sourceId": "vifnet-site",
+    "subject": {
+      "brandId": "vifnet",
+      "leadId": "lead-7-c0ffee01"
+    }
+  },
+  "properties": {
+    "lead_ref": "lead-7-c0ffee01",
+    "provider": "cal_com"
+  },
+  "body": {
+    "events": [
+      {
+        "id": "0199b3a0-6c00-7000-8000-000000000012",
+        "schema": "sa.funnel.v1",
+        "type": "booking.requested",
+        "typeVersion": 1,
+        "occurredAt": "2026-10-05T08:00:00.000Z",
+        "source": {
+          "kind": "site",
+          "id": "vifnet-site"
+        },
+        "subject": {
+          "brandId": "vifnet",
+          "leadId": "lead-7-c0ffee01"
+        },
+        "properties": {
+          "lead_ref": "lead-7-c0ffee01",
+          "provider": "cal_com"
+        }
+      }
+    ]
+  }
+}

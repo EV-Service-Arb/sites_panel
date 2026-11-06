@@ -1,7 +1,6 @@
-import { type Infer, type Parser, ParseError, arrayOf, cents, nullable, object, str } from "@/shared/lib/parse";
+import { type PricingModel, checkPricingModel } from "@evinvest/sites-contract";
 
-import { checkPricingModel } from "./check";
-import type { PricingModel } from "./model";
+import { type Infer, type Parser, ParseError, arrayOf, cents, nullable, object, str } from "@/shared/lib/parse";
 
 /** A model as the API holds it: whole and valid, or the answer is refused. */
 export const pricingModelParser: Parser<PricingModel> = (v, path) => {

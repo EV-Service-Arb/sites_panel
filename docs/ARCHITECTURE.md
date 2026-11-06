@@ -20,6 +20,9 @@ A cargo workspace of four crates; dependencies point inwards only.
 ```text
 contracts/proto/sa/v1/events.proto   sa.funnel.v1: the Event envelope, the ingest request and
                                      answer, one properties message per type@version
+contracts/vectors/                   the site ↔ panel contract's vectors, read in place by the
+                                     Rust tests and ts/sites-contract's (see The contract with
+                                     the sites)
 contracts/proto/scope/v1/            banking's ScopeLedger, vendored: the invoices
 crates/panel_contracts/              those protos, generated at build time: prost messages + pbjson
                                      serde (protojson); tonic clients for the ledger
@@ -37,13 +40,13 @@ crates/panel_core/                   no I/O: no database, network, clock or rand
                                      effective, the landings' rules for an override field
   src/analytics.rs                   what PostHog is told of a lead event (name, properties
                                      without PII, the person)
-  src/place.rs                       a place's live settings (kitstart's PlaceLive), checked
-                                     field by field; a change and who made it
-  src/pricing.rs                     a brand's price list (kitstart's PricingModel): checked,
-                                     priced to the cent; tests/fixtures/pricing vendored by sha
+  src/place.rs                       a place's live settings (PlaceLive), checked field by
+                                     field; a change and who made it
+  src/pricing.rs                     a brand's price list (PricingModel): checked, priced to
+                                     the cent
   src/booking.rs                     providers, a place's booking config and its URL rule, a
-                                     lead's booking folded; tests/fixtures/booking vendored by sha
-  src/phone.rs                       kitstart's normalizePhone, ported (E.164)
+                                     lead's booking folded
+  src/phone.rs                       a typed phone number as the funnel reads it (E.164)
 crates/panel/                        the engine
   src/lib.rs                         the `Panel` facade: ingest under a grant, PII, rebuild
   src/wire.rs                        protojson → the core: one event decoded and checked; the
@@ -94,9 +97,14 @@ crates/panel_server/                 the `sites_panel` binary: CLI and HTTP, thi
   src/invoices.rs, scope_ledger.rs   /api/v1/invoices; banking's ScopeLedger over mTLS
   src/settings.rs                    the environment (ev_lib `settings!`)
   src/testing.rs                     (feature `testing`) the router called as the conductor calls it
-crates/panel_gen/                    `nix run .#gen`: the front end's mirror of Rust types and
-                                     tables (ev_lib `ts_gen`), into frontend/**/generated.ts,
-                                     committed; the pre-commit hook re-runs it
+crates/panel_gen/                    `nix run .#gen` (ev_lib `ts_gen`), committed, re-run by the
+                                     pre-commit hook: the front end's own mirror of Rust types
+                                     and tables (frontend/**/generated.ts), and the generated
+                                     half of ts/sites-contract (panel_core's shapes and the
+                                     protos as protojson)
+ts/sites-contract/                   @evinvest/sites-contract (npm): the contract's one TS form
+                                     — what the sites build against, the front end imports by
+                                     path; released by an `@evinvest/sites-contract-v*` tag
 sa_auth (the conductor's crate)      the `sa` permissions and the assertion: verified here
 frontend/                            the `mfe-sites` bundle: <mfe-sites-panel> (the page, routes
                                      under `base`) and <mfe-sites-nav> (the conductor's Sites
@@ -107,6 +115,32 @@ frontend/                            the `mfe-sites` bundle: <mfe-sites-panel> (
   src/shared/lib/router.ts           one location for both elements under `base`
   src/shared/lib/live/               the host's relayed socket (sa:live, sa:live-status)
 ```
+
+## The contract with the sites
+
+What a landing reads from the panel and what it sends it — a brand's price list and its
+pricing, a place's live settings (its booking included), the experiments' overrides, phone
+numbers, and every ingest event a site writes — has one source here and one TS form:
+
+```text
+panel_core + contracts/proto/sa/v1 ── panel_gen ──▶ ts/sites-contract/src/generated
+                                                    shapes, vocabularies, limits, the wire
+panel_core's checks and arithmetic ◀─ contracts/vectors ─▶ ts/sites-contract/src/*.ts
+                                                    the same rules, once in TS
+@evinvest/sites-contract ──npm──▶ sites-tools ──▶ the brands
+                         ──path─▶ frontend/
+```
+
+- **Shapes exist once, logic twice.** A type, a vocabulary, a limit, a protojson message is
+  written in Rust (or a proto) and generated. What a browser and the panel both run — the
+  checks, `priceOf`, a phone number, the ingest builders — exists exactly twice, in
+  `panel_core` and in the package, and both suites read the same vector files in place.
+- **Problems are codes.** A check answers `{path, code}` (`PRICING_CODES`, `BOOKING_CODES`,
+  `PLACE_CODES`): a site logs them, the editor says each in its own words; the Rust also keeps
+  an English `why` for the CLI and a 422's text.
+- **A site builds no event by hand.** sites-tools sends `lead.created`, `booking.requested` and
+  `experiments.declared` through the package's `siteEvent`: the envelope in protojson's
+  camelCase, `properties` in the protos' snake_case (kept as sent by `wire::decode`).
 
 ## Ingest → journal → projections
 
@@ -295,8 +329,7 @@ Anything else is rejected like any word outside a closed vocabulary: a price wit
 no flow, a priced flow without both fields, one of the two alone, inputs with another flow, a
 key or value not a slug (never free text: they sit in the clear), 13 pairs, a date that is
 not a real day. The fields extend `LeadCreatedV1` (optional, `type_version` stays 1); a build
-before them rejects an event carrying one, so kitstart sends them only once this panel is live
-(its `panelFlow` switch).
+before them rejects an event carrying one.
 
 Like `suspect`, they are the counted creation's (the first journaled): a later `lead.created`
 saying nothing does not clear them. Where they show: `leads.flow`, `quoted_cents`,
@@ -438,14 +471,14 @@ names last had an event received (`max(events.received_at)`); the conductor's "s
 ## Place settings
 
 A landing bakes its places into its build and lays over each, field by field, what the
-panel answers for it (kitstart's `createPlaceSource`, `PlaceLive`): `phone`, `whatsapp`
+panel answers for it (sites-tools' `createPlaceSource`, `PlaceLive`): `phone`, `whatsapp`
 (E.164), `telegram` (the place's bot, its username without the `@`:
 `^[A-Za-z][A-Za-z0-9_]{1,28}[Bb][Oo][Tt]$`, 5–32 characters ending in bot), `messengers` (`{whatsapp?: bool, telegram?: bool}`, the
 landing's messenger buttons switched off; absent is on, another key refused as
 `messengers.<key>`), `hours` (`[{days, opens, closes}]`), `serviceArea` (commune names), and for
 storefronts `address`, `geo`, `storefrontPhoto` (https), `landmark` (a text per locale),
-`rating`. Hours are the place's local time, Europe/Paris for every place in v1 (no
-time zone per place). kitstart fetches every 10 minutes at most, times out after 3 s, and keeps its baked
+`rating`, `reviewUrl` (an https link on `g.page` or `search.google.com`). Hours are the place's local time, Europe/Paris for every place in v1 (no
+time zone per place). A site fetches every 10 minutes at most, times out after 3 s, and keeps its baked
 place on a 5xx or no answer; a JSON 404 is a place withdrawn, and the site 404s it.
 
 ```text
@@ -489,12 +522,12 @@ GET  /gmbs                                    {"<gmb_id>": {brand, location, lea
   held as opaque; unique among places, nullable). Not journaled in `place_changes` (that holds
   settings); the change is published as `places`.
 
-- **Checked as kitstart reads them, refused instead of dropped.** kitstart drops a field it
-  cannot read so a page never fails on one; the panel names it in a 422 so the editor sees
-  why. Stricter than kitstart where kitstart is loose (a phone is E.164, not just `+…`;
-  hours close after they open, a night across midnight is two rows; a day once per row),
-  never looser. kitstart keeps a landmark only when it has every locale the site speaks,
-  which the panel does not know.
+- **One rule per field, two readings.** `PlaceLive::check` and the package's `checkPlaceLive`
+  run the same rules (`contracts/vectors/place.json`): a phone is E.164, hours close after they
+  open (a night across midnight is two rows), a day once per row, texts trimmed and one line. A
+  site drops a field that breaks one, so a page never fails on it; the panel names it in a 422,
+  so the editor sees why. A site also keeps a landmark only when it has every locale it
+  speaks, which the panel does not know.
 - **A change is one write transaction**: the current settings read under the write lock,
   `expected_updated_at` compared, the new ones written, the change journaled
   (`place_changes`: before, after, who — the user's email and id, or `cli` — and
@@ -508,32 +541,25 @@ GET  /gmbs                                    {"<gmb_id>": {brand, location, lea
 
 ## Pricing
 
-A landing prices its `estimate` and `fixed` needs by a brand's price list (kitstart's
-`PricingModel`, FORM-VARIANTS-SPEC, lib#178), baked into its build and replaced by what the
-panel answers for the brand (`createPricingSource`: every 10 minutes at most, 3 s, the baked
-model on any failure or on a model it refuses). **The model is kitstart's**: its shape, its
-rules and its arithmetic are normative in kitstart's fixture README,
-`crates/panel_core/tests/fixtures/pricing/README.md` (format 1, EUR TTC, integer cents,
-basis points, every intermediate product rounded half up to the cent, the total to
-`roundToCents`, then `minimumCents`; a `fixed` need as is). `panel_core::pricing` is a port of
-`validate.ts` and `price.ts`, held to the same fixtures.
+A landing prices its `estimate` and `fixed` needs by a brand's price list (`PricingModel`,
+FORM-VARIANTS-SPEC, lib#178), baked into its build and replaced by what the panel answers for
+the brand (sites-tools' `createPricingSource`: every 10 minutes at most, 3 s, the baked model
+on any failure or on a model it refuses). Its shape, rules and arithmetic are normative in
+`contracts/vectors/pricing/README.md` (format 1, EUR TTC, integer cents, basis points, every
+intermediate product rounded half up to the cent, the total to `roundToCents`, then
+`minimumCents`; a `fixed` need as is): `panel_core::pricing` and the package's
+`checkPricingModel` / `priceOf` are held to its vectors.
 
-- **Vendored by sha.** `crates/panel_core/tests/fixtures/pricing/` is a copy of kitstart's
-  `ts/kitstart/test/fixtures/pricing` in EV-Service-Arb/sites_tools at the commit `SOURCE` names; `tests/pricing_fixtures.rs`
-  accepts every `valid/*.json` (and reads it back unchanged), refuses every `invalid/*.json` at
-  the field its name says, and prices every `cases.json` to the cent, `null` included. kitstart
-  changing a fixture changes the contract: copy the directory of the new commit over this one,
-  write its sha in `SOURCE`, make the tests pass (adding the line a new invalid fixture needs),
-  and ship the panel before the sites rely on it.
 - **A brand's locales.** Every input's and option's label must be in each locale the brand's
-  sites speak, or a site refuses the whole model; the panel refuses to save one (kitstart's
-  `pricingProblemsFor`). The locales are `fr,en` unless set by `sites_panel pricing locales <brand>
+  sites speak, or a site refuses the whole model; the panel refuses to save one
+  (`labelMissing`, `contracts/vectors/pricing/locales.json`). The locales are `fr,en` unless set by `sites_panel pricing locales <brand>
   fr,en` (`brand_locales`); a model saved before a locale was added is kept for the editor but
   not served (`{}`) until saved with the labels.
-- **Paths.** A refusal names the first problem at kitstart's path without its `model.` root:
-  `needs.standard.inputs[2]`, `inputs[0].options[1].labels`. JSON objects are read sorted here
-  and in insertion order there, so with several problems the first named may differ; whether
-  there is one never does. Saved, a model is stored in kitstart's shape (its maps' keys sorted).
+- **Problems.** A refusal names the first problem by its path from the model's root and its
+  code (`PRICING_CODES`): `needs.standard.inputs[2]` `noInput`, `inputs[0].options[1].labels.en`
+  `labelMissing`. JSON objects are read sorted here and in insertion order in TS, so with
+  several problems the first named may differ; which there are never does. Saved, a model is
+  stored in its wire shape (its maps' keys sorted).
 
 ```text
 GET    /api/internal/brands/{brand}/pricing?locale   no assertion; with the locations' read ≤ 32
@@ -551,11 +577,11 @@ GET    /pricing                       {items: [Item]}: every brand the panel kno
                                       pricing or locales for
 GET    /pricing/{brand}               Item; a brand never set: model, updated_at, updated_by null
 PUT    /pricing/{brand}     edit      {model, expected_updated_at: RFC 3339 | null} → 200 Item;
-                                      409 {error: "stale", current: Item}; 422 {error, path}
+                                      409 {error: "stale", current: Item}; 422 {error, code, path}
 DELETE /pricing/{brand}     edit      {expected_updated_at} (required) → 200 Item, model null;
                                       409 as PUT
 POST   /pricing/{brand}/preview       {model, need, inputs: {input: option}} → 200 {cents: n |
-                                      null} (null: kitstart's "no price"); 422 as PUT: the draft
+                                      null} (null: "no price"); 422 as PUT: the draft
                                       is held to the brand's locales, as the site would
 GET    /pricing/{brand}/changes       {changes: [{id, at, by, kind: set | remove, valid_from,
                                       needs, model}]}: the last 50, newest first; `model` the
@@ -709,11 +735,11 @@ client certificate (mTLS) and by a `typ=service` token minted over the same chan
 ## Booking
 
 FORM-VARIANTS-SPEC, "Booking providers contract" (2026-10-04). Providers, a closed set:
-`manual | link | google_calendar | cal_com` (`calendly` next, same seams). kitstart's booking
-fixtures are vendored by sha in `crates/panel_core/tests/fixtures/booking` (`SOURCE`), their
-README normative; `tests/booking_fixtures.rs` holds the config validator to `valid/` and
-`invalid/`, `crates/panel/tests/booking.rs` the registry to `requested/`. `choose.json` and
-`hrefs.json` are the site's (the panel neither picks a provider nor builds a link).
+`manual | link | google_calendar | cal_com` (`calendly` next, same seams). The rules are
+normative in `contracts/vectors/booking/README.md`: `panel_core::booking::check_config` and the
+package's `checkBookingConfig` are held to `valid/`, `invalid/` and `urls.json`, the registry
+(`crates/panel/tests/booking.rs`) and `bookingRequested` to `requested/`. Which provider a
+visitor is offered and the link a page opens are the site's (sites-tools).
 
 **A place's `booking`** (place settings, `PlaceLive.booking` in `/api/internal/…/locations`):
 `{"default": <provider>, "providers": {<provider>: {"url"}}}`. `manual` is always available and
@@ -732,7 +758,7 @@ booking.requested@1      site    {lead_ref = subject.lead_id (lead-<row>-<8hex>)
                                  free text; the date 2 days back – 366 ahead of arrival (checked
                                  at ingest, not by the registry: a rebuild never re-judges it).
                                  Before its lead's lead.created: verdict `deferred`, the batch
-                                 answered 409 + Retry-After 30 (kitstart retries 409/425 on it)
+                                 answered 409 + Retry-After 30 (a site's outbox retries 409/425 on it)
 booking.created@1        booking {provider (with an adapter), external_ref, start_at, end_at?,
                                  match? (ref|contact, exactly with subject.lead_id), version,
                                  booked_at?}; the attendee in pii, sealed
@@ -773,7 +799,7 @@ again is a duplicate; a slot as it stands already is `unchanged`; a cancellation
 the panel never had is ignored.
 
 **Matching**, once per booking (later events keep its lead): a `lead_ref` naming a lead of the
-brand → `ref`; else the attendee's phone (E.164, kitstart's rule) or email (lowercase) against
+brand → `ref`; else the attendee's phone (E.164, `phone.json`'s rule) or email (lowercase) against
 the `phone` / `email` of the creation PII of the brand's leads created from 14 days before the
 booking to 10 minutes after; one lead → `contact`, none or several → unmatched. The leads' PII
 is opened under `PANEL_DATA_KEY` only to compare.
@@ -821,6 +847,11 @@ Booking:      {id, brand, provider, external_ref, status: booked | canceled, sta
 
 ## Invariants
 
+- **The site ↔ panel contract has one source.** `panel_core` and `contracts/proto/sa/v1` are the
+  only source of what the sites read from the panel and send to it; `@evinvest/sites-contract`
+  is its only TS form (generated, and the logic held to `contracts/vectors`). Nothing re-types
+  it — not the front end, not sites-tools, not a brand. A wire change is accepted by a panel in
+  production before any site sends it.
 - **Sites trusts only the conductor's assertion.** Every route that reads or writes the
   business takes one (The conductor's assertion); the open ones are the landings' reads, the
   providers' webhooks (their own signatures), the bundle and `/health`. sites_panel calls no one

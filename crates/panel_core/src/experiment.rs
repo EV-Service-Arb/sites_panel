@@ -13,12 +13,30 @@ use jiff::Timestamp;
 
 use crate::{Invalid, ids::EventId};
 
-/// Experiments one declaration may hold.
-pub const MAX_EXPERIMENTS: usize = 64;
-/// Variants one experiment may have.
-pub const MAX_VARIANTS: usize = 32;
-/// The longest summary, in characters.
-pub const MAX_SUMMARY: usize = 200;
+/// What a landing's declaration may hold.
+#[derive(Clone, Copy, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Limits {
+	/// Experiments one declaration may hold.
+	pub max_experiments: usize,
+	/// Variants one experiment may have, two at least.
+	pub max_variants: usize,
+	/// The longest summary, in characters, once trimmed.
+	pub max_summary: usize,
+	/// An experiment's key.
+	pub key: &'static str,
+	/// A variant's name, what `@evinvest/experiments` takes.
+	pub variant: &'static str,
+}
+
+pub const LIMITS: Limits = Limits {
+	max_experiments: 64,
+	max_variants: 32,
+	max_summary: 200,
+	key: "^[a-z0-9_]{1,64}$",
+	variant: "^[a-z0-9_-]{1,32}$",
+};
+const MAX_VARIANTS: usize = LIMITS.max_variants;
 
 /// What a landing says of one experiment in its code.
 #[derive(Clone, Debug, PartialEq)]
@@ -79,8 +97,8 @@ impl Declaration {
 			return Err(at("holdout is not in [0, 1)"));
 		}
 		let summary = summary.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty());
-		if summary.as_ref().is_some_and(|s| s.chars().count() > MAX_SUMMARY) {
-			return Err(at(&format!("summary is at most {MAX_SUMMARY} characters")));
+		if summary.as_ref().is_some_and(|s| s.chars().count() > LIMITS.max_summary) {
+			return Err(at(&format!("summary is at most {} characters", LIMITS.max_summary)));
 		}
 		Ok(Self {
 			key: key.to_owned(),
@@ -93,10 +111,10 @@ impl Declaration {
 	}
 }
 
-/// A whole declaration: at most [`MAX_EXPERIMENTS`], each key once.
+/// A whole declaration: at most `max_experiments`, each key once.
 pub fn check_declared(experiments: &[Declaration]) -> Result<(), Invalid> {
-	if experiments.len() > MAX_EXPERIMENTS {
-		return Err(Invalid::new(format!("properties.experiments holds more than {MAX_EXPERIMENTS}")));
+	if experiments.len() > LIMITS.max_experiments {
+		return Err(Invalid::new(format!("properties.experiments holds more than {}", LIMITS.max_experiments)));
 	}
 	if experiments.iter().map(|e| &e.key).collect::<BTreeSet<_>>().len() != experiments.len() {
 		return Err(Invalid::new("properties.experiments names a key twice"));

@@ -1,10 +1,11 @@
-import { BOOKING_PROVIDERS } from "@/shared/config/booking";
+import { BOOKING_PROVIDERS, BOOKING_STATUSES, type BookingStatus, DAY_PARTS } from "@evinvest/sites-contract";
+
 import { type Infer, type Parser, isoDay, nullable, object, oneOf, str } from "@/shared/lib/parse";
 
-import { BOOKING_MATCHES, BOOKING_STATUSES, type BookingStatus, DAY_PARTS } from "./generated";
+import { BOOKING_MATCHES } from "./generated";
 
-export { BOOKING_MATCHES, BOOKING_STATUSES, DAY_PARTS } from "./generated";
-export type { BookingMatch, BookingStatus, DayPart } from "./generated";
+export { BOOKING_MATCHES } from "./generated";
+export type { BookingMatch } from "./generated";
 
 const bookingObject = object({
   status: oneOf(BOOKING_STATUSES),

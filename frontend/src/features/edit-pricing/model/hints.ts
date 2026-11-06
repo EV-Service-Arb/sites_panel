@@ -1,4 +1,6 @@
-import { type PricingInputKind, parseHundredths } from "@/entities/pricing";
+import type { PricingInputKind } from "@evinvest/sites-contract";
+
+import { parseHundredths } from "@/entities/pricing";
 
 export type EffectHintKey = `pricing.hint.effect.${PricingInputKind}`;
 

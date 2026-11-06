@@ -1,0 +1,16 @@
+{
+  "problems": [
+    {
+      "path": "providers.link.url",
+      "code": "scheme"
+    }
+  ],
+  "config": {
+    "default": "link",
+    "providers": {
+      "link": {
+        "url": "http://book.example.fr/vifnet"
+      }
+    }
+  }
+}

@@ -1,4 +1,6 @@
-import { BOOKING_STATUSES, CHANNELS, FLOWS, type LeadCounts, type LeadFilter, STAGES, type Stage } from "@/entities/lead";
+import { BOOKING_STATUSES, LEAD_CHANNELS, LEAD_FLOWS, LEAD_LIMITS } from "@evinvest/sites-contract";
+
+import { type LeadCounts, type LeadFilter, STAGES, type Stage } from "@/entities/lead";
 import type { MessageKey, T } from "@/shared/i18n";
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -53,7 +55,7 @@ const FILTER_KEYS: readonly (keyof LeadFilter)[] = ["stage", "brand", "location"
 
 /** As with suspect: a word the API does not take would answer 400, so it reads as "every lead". */
 export function flowFilterOf(v: string | null): LeadFilter["flow"] {
-  return FLOWS.find((f) => f === v) ?? null;
+  return LEAD_FLOWS.find((f) => f === v) ?? null;
 }
 
 /** A booking status the API takes (anything else answers 400): every lead otherwise. */
@@ -63,11 +65,10 @@ export function bookingFilterOf(v: string | null): LeadFilter["booking"] {
 
 /** A channel the API takes (anything else answers 400): every lead otherwise. */
 export function channelFilterOf(v: string | null): LeadFilter["channel"] {
-  return CHANNELS.find((c) => c === v) ?? null;
+  return LEAD_CHANNELS.find((c) => c === v) ?? null;
 }
 
-/** `panel_core::fact::MessageRef`: 2–4 letters, a dash, 4–8 of Crockford base32. */
-const MESSAGE_REF = /^[A-Z]{2,4}-[0-9A-HJKMNP-TV-Z]{4,8}$/;
+const MESSAGE_REF = new RegExp(LEAD_LIMITS.messageRef);
 
 /** A label pasted with the ref ("Réf. ", "ref ", "Ref: "): the prefilled WhatsApp line ends "Réf. AQ-7K3F". */
 const REF_LABEL = /^R[EÉ]F(?:[EÉ]RENCE)?(?:[.:#]\s*|\s+)/;

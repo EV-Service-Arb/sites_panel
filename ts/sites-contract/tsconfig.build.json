@@ -1,0 +1,16 @@
+// No Node types: the package is bundled into landing pages and the panel's front end, so
+// what builds here runs in a browser.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rootDir": "src",
+    "outDir": "dist",
+    "declarationMap": false,
+    "sourceMap": false,
+    "types": []
+  },
+  "include": [
+    "src"
+  ]
+}

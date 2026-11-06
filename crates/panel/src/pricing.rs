@@ -118,7 +118,7 @@ impl Panel {
 		Ok(view(brand, stored::pricing(&mut conn, brand).await?))
 	}
 
-	/// What a site is answered: the model, in kitstart's shape, when there is one its sites can
+	/// What a site is answered: the model, in its wire shape, when there is one its sites can
 	/// show today. One that no longer passes (the rules or the brand's locales changed since
 	/// it was saved) is `None`, as the site would refuse it anyway, and logged.
 	pub async fn live_pricing(&self, brand: &BrandId) -> eyre::Result<Option<Value>> {
@@ -165,7 +165,7 @@ impl Panel {
 	}
 
 	/// Saves `model` as the brand's, whole: checked against the brand's locales, stored in
-	/// kitstart's shape. Saving the model there is changes nothing and writes nothing.
+	/// its wire shape. Saving the model there is changes nothing and writes nothing.
 	pub async fn set_pricing(&self, editor: &Editor, brand: &BrandId, model: &Value, expected: Expected, now: Timestamp) -> Result<PricingView, PricingError> {
 		self.change_pricing(editor, brand, expected, now, |current| {
 			let model = PricingModel::parse_for(model, &current.locales).map_err(PricingError::Invalid)?;

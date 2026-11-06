@@ -1,0 +1,16 @@
+{
+  "problems": [
+    {
+      "path": "providers.cal_com.url",
+      "code": "cal_path"
+    }
+  ],
+  "config": {
+    "default": "cal_com",
+    "providers": {
+      "cal_com": {
+        "url": "https://cal.com/vifnet/men%61ge"
+      }
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "problems": [
+    {
+      "path": "providers.link",
+      "code": "provider_extra"
+    }
+  ],
+  "config": {
+    "default": "manual",
+    "providers": {
+      "link": {
+        "url": "https://book.example.fr/vifnet",
+        "label": "Book"
+      }
+    }
+  }
+}

@@ -1,4 +1,6 @@
-import type { DayPart, LeadBooking, SlotBody } from "@/entities/lead";
+import type { DayPart } from "@evinvest/sites-contract";
+
+import type { LeadBooking, SlotBody } from "@/entities/lead";
 import { minutesOf, normaliseTime } from "@/shared/lib/clock";
 import { dayOfDate, localInstant, rfc3339 } from "@/shared/lib/instant";
 

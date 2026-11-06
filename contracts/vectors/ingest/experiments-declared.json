@@ -1,0 +1,94 @@
+{
+  "name": "a landing's experiments at start",
+  "key": "experiments.declared@1",
+  "head": {
+    "id": "0199b3a0-6c00-7000-8000-000000000021",
+    "occurredAt": "2026-10-05T08:00:00.000Z",
+    "sourceId": "vifnet-site",
+    "subject": {
+      "brandId": "vifnet"
+    }
+  },
+  "properties": {
+    "experiments": [
+      {
+        "key": "hero",
+        "variants": [
+          "control",
+          "short"
+        ],
+        "weights": [
+          1,
+          1
+        ],
+        "enabled": true,
+        "summary": "A shorter hero converts better"
+      },
+      {
+        "key": "booking_provider",
+        "variants": [
+          "manual",
+          "cal_com",
+          "google_calendar"
+        ],
+        "weights": [
+          1,
+          1,
+          1
+        ],
+        "enabled": false,
+        "holdout": 0.1
+      }
+    ]
+  },
+  "body": {
+    "events": [
+      {
+        "id": "0199b3a0-6c00-7000-8000-000000000021",
+        "schema": "sa.funnel.v1",
+        "type": "experiments.declared",
+        "typeVersion": 1,
+        "occurredAt": "2026-10-05T08:00:00.000Z",
+        "source": {
+          "kind": "site",
+          "id": "vifnet-site"
+        },
+        "subject": {
+          "brandId": "vifnet"
+        },
+        "properties": {
+          "experiments": [
+            {
+              "key": "hero",
+              "variants": [
+                "control",
+                "short"
+              ],
+              "weights": [
+                1,
+                1
+              ],
+              "enabled": true,
+              "summary": "A shorter hero converts better"
+            },
+            {
+              "key": "booking_provider",
+              "variants": [
+                "manual",
+                "cal_com",
+                "google_calendar"
+              ],
+              "weights": [
+                1,
+                1,
+                1
+              ],
+              "enabled": false,
+              "holdout": 0.1
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

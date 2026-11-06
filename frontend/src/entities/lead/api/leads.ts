@@ -1,9 +1,9 @@
+import type { BookingStatus, LeadChannel, LeadFlow, Messenger } from "@evinvest/sites-contract";
+
 import { IDEMPOTENCY_HEADER, http, ignoreBody } from "@/shared/api";
 import { object, str } from "@/shared/lib/parse";
 
-import type { BookingStatus } from "../model/booking";
-import type { Flow } from "../model/pricing";
-import { type Channel, type LeadCard, type LeadCounts, type LeadPage, type LeadRef, type ManualChannel, type Messenger, type Stage, leadCardParser, leadCountsParser, leadPageParser, leadPath } from "../model/lead";
+import { type LeadCard, type LeadCounts, type LeadPage, type LeadRef, type ManualChannel, type Stage, leadCardParser, leadCountsParser, leadPageParser, leadPath } from "../model/lead";
 
 export interface LeadFilter {
   stage: Stage | null;
@@ -16,11 +16,11 @@ export interface LeadFilter {
   /** Antispam's doubted leads: only them, none of them, or (null) every lead. */
   suspect: "only" | "exclude" | null;
   /** The form variant; null is every lead, those without one included. */
-  flow: Flow | null;
+  flow: LeadFlow | null;
   /** Where the lead's booking stands (`none` included); null is every lead. */
   booking: BookingStatus | null;
   /** How the lead came in; null is every lead. */
-  channel: Channel | null;
+  channel: LeadChannel | null;
   /** A messenger ref as the customer quotes it; the API matches it in any case. */
   messageRef: string | null;
 }

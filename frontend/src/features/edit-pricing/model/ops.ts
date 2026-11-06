@@ -1,4 +1,4 @@
-import type { PricingInputKind } from "@/entities/pricing";
+import type { PricingInputKind } from "@evinvest/sites-contract";
 
 import { type InputDraft, type NeedDraft, type OptionDraft, type PricingDraft, emptyInput, emptyNeed, emptyOption } from "./draft";
 

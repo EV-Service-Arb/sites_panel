@@ -1,9 +1,10 @@
+import type { OpeningHours } from "@evinvest/sites-contract";
 import { describe, expect, it } from "vitest";
 
 import { channelPreview } from "@/entities/place/lib/channels";
 import { diffLineText, diffSettings } from "@/entities/place/lib/diff";
-import { type HoursRow, type PlaceSettings, settingsParser, settingsToWire } from "@/entities/place/model/settings";
-import { draftChanged, draftOf, editedOf, looksLikeBot, normaliseBot } from "@/features/edit-place-settings/model/draft";
+import { type PlaceSettings, settingsParser, settingsToWire } from "@/entities/place/model/settings";
+import { draftChanged, draftOf, editedOf, normaliseBot } from "@/features/edit-place-settings/model/draft";
 import { translator } from "@/shared/i18n/translate";
 import { parse } from "@/shared/lib/parse";
 
@@ -61,25 +62,6 @@ describe("the form draft with messengers", () => {
   });
 });
 
-describe("the bot username hint", () => {
-  it("takes a username with or without the @, and an empty field", () => {
-    expect(["@name_bot ", "name_bot", "Aquafix_devis_bot", "AquafixBOT", ""].map(looksLikeBot)).toEqual([true, true, true, true, true]);
-  });
-
-  it("takes 5 to 32 characters and nothing outside", () => {
-    expect(["a_bot", "abcdefghijklmnopqrstuvwxyz12_bot"].map(looksLikeBot)).toEqual([true, true]);
-    expect(["abcd", "abot", "abcdefghijklmnopqrstuvwxyz123_bot"].map(looksLikeBot)).toEqual([false, false, false]);
-  });
-
-  it("refuses a username without the bot suffix", () => {
-    expect(["bot_name", "aquafix", "aquafix_bo"].map(looksLikeBot)).toEqual([false, false, false]);
-  });
-
-  it("refuses a username starting with a digit or holding a dash or a space", () => {
-    expect(["1name_bot", "name-bot", "name bot"].map(looksLikeBot)).toEqual([false, false, false]);
-  });
-});
-
 describe("the change history of messengers", () => {
   it("names the bot with its @ and the switches turned off", () => {
     const lines = diffSettings(settings({}), settings({ telegram: "aquafix_bot", messengers: { whatsapp: false, telegram: false } }), en);
@@ -97,7 +79,7 @@ describe("the change history of messengers", () => {
 });
 
 describe("the channel preview with messengers", () => {
-  const weekdays: HoursRow = { days: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"], opens: "08:00", closes: "19:00" };
+  const weekdays: OpeningHours = { days: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"], opens: "08:00", closes: "19:00" };
   const fields = { phone: "+33423500640", whatsapp: "+33612345678", telegram: "aquafix_bot", hours: [weekdays] };
   const open = { day: "Monday", minutes: 10 * 60 } as const;
   const closed = { day: "Monday", minutes: 20 * 60 } as const;

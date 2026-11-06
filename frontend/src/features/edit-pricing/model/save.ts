@@ -1,4 +1,6 @@
-import { type PricingItem, type PricingModel, conflictCurrent, fetchPricing, savePricing } from "@/entities/pricing";
+import type { PricingModel } from "@evinvest/sites-contract";
+
+import { type PricingItem, conflictCurrent, fetchPricing, savePricing } from "@/entities/pricing";
 import { ApiError } from "@/shared/api";
 
 export type SaveOutcome =

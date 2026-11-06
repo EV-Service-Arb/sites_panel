@@ -1,0 +1,16 @@
+{
+  "problems": [
+    {
+      "path": "providers.link.url",
+      "code": "port"
+    }
+  ],
+  "config": {
+    "default": "link",
+    "providers": {
+      "link": {
+        "url": "https://book.example.fr:8443/vifnet"
+      }
+    }
+  }
+}

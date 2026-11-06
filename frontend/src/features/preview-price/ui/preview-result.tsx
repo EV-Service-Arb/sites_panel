@@ -1,6 +1,6 @@
+import { PRICING_CURRENCY } from "@evinvest/sites-contract";
 import { Alert, AlertDescription, Button, Spinner } from "@evinvest/uikit";
 
-import { PRICING_CURRENCY } from "@/entities/pricing";
 import { useLocale, useT } from "@/shared/i18n";
 import { formatCents } from "@/shared/lib/format";
 import { failureText } from "@/shared/ui/failure-text";

@@ -1,12 +1,10 @@
+import { DAYS, type DayOfWeek, type OpeningHours } from "@evinvest/sites-contract";
+
 import type { T } from "@/shared/i18n";
 import { minutesOf } from "@/shared/lib/clock";
 
-import { DAYS, type Day, type HoursRow } from "../model/settings";
-
-export { minutesOf };
-
 export interface LocalTime {
-  day: Day;
+  day: DayOfWeek;
   minutes: number;
 }
 
@@ -18,24 +16,17 @@ export function localTimeOf(at: Date, timeZone: string): LocalTime {
   return { day, minutes: Number(part("hour")) * 60 + Number(part("minute")) };
 }
 
-const previousDay = (day: Day): Day => DAYS[(DAYS.indexOf(day) + DAYS.length - 1) % DAYS.length] ?? day;
-
-/**
- * Whether the hours say "open" at a local time. A row that closes at or before
- * it opens runs past midnight into the next day.
- */
-export function isOpenAt(hours: readonly HoursRow[], at: LocalTime): boolean {
+/** Whether the hours say "open" at a local time. */
+export function isOpenAt(hours: readonly OpeningHours[], at: LocalTime): boolean {
   return hours.some((row) => {
     const opens = minutesOf(row.opens);
     const closes = minutesOf(row.closes);
-    if (opens === null || closes === null) return false;
-    if (opens < closes) return row.days.includes(at.day) && at.minutes >= opens && at.minutes < closes;
-    return (row.days.includes(at.day) && at.minutes >= opens) || (row.days.includes(previousDay(at.day)) && at.minutes < closes);
+    return row.days.includes(at.day) && opens !== null && closes !== null && at.minutes >= opens && at.minutes < closes;
   });
 }
 
 /** Days in week order, runs of three or more joined: "Mon–Fri, Sun". */
-export function formatDays(days: readonly Day[], t: T): string {
+export function formatDays(days: readonly DayOfWeek[], t: T): string {
   const idx = [...new Set(days.map((d) => DAYS.indexOf(d)))].sort((a, b) => a - b);
   const runs: number[][] = [];
   for (const i of idx) {
@@ -50,6 +41,6 @@ export function formatDays(days: readonly Day[], t: T): string {
 }
 
 /** "Mon–Fri 08:00–19:00; Sat 09:00–12:00". */
-export function formatHours(hours: readonly HoursRow[], t: T): string {
+export function formatHours(hours: readonly OpeningHours[], t: T): string {
   return hours.map((row) => `${formatDays(row.days, t)} ${row.opens}–${row.closes}`).join("; ");
 }

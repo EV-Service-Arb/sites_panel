@@ -1,6 +1,5 @@
 //! Booking in the engine, on throwaway SQLite files: the journal's migration to the source
-//! kind `booking` keeps every row, kitstart's `booking.requested` fixtures judged by the
-//! registry, and `booking.requested` through a ingest under a source's grant — deferred while its lead has
+//! kind `booking` keeps every row, the `booking.requested` vectors judged by the registry, and `booking.requested` through a ingest under a source's grant — deferred while its lead has
 //! not arrived, refused for a wish out of the window.
 
 use std::{fs, path::PathBuf};
@@ -29,7 +28,7 @@ const ACCEPTED: Outcome = Outcome::Accepted { unregistered: false };
 const LEAD: &str = "lead-42-0a1b2c3d";
 
 fn fixtures(sub: &str) -> Vec<(String, Value)> {
-	let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../panel_core/tests/fixtures/booking").join(sub);
+	let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../contracts/vectors/booking").join(sub);
 	let mut out: Vec<(String, Value)> = fs::read_dir(&dir)
 		.unwrap()
 		.map(|e| e.unwrap().path())
@@ -55,16 +54,16 @@ fn subject(lead: &str) -> Subject {
 }
 
 #[test]
-fn kitstarts_requested_fixtures() {
+fn the_requested_vectors() {
 	let key = TypeKey::parse("booking.requested", 1).unwrap();
 	let valid = fixtures("requested/valid");
-	assert_eq!(valid.len(), 7, "the vendored set");
+	assert!(!valid.is_empty());
 	for (name, props) in valid {
 		let got = check(&key, SourceKind::Site, &props, &subject(LEAD));
 		assert!(matches!(got, Checked::Registered(_)), "{name}: {got:?}");
 	}
 	let invalid = fixtures("requested/invalid");
-	assert_eq!(invalid.len(), 15, "the vendored set");
+	assert!(!invalid.is_empty());
 	for (name, props) in invalid {
 		let got = check(&key, SourceKind::Site, &props, &subject(LEAD));
 		assert!(matches!(got, Checked::Invalid(_)), "{name}: {got:?}");

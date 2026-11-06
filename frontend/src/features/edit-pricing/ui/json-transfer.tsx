@@ -1,8 +1,8 @@
+import type { PricingModel, PricingProblem } from "@evinvest/sites-contract";
 import { Alert, AlertDescription, Button, Field, FieldDescription, FieldLabel, Textarea, toast } from "@evinvest/uikit";
 import { ClipboardCopy, ClipboardPaste } from "lucide-react";
 import { useId, useState } from "react";
 
-import type { PricingModel, PricingProblem } from "@/entities/pricing";
 import { useT } from "@/shared/i18n";
 import { PanelOverlay } from "@/shared/ui/panel-overlay";
 import { useButtonSize } from "@/shared/ui/touch";

@@ -1,7 +1,8 @@
+import type { PricingModel } from "@evinvest/sites-contract";
 import { toast } from "@evinvest/uikit";
 import { useEffect, useMemo, useState } from "react";
 
-import type { PricingItem, PricingModel } from "@/entities/pricing";
+import type { PricingItem } from "@/entities/pricing";
 import { useT } from "@/shared/i18n";
 import { notifyFailure } from "@/shared/ui/notify";
 

@@ -13,8 +13,10 @@ ev_lib = { workspace = true, features = ["architecture"] }
 jiff.workspace = true
 sa_alerts.workspace = true
 sa_auth.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+ts-rs.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]

@@ -1,13 +1,9 @@
-//! A phone number as the funnel reads it: kitstart's `normalizePhone`
-//! (EV-Service-Arb/sites_tools `ts/kitstart/src/core/phone.ts`), ported rule for rule, so a number the site stored and
-//! the same number typed into a booking form compare equal.
-//!
-//! One difference: kitstart runs NFKC first; here only what NFKC does to a phone number is
-//! done — full-width digits and `＋` read as ASCII, and every Unicode space (no-break ones
-//! included) is a space.
+//! A phone number as the funnel reads it — `normalizePhone` of `@evinvest/sites-contract`, the
+//! same rules held to `contracts/vectors/phone.json` — so a number the site stored and the same
+//! number typed into a booking form compare equal. Full-width digits and `＋` read as ASCII, and
+//! every Unicode space (no-break ones included) is a space.
 
-/// The national number's length, after the country code, for the plans kitstart reads
-/// closely; any other plan keeps E.164's 8 to 15 digits.
+/// The national number's length, after the country code, for the plans read closely; any other plan keeps E.164's 8 to 15 digits.
 const NATIONAL_LENGTH: [(&str, usize, usize); 7] = [("1", 10, 10), ("32", 8, 9), ("34", 9, 9), ("39", 6, 11), ("41", 9, 9), ("44", 9, 10), ("49", 7, 13)];
 
 fn fits_plan(digits: &str) -> bool {
@@ -20,7 +16,7 @@ fn fits_plan(digits: &str) -> bool {
 	true
 }
 
-/// What NFKC makes of the characters a phone number may be typed with.
+/// The characters a phone number may be typed with, as ASCII.
 fn fold(c: char) -> char {
 	match c {
 		'\u{FF10}'..='\u{FF19}' => char::from(b'0' + (c as u32 - 0xff10) as u8),
@@ -63,34 +59,4 @@ pub fn normalize(raw: &str) -> Option<String> {
 		return None;
 	}
 	Some(e164)
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-
-	#[test]
-	fn as_kitstart_reads_them() {
-		for (raw, want) in [
-			("06 12 34 56 78", Some("+33612345678")),
-			("+33 (0)6 12 34 56 78", Some("+33612345678")),
-			("0033 6 12 34 56 78", Some("+33612345678")),
-			("6 12 34 56 78", Some("+33612345678")),
-			("+33612345678", Some("+33612345678")),
-			("06.12.34.56.78", Some("+33612345678")),
-			("０６\u{a0}１２ ３４ ５６ ７８", Some("+33612345678")),
-			("+44 7911 123456", Some("+447911123456")),
-			("+1 415 555 0100", Some("+14155550100")),
-			("+12345678", None),
-			("00 00 00 00 00", None),
-			("06 66 66 66 66", None),
-			("+33 012345678", None),
-			("12345", None),
-			("phone", None),
-			("", None),
-			("+33 6 12 34 56 7", None),
-		] {
-			assert_eq!(normalize(raw).as_deref(), want, "{raw:?}");
-		}
-	}
 }

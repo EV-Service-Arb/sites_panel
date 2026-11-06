@@ -1,7 +1,8 @@
+import { INPUT_KINDS, type PricingInputKind } from "@evinvest/sites-contract";
 import { Button } from "@evinvest/uikit";
 import { Plus } from "lucide-react";
 
-import { INPUT_KINDS, type PricingInputKind, labelOf } from "@/entities/pricing";
+import { labelOf } from "@/entities/pricing";
 import { useLocale, useT } from "@/shared/i18n";
 import { useButtonSize } from "@/shared/ui/touch";
 

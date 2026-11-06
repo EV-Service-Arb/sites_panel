@@ -1,0 +1,16 @@
+{
+  "problems": [
+    {
+      "path": "providers.link.url",
+      "code": "ip"
+    }
+  ],
+  "config": {
+    "default": "link",
+    "providers": {
+      "link": {
+        "url": "https://192.168.1.10/vifnet"
+      }
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "problems": [
+    {
+      "path": "providers.link",
+      "code": "provider_shape"
+    }
+  ],
+  "config": {
+    "default": "manual",
+    "providers": {
+      "link": "https://book.example.fr/vifnet"
+    }
+  }
+}

@@ -1,5 +1,5 @@
 //! A brand's pricing over HTTP, end to end on the real router: the editor's routes behind the
-//! conductor's assertion, the preview held to kitstart's cases, and the sites' read under
+//! conductor's assertion, the preview held to the pricing vectors' cases, and the sites' read under
 //! `/api/internal`.
 
 use axum::http::{Method, StatusCode};
@@ -12,7 +12,7 @@ const ITEM: &str = "/api/v1/pricing/vifnet";
 const LIVE: &str = "/api/internal/brands/vifnet/pricing?locale=fr";
 
 fn fixture(path: &str) -> Value {
-	let path = format!("{}/../panel_core/tests/fixtures/pricing/{path}", env!("CARGO_MANIFEST_DIR"));
+	let path = format!("{}/../../contracts/vectors/pricing/{path}", env!("CARGO_MANIFEST_DIR"));
 	serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap()
 }
 
@@ -80,17 +80,23 @@ async fn an_admin_saves_a_model_and_the_sites_read_it() {
 	let (status, body) = b.put(ITEM, json!({"model": invalid, "expected_updated_at": null})).await;
 	assert_eq!(
 		(status, body),
-		(StatusCode::UNPROCESSABLE_ENTITY, json!({"error": "no input \"pets\"", "path": "needs.standard.inputs[2]"}))
+		(
+			StatusCode::UNPROCESSABLE_ENTITY,
+			json!({"error": "no input \"pets\"", "code": "noInput", "path": "needs.standard.inputs[2]"})
+		)
 	);
 	let mut unlabelled = cleaning.clone();
 	unlabelled["inputs"][1]["options"][0]["labels"] = json!({"fr": "Studio"});
 	let (status, body) = b.put(ITEM, json!({"model": unlabelled, "expected_updated_at": null})).await;
 	assert_eq!(
 		(status, body),
-		(StatusCode::UNPROCESSABLE_ENTITY, json!({"error": "no \"en\" label", "path": "inputs[1].options[0].labels"}))
+		(
+			StatusCode::UNPROCESSABLE_ENTITY,
+			json!({"error": "no \"en\" label", "code": "labelMissing", "path": "inputs[1].options[0].labels.en"})
+		)
 	);
 	let (status, body) = b.put(ITEM, json!({"model": [], "expected_updated_at": null})).await;
-	assert_eq!((status, body), (StatusCode::UNPROCESSABLE_ENTITY, json!({"error": "an object", "path": ""})));
+	assert_eq!((status, body), (StatusCode::UNPROCESSABLE_ENTITY, json!({"error": "an object", "code": "object", "path": ""})));
 
 	let (status, saved) = b.put(ITEM, put.clone()).await;
 	assert_eq!(status, StatusCode::OK, "{saved}");
@@ -136,9 +142,9 @@ async fn an_admin_saves_a_model_and_the_sites_read_it() {
 	);
 }
 
-/// The editor's preview is what the site shows: kitstart's cases, priced over HTTP, to the cent.
+/// The editor's preview is what the site shows: the vectors' cases, priced over HTTP, to the cent.
 #[tokio::test]
-async fn the_preview_prices_kitstarts_cases() {
+async fn the_preview_prices_the_vectors_cases() {
 	let db = TestDb::create().await;
 	let conductor = Conductor::new("k1");
 	let app = app(panel(&db).await, &conductor);
@@ -160,7 +166,10 @@ async fn the_preview_prices_kitstarts_cases() {
 	let (status, answer) = b.post("/api/v1/pricing/vifnet/preview", json!({"model": draft, "need": "standard", "inputs": {}})).await;
 	assert_eq!(
 		(status, answer),
-		(StatusCode::UNPROCESSABLE_ENTITY, json!({"error": "an integer from 1 to 100000000", "path": "roundToCents"}))
+		(
+			StatusCode::UNPROCESSABLE_ENTITY,
+			json!({"error": "an integer from 1 to 100000000", "code": "int", "path": "roundToCents"})
+		)
 	);
 }
 

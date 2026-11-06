@@ -3,10 +3,10 @@
  * on some leads, and the `?flow=` filter the leads list takes.
  */
 
-import { FLOWS, type Flow } from "../src/entities/lead/model/generated.ts";
+import { LEAD_FLOWS, type LeadFlow } from "@evinvest/sites-contract";
 
 export interface StubDeal {
-  flow: Flow;
+  flow: LeadFlow;
   quoted_cents: number | null;
   pricing_valid_from: string | null;
   estimate_inputs: Record<string, string> | null;
@@ -42,7 +42,7 @@ export function dealDto(deal: StubDeal | null): StubDeal | { [K in keyof StubDea
 }
 
 /** `?flow=`: null for none, false for a word the API refuses with 400. */
-export function flowParam(raw: string | null): Flow | null | false {
+export function flowParam(raw: string | null): LeadFlow | null | false {
   if (raw === null) return null;
-  return FLOWS.find((f) => f === raw) ?? false;
+  return LEAD_FLOWS.find((f) => f === raw) ?? false;
 }

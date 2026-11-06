@@ -1,0 +1,1764 @@
+[
+  {
+    "name": "every field, kept as sent",
+    "settings": {
+      "phone": "+33423500640",
+      "whatsapp": "+33612345678",
+      "telegram": "aquafix_devis_bot",
+      "messengers": {
+        "whatsapp": true,
+        "telegram": false
+      },
+      "hours": [
+        {
+          "days": [
+            "Monday",
+            "Tuesday"
+          ],
+          "opens": "08:00",
+          "closes": "19:00"
+        }
+      ],
+      "serviceArea": [
+        "Royat",
+        "Chamalières"
+      ],
+      "address": {
+        "street": "1 rue X",
+        "postalCode": "63130",
+        "locality": "Royat"
+      },
+      "geo": {
+        "lat": 45.76,
+        "lng": 3.05
+      },
+      "storefrontPhoto": "https://example.com/front.jpg",
+      "landmark": {
+        "fr": "Face à la mairie",
+        "en": "Opposite the town hall"
+      },
+      "rating": {
+        "value": 4.8,
+        "count": 37,
+        "fetchedAt": "2026-10-03T12:00:00Z"
+      },
+      "booking": {
+        "default": "google_calendar",
+        "providers": {
+          "google_calendar": {
+            "url": "https://calendar.app.google/x1"
+          }
+        }
+      },
+      "reviewUrl": "https://g.page/r/CdEfGh/review"
+    },
+    "live": {
+      "phone": "+33423500640",
+      "whatsapp": "+33612345678",
+      "telegram": "aquafix_devis_bot",
+      "messengers": {
+        "whatsapp": true,
+        "telegram": false
+      },
+      "hours": [
+        {
+          "days": [
+            "Monday",
+            "Tuesday"
+          ],
+          "opens": "08:00",
+          "closes": "19:00"
+        }
+      ],
+      "serviceArea": [
+        "Royat",
+        "Chamalières"
+      ],
+      "address": {
+        "street": "1 rue X",
+        "postalCode": "63130",
+        "locality": "Royat"
+      },
+      "geo": {
+        "lat": 45.76,
+        "lng": 3.05
+      },
+      "storefrontPhoto": "https://example.com/front.jpg",
+      "landmark": {
+        "fr": "Face à la mairie",
+        "en": "Opposite the town hall"
+      },
+      "rating": {
+        "value": 4.8,
+        "count": 37,
+        "fetchedAt": "2026-10-03T12:00:00Z"
+      },
+      "booking": {
+        "default": "google_calendar",
+        "providers": {
+          "google_calendar": {
+            "url": "https://calendar.app.google/x1"
+          }
+        }
+      },
+      "reviewUrl": "https://g.page/r/CdEfGh/review"
+    },
+    "problems": []
+  },
+  {
+    "name": "nothing set",
+    "settings": {},
+    "live": {},
+    "problems": []
+  },
+  {
+    "name": "a field set to null is left out",
+    "settings": {
+      "phone": null
+    },
+    "live": {},
+    "problems": []
+  },
+  {
+    "name": "not an object",
+    "settings": [],
+    "live": {},
+    "problems": [
+      {
+        "path": "",
+        "code": "object"
+      }
+    ]
+  },
+  {
+    "name": "text is trimmed, days put in week order",
+    "settings": {
+      "serviceArea": [
+        " Royat "
+      ],
+      "hours": [
+        {
+          "days": [
+            "Friday",
+            "Monday"
+          ],
+          "opens": "08:00",
+          "closes": "19:00"
+        }
+      ]
+    },
+    "live": {
+      "serviceArea": [
+        "Royat"
+      ],
+      "hours": [
+        {
+          "days": [
+            "Monday",
+            "Friday"
+          ],
+          "opens": "08:00",
+          "closes": "19:00"
+        }
+      ]
+    },
+    "problems": []
+  },
+  {
+    "name": "a phone is E.164, not a national number",
+    "settings": {
+      "phone": "0612345678"
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "phone",
+        "code": "e164"
+      }
+    ]
+  },
+  {
+    "name": "whatsapp '+33 6 12 34 56 78' is not E.164",
+    "settings": {
+      "whatsapp": "+33 6 12 34 56 78"
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "whatsapp",
+        "code": "e164"
+      }
+    ]
+  },
+  {
+    "name": "whatsapp '+0612345678' is not E.164",
+    "settings": {
+      "whatsapp": "+0612345678"
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "whatsapp",
+        "code": "e164"
+      }
+    ]
+  },
+  {
+    "name": "whatsapp '+123' is not E.164",
+    "settings": {
+      "whatsapp": "+123"
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "whatsapp",
+        "code": "e164"
+      }
+    ]
+  },
+  {
+    "name": "whatsapp '+1234567890123456' is not E.164",
+    "settings": {
+      "whatsapp": "+1234567890123456"
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "whatsapp",
+        "code": "e164"
+      }
+    ]
+  },
+  {
+    "name": "whatsapp '+33612345678x' is not E.164",
+    "settings": {
+      "whatsapp": "+33612345678x"
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "whatsapp",
+        "code": "e164"
+      }
+    ]
+  },
+  {
+    "name": "every bad field is named, the good ones kept",
+    "settings": {
+      "phone": "+33423500640",
+      "fax": "+33612345678",
+      "geo": {
+        "lat": 91,
+        "lng": 0
+      },
+      "storefrontPhoto": "http://x.fr/a.jpg"
+    },
+    "live": {
+      "phone": "+33423500640"
+    },
+    "problems": [
+      {
+        "path": "fax",
+        "code": "unknown_field"
+      },
+      {
+        "path": "geo.lat",
+        "code": "coordinate"
+      },
+      {
+        "path": "storefrontPhoto",
+        "code": "https_url"
+      }
+    ]
+  },
+  {
+    "name": "a whole day",
+    "settings": {
+      "hours": [
+        {
+          "days": [
+            "Sunday"
+          ],
+          "opens": "00:00",
+          "closes": "23:59"
+        }
+      ]
+    },
+    "live": {
+      "hours": [
+        {
+          "days": [
+            "Sunday"
+          ],
+          "opens": "00:00",
+          "closes": "23:59"
+        }
+      ]
+    },
+    "problems": []
+  },
+  {
+    "name": "hours: an empty list",
+    "settings": {
+      "hours": []
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "hours",
+        "code": "empty"
+      }
+    ]
+  },
+  {
+    "name": "hours: not a list",
+    "settings": {
+      "hours": "Mo-Fr"
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "hours",
+        "code": "shape"
+      }
+    ]
+  },
+  {
+    "name": "hours: no day",
+    "settings": {
+      "hours": [
+        {
+          "days": [],
+          "opens": "08:00",
+          "closes": "19:00"
+        }
+      ]
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "hours[0].days",
+        "code": "empty"
+      }
+    ]
+  },
+  {
+    "name": "hours: not a day",
+    "settings": {
+      "hours": [
+        {
+          "days": [
+            "Mon"
+          ],
+          "opens": "08:00",
+          "closes": "19:00"
+        }
+      ]
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "hours[0].days[0]",
+        "code": "day"
+      }
+    ]
+  },
+  {
+    "name": "hours: a day twice",
+    "settings": {
+      "hours": [
+        {
+          "days": [
+            "Monday",
+            "Monday"
+          ],
+          "opens": "08:00",
+          "closes": "19:00"
+        }
+      ]
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "hours[0].days[1]",
+        "code": "duplicate"
+      }
+    ]
+  },
+  {
+    "name": "hours: H:MM",
+    "settings": {
+      "hours": [
+        {
+          "days": [
+            "Monday"
+          ],
+          "opens": "8:00",
+          "closes": "19:00"
+        }
+      ]
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "hours[0].opens",
+        "code": "time"
+      }
+    ]
+  },
+  {
+    "name": "hours: 24:00",
+    "settings": {
+      "hours": [
+        {
+          "days": [
+            "Monday"
+          ],
+          "opens": "08:00",
+          "closes": "24:00"
+        }
+      ]
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "hours[0].closes",
+        "code": "time"
+      }
+    ]
+  },
+  {
+    "name": "hours: minute 60",
+    "settings": {
+      "hours": [
+        {
+          "days": [
+            "Monday"
+          ],
+          "opens": "08:60",
+          "closes": "19:00"
+        }
+      ]
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "hours[0].opens",
+        "code": "time"
+      }
+    ]
+  },
+  {
+    "name": "hours: across midnight is two rows",
+    "settings": {
+      "hours": [
+        {
+          "days": [
+            "Monday"
+          ],
+          "opens": "19:00",
+          "closes": "08:00"
+        }
+      ]
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "hours[0].closes",
+        "code": "closes_before_opens"
+      }
+    ]
+  },
+  {
+    "name": "hours: closing as it opens",
+    "settings": {
+      "hours": [
+        {
+          "days": [
+            "Monday"
+          ],
+          "opens": "08:00",
+          "closes": "08:00"
+        }
+      ]
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "hours[0].closes",
+        "code": "closes_before_opens"
+      }
+    ]
+  },
+  {
+    "name": "hours: no closes",
+    "settings": {
+      "hours": [
+        {
+          "days": [
+            "Monday"
+          ],
+          "opens": "08:00"
+        }
+      ]
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "hours[0].closes",
+        "code": "required"
+      }
+    ]
+  },
+  {
+    "name": "hours: a stray key",
+    "settings": {
+      "hours": [
+        {
+          "days": [
+            "Monday"
+          ],
+          "opens": "08:00",
+          "closes": "19:00",
+          "note": "x"
+        }
+      ]
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "hours[0].note",
+        "code": "unknown_field"
+      }
+    ]
+  },
+  {
+    "name": "hours: fifteen rows",
+    "settings": {
+      "hours": [
+        {
+          "days": [
+            "Monday"
+          ],
+          "opens": "08:00",
+          "closes": "09:00"
+        },
+        {
+          "days": [
+            "Monday"
+          ],
+          "opens": "08:00",
+          "closes": "09:00"
+        },
+        {
+          "days": [
+            "Monday"
+          ],
+          "opens": "08:00",
+          "closes": "09:00"
+        },
+        {
+          "days": [
+            "Monday"
+          ],
+          "opens": "08:00",
+          "closes": "09:00"
+        },
+        {
+          "days": [
+            "Monday"
+          ],
+          "opens": "08:00",
+          "closes": "09:00"
+        },
+        {
+          "days": [
+            "Monday"
+          ],
+          "opens": "08:00",
+          "closes": "09:00"
+        },
+        {
+          "days": [
+            "Monday"
+          ],
+          "opens": "08:00",
+          "closes": "09:00"
+        },
+        {
+          "days": [
+            "Monday"
+          ],
+          "opens": "08:00",
+          "closes": "09:00"
+        },
+        {
+          "days": [
+            "Monday"
+          ],
+          "opens": "08:00",
+          "closes": "09:00"
+        },
+        {
+          "days": [
+            "Monday"
+          ],
+          "opens": "08:00",
+          "closes": "09:00"
+        },
+        {
+          "days": [
+            "Monday"
+          ],
+          "opens": "08:00",
+          "closes": "09:00"
+        },
+        {
+          "days": [
+            "Monday"
+          ],
+          "opens": "08:00",
+          "closes": "09:00"
+        },
+        {
+          "days": [
+            "Monday"
+          ],
+          "opens": "08:00",
+          "closes": "09:00"
+        },
+        {
+          "days": [
+            "Monday"
+          ],
+          "opens": "08:00",
+          "closes": "09:00"
+        },
+        {
+          "days": [
+            "Monday"
+          ],
+          "opens": "08:00",
+          "closes": "09:00"
+        }
+      ]
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "hours",
+        "code": "too_many"
+      }
+    ]
+  },
+  {
+    "name": "a list names the part that is wrong",
+    "settings": {
+      "hours": [
+        {
+          "days": [
+            "Monday"
+          ],
+          "opens": "08:00",
+          "closes": "19:00"
+        },
+        {
+          "days": [
+            "Tuesday",
+            "Tuesday"
+          ],
+          "opens": "8h",
+          "closes": "19:00"
+        },
+        {
+          "days": [
+            "Friday"
+          ],
+          "opens": "19:00",
+          "closes": "08:00"
+        }
+      ],
+      "serviceArea": [
+        "Royat",
+        "",
+        "royat"
+      ]
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "hours[1].days[1]",
+        "code": "duplicate"
+      },
+      {
+        "path": "hours[1].opens",
+        "code": "time"
+      },
+      {
+        "path": "hours[2].closes",
+        "code": "closes_before_opens"
+      },
+      {
+        "path": "serviceArea[1]",
+        "code": "blank"
+      },
+      {
+        "path": "serviceArea[2]",
+        "code": "duplicate"
+      }
+    ]
+  },
+  {
+    "name": "serviceArea: empty",
+    "settings": {
+      "serviceArea": []
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "serviceArea",
+        "code": "empty"
+      }
+    ]
+  },
+  {
+    "name": "serviceArea: a commune twice, whatever its case",
+    "settings": {
+      "serviceArea": [
+        "Royat",
+        "royat"
+      ]
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "serviceArea[1]",
+        "code": "duplicate"
+      }
+    ]
+  },
+  {
+    "name": "serviceArea: blank",
+    "settings": {
+      "serviceArea": [
+        ""
+      ]
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "serviceArea[0]",
+        "code": "blank"
+      }
+    ]
+  },
+  {
+    "name": "serviceArea: not text",
+    "settings": {
+      "serviceArea": [
+        63130
+      ]
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "serviceArea[0]",
+        "code": "type"
+      }
+    ]
+  },
+  {
+    "name": "serviceArea: a line break",
+    "settings": {
+      "serviceArea": [
+        "Roy\nat"
+      ]
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "serviceArea[0]",
+        "code": "control"
+      }
+    ]
+  },
+  {
+    "name": "serviceArea: past 200 characters",
+    "settings": {
+      "serviceArea": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ]
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "serviceArea[0]",
+        "code": "too_long"
+      }
+    ]
+  },
+  {
+    "name": "address: a four-digit postal code",
+    "settings": {
+      "address": {
+        "street": "1 rue X",
+        "postalCode": "6313",
+        "locality": "Royat"
+      }
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "address.postalCode",
+        "code": "postal_code"
+      }
+    ]
+  },
+  {
+    "name": "address: no postal code",
+    "settings": {
+      "address": {
+        "street": "1 rue X",
+        "locality": "Royat"
+      }
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "address.postalCode",
+        "code": "required"
+      }
+    ]
+  },
+  {
+    "name": "geo: no lng",
+    "settings": {
+      "geo": {
+        "lat": 45.0
+      }
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "geo.lng",
+        "code": "required"
+      }
+    ]
+  },
+  {
+    "name": "storefrontPhoto: no host",
+    "settings": {
+      "storefrontPhoto": "https://"
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "storefrontPhoto",
+        "code": "https_url"
+      }
+    ]
+  },
+  {
+    "name": "storefrontPhoto: a space",
+    "settings": {
+      "storefrontPhoto": "https://a b.fr/x"
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "storefrontPhoto",
+        "code": "https_url"
+      }
+    ]
+  },
+  {
+    "name": "landmark: no locale",
+    "settings": {
+      "landmark": {}
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "landmark",
+        "code": "empty"
+      }
+    ]
+  },
+  {
+    "name": "landmark: not a locale",
+    "settings": {
+      "landmark": {
+        "french": "x"
+      }
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "landmark.french",
+        "code": "locale"
+      }
+    ]
+  },
+  {
+    "name": "landmark: blank",
+    "settings": {
+      "landmark": {
+        "fr": " "
+      }
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "landmark.fr",
+        "code": "blank"
+      }
+    ]
+  },
+  {
+    "name": "rating: under 1",
+    "settings": {
+      "rating": {
+        "value": 0.5,
+        "count": 1,
+        "fetchedAt": "2026-10-03T12:00:00Z"
+      }
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "rating.value",
+        "code": "rating_value"
+      }
+    ]
+  },
+  {
+    "name": "rating: a negative count",
+    "settings": {
+      "rating": {
+        "value": 4,
+        "count": -1,
+        "fetchedAt": "2026-10-03T12:00:00Z"
+      }
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "rating.count",
+        "code": "rating_count"
+      }
+    ]
+  },
+  {
+    "name": "rating: a fractional count",
+    "settings": {
+      "rating": {
+        "value": 4,
+        "count": 1.5,
+        "fetchedAt": "2026-10-03T12:00:00Z"
+      }
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "rating.count",
+        "code": "rating_count"
+      }
+    ]
+  },
+  {
+    "name": "rating: not an instant",
+    "settings": {
+      "rating": {
+        "value": 4,
+        "count": 1,
+        "fetchedAt": "yesterday"
+      }
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "rating.fetchedAt",
+        "code": "instant"
+      }
+    ]
+  },
+  {
+    "name": "rating: a day, not an instant",
+    "settings": {
+      "rating": {
+        "value": 4,
+        "count": 1,
+        "fetchedAt": "2026-10-03"
+      }
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "rating.fetchedAt",
+        "code": "instant"
+      }
+    ]
+  },
+  {
+    "name": "rating: no offset",
+    "settings": {
+      "rating": {
+        "value": 4,
+        "count": 1,
+        "fetchedAt": "2026-10-03T12:00:00"
+      }
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "rating.fetchedAt",
+        "code": "instant"
+      }
+    ]
+  },
+  {
+    "name": "rating: the 31st of February",
+    "settings": {
+      "rating": {
+        "value": 4,
+        "count": 1,
+        "fetchedAt": "2026-02-31T12:00:00Z"
+      }
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "rating.fetchedAt",
+        "code": "instant"
+      }
+    ]
+  },
+  {
+    "name": "reviewUrl: another host",
+    "settings": {
+      "reviewUrl": "https://evil.example/r"
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "reviewUrl",
+        "code": "review_url"
+      }
+    ]
+  },
+  {
+    "name": "reviewUrl: the host as userinfo",
+    "settings": {
+      "reviewUrl": "https://g.page@evil.example/r"
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "reviewUrl",
+        "code": "review_url"
+      }
+    ]
+  },
+  {
+    "name": "reviewUrl: http",
+    "settings": {
+      "reviewUrl": "http://g.page/r/x"
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "reviewUrl",
+        "code": "review_url"
+      }
+    ]
+  },
+  {
+    "name": "rating at 2026-10-03T14:00:00+02:00, kept as sent",
+    "settings": {
+      "rating": {
+        "value": 4,
+        "count": 0,
+        "fetchedAt": "2026-10-03T14:00:00+02:00"
+      }
+    },
+    "live": {
+      "rating": {
+        "value": 4,
+        "count": 0,
+        "fetchedAt": "2026-10-03T14:00:00+02:00"
+      }
+    },
+    "problems": []
+  },
+  {
+    "name": "rating at 2026-10-03T12:00:00.123456789Z, kept as sent",
+    "settings": {
+      "rating": {
+        "value": 5,
+        "count": 12,
+        "fetchedAt": "2026-10-03T12:00:00.123456789Z"
+      }
+    },
+    "live": {
+      "rating": {
+        "value": 5,
+        "count": 12,
+        "fetchedAt": "2026-10-03T12:00:00.123456789Z"
+      }
+    },
+    "problems": []
+  },
+  {
+    "name": "reviewUrl on search.google.com",
+    "settings": {
+      "reviewUrl": "https://search.google.com/local/writereview?placeid=ChIJ"
+    },
+    "live": {
+      "reviewUrl": "https://search.google.com/local/writereview?placeid=ChIJ"
+    },
+    "problems": []
+  },
+  {
+    "name": "a booking is named by its path",
+    "settings": {
+      "booking": {
+        "default": "link",
+        "providers": {
+          "google_calendar": {
+            "url": "https://calendar.google.com/x"
+          }
+        }
+      }
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "booking.default",
+        "code": "default_unset"
+      },
+      {
+        "path": "booking.providers.google_calendar.url",
+        "code": "google"
+      }
+    ]
+  },
+  {
+    "name": "a booking that is not one",
+    "settings": {
+      "booking": "manual"
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "booking",
+        "code": "shape"
+      }
+    ]
+  },
+  {
+    "name": "the bot's username, trimmed",
+    "settings": {
+      "telegram": " aquafix_devis_bot ",
+      "messengers": {
+        "whatsapp": true,
+        "telegram": false
+      }
+    },
+    "live": {
+      "telegram": "aquafix_devis_bot",
+      "messengers": {
+        "whatsapp": true,
+        "telegram": false
+      }
+    },
+    "problems": []
+  },
+  {
+    "name": "every messenger on",
+    "settings": {
+      "messengers": {}
+    },
+    "live": {
+      "messengers": {}
+    },
+    "problems": []
+  },
+  {
+    "name": "telegram 'a_bot'",
+    "settings": {
+      "telegram": "a_bot"
+    },
+    "live": {
+      "telegram": "a_bot"
+    },
+    "problems": []
+  },
+  {
+    "name": "telegram 'AquafixBOT'",
+    "settings": {
+      "telegram": "AquafixBOT"
+    },
+    "live": {
+      "telegram": "AquafixBOT"
+    },
+    "problems": []
+  },
+  {
+    "name": "telegram 'x1Bot'",
+    "settings": {
+      "telegram": "x1Bot"
+    },
+    "live": {
+      "telegram": "x1Bot"
+    },
+    "problems": []
+  },
+  {
+    "name": "telegram 'abbbbbbbbbbbbbbbbbbbbbbbbbbbbbot'",
+    "settings": {
+      "telegram": "abbbbbbbbbbbbbbbbbbbbbbbbbbbbbot"
+    },
+    "live": {
+      "telegram": "abbbbbbbbbbbbbbbbbbbbbbbbbbbbbot"
+    },
+    "problems": []
+  },
+  {
+    "name": "telegram 'abot' is not a bot's username",
+    "settings": {
+      "telegram": "abot"
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "telegram",
+        "code": "telegram_bot"
+      }
+    ]
+  },
+  {
+    "name": "telegram '_xbot' is not a bot's username",
+    "settings": {
+      "telegram": "_xbot"
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "telegram",
+        "code": "telegram_bot"
+      }
+    ]
+  },
+  {
+    "name": "telegram 'aquafix' is not a bot's username",
+    "settings": {
+      "telegram": "aquafix"
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "telegram",
+        "code": "telegram_bot"
+      }
+    ]
+  },
+  {
+    "name": "telegram 'aquafix_bo' is not a bot's username",
+    "settings": {
+      "telegram": "aquafix_bo"
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "telegram",
+        "code": "telegram_bot"
+      }
+    ]
+  },
+  {
+    "name": "telegram '@aquafix_bot' is not a bot's username",
+    "settings": {
+      "telegram": "@aquafix_bot"
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "telegram",
+        "code": "telegram_bot"
+      }
+    ]
+  },
+  {
+    "name": "telegram '1aquafix_bot' is not a bot's username",
+    "settings": {
+      "telegram": "1aquafix_bot"
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "telegram",
+        "code": "telegram_bot"
+      }
+    ]
+  },
+  {
+    "name": "telegram 'aqua-fix_bot' is not a bot's username",
+    "settings": {
+      "telegram": "aqua-fix_bot"
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "telegram",
+        "code": "telegram_bot"
+      }
+    ]
+  },
+  {
+    "name": "telegram 'aqua fix bot' is not a bot's username",
+    "settings": {
+      "telegram": "aqua fix bot"
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "telegram",
+        "code": "telegram_bot"
+      }
+    ]
+  },
+  {
+    "name": "telegram 'abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbot' is not a bot's username",
+    "settings": {
+      "telegram": "abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbot"
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "telegram",
+        "code": "telegram_bot"
+      }
+    ]
+  },
+  {
+    "name": "messengers: one unknown, one not a switch",
+    "settings": {
+      "messengers": {
+        "whatsapp": "on",
+        "signal": true,
+        "telegram": false
+      }
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "messengers.signal",
+        "code": "messenger_unknown"
+      },
+      {
+        "path": "messengers.whatsapp",
+        "code": "boolean"
+      }
+    ]
+  },
+  {
+    "name": "messengers: not an object",
+    "settings": {
+      "messengers": [
+        true
+      ]
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "messengers",
+        "code": "shape"
+      }
+    ]
+  },
+  {
+    "name": "rating: 2026-10-03T23:59:60Z is not an RFC 3339 instant",
+    "settings": {
+      "rating": {
+        "value": 4,
+        "count": 1,
+        "fetchedAt": "2026-10-03T23:59:60Z"
+      }
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "rating.fetchedAt",
+        "code": "instant"
+      }
+    ]
+  },
+  {
+    "name": "rating: 2026-10-03T12:00:00+24:00 is not an RFC 3339 instant",
+    "settings": {
+      "rating": {
+        "value": 4,
+        "count": 1,
+        "fetchedAt": "2026-10-03T12:00:00+24:00"
+      }
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "rating.fetchedAt",
+        "code": "instant"
+      }
+    ]
+  },
+  {
+    "name": "rating: 2026-10-03T12:00:00.1234567890Z is not an RFC 3339 instant",
+    "settings": {
+      "rating": {
+        "value": 4,
+        "count": 1,
+        "fetchedAt": "2026-10-03T12:00:00.1234567890Z"
+      }
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "rating.fetchedAt",
+        "code": "instant"
+      }
+    ]
+  },
+  {
+    "name": "rating: 2026-10-03t12:00:00Z is not an RFC 3339 instant",
+    "settings": {
+      "rating": {
+        "value": 4,
+        "count": 1,
+        "fetchedAt": "2026-10-03t12:00:00Z"
+      }
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "rating.fetchedAt",
+        "code": "instant"
+      }
+    ]
+  },
+  {
+    "name": "rating: 2026-10-03T12:00:00z is not an RFC 3339 instant",
+    "settings": {
+      "rating": {
+        "value": 4,
+        "count": 1,
+        "fetchedAt": "2026-10-03T12:00:00z"
+      }
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "rating.fetchedAt",
+        "code": "instant"
+      }
+    ]
+  },
+  {
+    "name": "rating: 2026-10-03T12:00Z is not an RFC 3339 instant",
+    "settings": {
+      "rating": {
+        "value": 4,
+        "count": 1,
+        "fetchedAt": "2026-10-03T12:00Z"
+      }
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "rating.fetchedAt",
+        "code": "instant"
+      }
+    ]
+  },
+  {
+    "name": "rating: ２０２６-10-03T12:00:00Z is not an RFC 3339 instant",
+    "settings": {
+      "rating": {
+        "value": 4,
+        "count": 1,
+        "fetchedAt": "２０２６-10-03T12:00:00Z"
+      }
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "rating.fetchedAt",
+        "code": "instant"
+      }
+    ]
+  },
+  {
+    "name": "rating: 2026-10-03T12:00:00+0200 is not an RFC 3339 instant",
+    "settings": {
+      "rating": {
+        "value": 4,
+        "count": 1,
+        "fetchedAt": "2026-10-03T12:00:00+0200"
+      }
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "rating.fetchedAt",
+        "code": "instant"
+      }
+    ]
+  },
+  {
+    "name": "rating at 2026-10-03T12:00:00-00:00, kept as sent",
+    "settings": {
+      "rating": {
+        "value": 4,
+        "count": 1,
+        "fetchedAt": "2026-10-03T12:00:00-00:00"
+      }
+    },
+    "live": {
+      "rating": {
+        "value": 4,
+        "count": 1,
+        "fetchedAt": "2026-10-03T12:00:00-00:00"
+      }
+    },
+    "problems": []
+  },
+  {
+    "name": "rating at 0000-01-01T00:00:00Z, kept as sent",
+    "settings": {
+      "rating": {
+        "value": 4,
+        "count": 1,
+        "fetchedAt": "0000-01-01T00:00:00Z"
+      }
+    },
+    "live": {
+      "rating": {
+        "value": 4,
+        "count": 1,
+        "fetchedAt": "0000-01-01T00:00:00Z"
+      }
+    },
+    "problems": []
+  },
+  {
+    "name": "rating at 9999-12-31T23:59:59+23:59, kept as sent",
+    "settings": {
+      "rating": {
+        "value": 4,
+        "count": 1,
+        "fetchedAt": "9999-12-31T23:59:59+23:59"
+      }
+    },
+    "live": {
+      "rating": {
+        "value": 4,
+        "count": 1,
+        "fetchedAt": "9999-12-31T23:59:59+23:59"
+      }
+    },
+    "problems": []
+  },
+  {
+    "name": "reviewUrl: https://g.page.evil.example/r/x is not Google's",
+    "settings": {
+      "reviewUrl": "https://g.page.evil.example/r/x"
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "reviewUrl",
+        "code": "review_url"
+      }
+    ]
+  },
+  {
+    "name": "reviewUrl: https://evil-g.page/r/x is not Google's",
+    "settings": {
+      "reviewUrl": "https://evil-g.page/r/x"
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "reviewUrl",
+        "code": "review_url"
+      }
+    ]
+  },
+  {
+    "name": "reviewUrl: https://search.google.com.evil.example/local/writereview is not Google's",
+    "settings": {
+      "reviewUrl": "https://search.google.com.evil.example/local/writereview"
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "reviewUrl",
+        "code": "review_url"
+      }
+    ]
+  },
+  {
+    "name": "reviewUrl: https://g.page:pw@evil.example/r/x is not Google's",
+    "settings": {
+      "reviewUrl": "https://g.page:pw@evil.example/r/x"
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "reviewUrl",
+        "code": "review_url"
+      }
+    ]
+  },
+  {
+    "name": "reviewUrl: javascript:alert(1)//g.page is not Google's",
+    "settings": {
+      "reviewUrl": "javascript:alert(1)//g.page"
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "reviewUrl",
+        "code": "review_url"
+      }
+    ]
+  },
+  {
+    "name": "reviewUrl: 42 is not a link",
+    "settings": {
+      "reviewUrl": 42
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "reviewUrl",
+        "code": "review_url"
+      }
+    ]
+  },
+  {
+    "name": "reviewUrl: true is not a link",
+    "settings": {
+      "reviewUrl": true
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "reviewUrl",
+        "code": "review_url"
+      }
+    ]
+  },
+  {
+    "name": "reviewUrl: {} is not a link",
+    "settings": {
+      "reviewUrl": {}
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "reviewUrl",
+        "code": "review_url"
+      }
+    ]
+  },
+  {
+    "name": "reviewUrl: [\"https://g.page/r/x\"] is not a link",
+    "settings": {
+      "reviewUrl": [
+        "https://g.page/r/x"
+      ]
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "reviewUrl",
+        "code": "review_url"
+      }
+    ]
+  },
+  {
+    "name": "reviewUrl: \"\" is not a link",
+    "settings": {
+      "reviewUrl": ""
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "reviewUrl",
+        "code": "review_url"
+      }
+    ]
+  },
+  {
+    "name": "the old booking shape",
+    "settings": {
+      "booking": {
+        "provider": "cal_com",
+        "url": "https://cal.com/a/b"
+      }
+    },
+    "live": {},
+    "problems": [
+      {
+        "path": "booking",
+        "code": "unknown_key"
+      },
+      {
+        "path": "booking.default",
+        "code": "required"
+      },
+      {
+        "path": "booking.providers",
+        "code": "required"
+      }
+    ]
+  },
+  {
+    "name": "a phone in its national form is dropped, the rest kept",
+    "settings": {
+      "phone": "+33422222222",
+      "whatsapp": "06 12 34 56 78",
+      "storefrontPhoto": "http://insecure.example/x.jpg",
+      "hours": [
+        {
+          "days": [
+            "Monday"
+          ],
+          "opens": "07:00",
+          "closes": "21:00"
+        }
+      ]
+    },
+    "live": {
+      "phone": "+33422222222",
+      "hours": [
+        {
+          "days": [
+            "Monday"
+          ],
+          "opens": "07:00",
+          "closes": "21:00"
+        }
+      ]
+    },
+    "problems": [
+      {
+        "path": "whatsapp",
+        "code": "e164"
+      },
+      {
+        "path": "storefrontPhoto",
+        "code": "https_url"
+      }
+    ]
+  }
+]

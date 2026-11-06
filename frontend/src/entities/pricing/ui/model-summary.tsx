@@ -1,10 +1,11 @@
+import { PRICING_CURRENCY, type PricingInput, type PricingModel } from "@evinvest/sites-contract";
+
 import { useLocale, useT } from "@/shared/i18n";
 import { formatCents } from "@/shared/lib/format";
 
 import { effectText } from "../lib/amounts";
 import { optionValues } from "../lib/effect";
 import { labelOf } from "../lib/labels";
-import { PRICING_CURRENCY, type PricingInput, type PricingModel } from "../model/model";
 
 /** The model read, not edited: what an operator sees, and what a quote on the phone is checked against. */
 export function ModelSummary({ model }: { model: PricingModel }) {

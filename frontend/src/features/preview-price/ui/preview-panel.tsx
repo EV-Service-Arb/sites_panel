@@ -1,7 +1,8 @@
+import type { PricingModel } from "@evinvest/sites-contract";
 import { Alert, AlertDescription, Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@evinvest/uikit";
 import { useState } from "react";
 
-import { type PricingModel, labelOf } from "@/entities/pricing";
+import { labelOf } from "@/entities/pricing";
 import { useLocale, useT } from "@/shared/i18n";
 
 import { answersFor, needFor } from "../model/answers";

@@ -38,6 +38,24 @@ impl fmt::Display for Currency {
 	}
 }
 
+/// The shapes of what a lead's events carry besides their vocabularies.
+#[derive(Clone, Copy, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Limits {
+	/// [`AnalyticsId`].
+	pub analytics_id: &'static str,
+	/// [`MessageRef`].
+	pub message_ref: &'static str,
+	/// `estimate_inputs`' pairs, at most.
+	pub max_estimate_inputs: usize,
+}
+
+pub const LIMITS: Limits = Limits {
+	analytics_id: "^[A-Za-z0-9._:-]{1,128}$",
+	message_ref: "^[A-Z]{2,4}-[0-9A-HJKMNP-TV-Z]{4,8}$",
+	max_estimate_inputs: MAX_ESTIMATE_INPUTS,
+};
+
 /// An amount in minor units (cents) of its currency.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Money {
@@ -45,44 +63,29 @@ pub struct Money {
 	pub currency: Currency,
 }
 
-/// How a lead came in.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum LeadChannel {
-	/// The landing's form.
-	Form,
-	/// A call that bypassed the form, entered by the operator (spec §10a).
-	PhoneInbound,
-	/// The landing's "call me back" request: the customer left a number to be called on.
-	Callback,
-	/// The customer chose to write on WhatsApp (MESSENGER-CHANNELS-SPEC §1): the landing's
-	/// prefilled message, or a conversation a bot or an operator saw start there.
-	Whatsapp,
-	/// The customer chose the brand's Telegram bot (`t.me/<bot>?start=<ref>`).
-	Telegram,
+vocabulary! {
+	/// How a lead came in.
+	pub enum LeadChannel, "properties.channel is not one of form, phone_inbound, callback, whatsapp, telegram" {
+		/// The landing's form.
+		Form => "form",
+		/// A call that bypassed the form, entered by the operator (spec §10a).
+		PhoneInbound => "phone_inbound",
+		/// The landing's "call me back" request: the customer left a number to be called on.
+		Callback => "callback",
+		/// The customer chose to write on WhatsApp (MESSENGER-CHANNELS-SPEC §1): the landing's
+		/// prefilled message, or a conversation a bot or an operator saw start there.
+		Whatsapp => "whatsapp",
+		/// The customer chose the brand's Telegram bot (`t.me/<bot>?start=<ref>`).
+		Telegram => "telegram",
+	}
 }
 
 impl LeadChannel {
-	pub const ALL: [Self; 5] = [Self::Form, Self::PhoneInbound, Self::Callback, Self::Whatsapp, Self::Telegram];
 	/// The channels an operator takes a lead in by hand: a call, or a conversation a customer
 	/// started on a messenger without the landing. A form and a callback are the landing's.
 	pub const MANUAL: [Self; 3] = [Self::PhoneInbound, Self::Whatsapp, Self::Telegram];
-
-	pub fn as_str(self) -> &'static str {
-		match self {
-			Self::Form => "form",
-			Self::PhoneInbound => "phone_inbound",
-			Self::Callback => "callback",
-			Self::Whatsapp => "whatsapp",
-			Self::Telegram => "telegram",
-		}
-	}
-
-	pub fn parse(raw: &str) -> Result<Self, Invalid> {
-		Self::ALL
-			.into_iter()
-			.find(|c| c.as_str() == raw)
-			.ok_or_else(|| Invalid::new("properties.channel is not one of form, phone_inbound, callback, whatsapp, telegram"))
-	}
+	/// The channels a landing sends: the panel's `phone_inbound` is for the calls it records.
+	pub const SITE: [Self; 4] = [Self::Form, Self::Callback, Self::Whatsapp, Self::Telegram];
 
 	/// The messenger it came through, for the two that are one.
 	pub fn messenger(self) -> Option<Messenger> {
@@ -94,28 +97,11 @@ impl LeadChannel {
 	}
 }
 
-/// A messenger the customer writes the brand on.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub enum Messenger {
-	Whatsapp,
-	Telegram,
-}
-
-impl Messenger {
-	pub const ALL: [Self; 2] = [Self::Whatsapp, Self::Telegram];
-
-	pub fn as_str(self) -> &'static str {
-		match self {
-			Self::Whatsapp => "whatsapp",
-			Self::Telegram => "telegram",
-		}
-	}
-
-	pub fn parse(raw: &str) -> Result<Self, Invalid> {
-		Self::ALL
-			.into_iter()
-			.find(|m| m.as_str() == raw)
-			.ok_or_else(|| Invalid::new("properties.channel is not one of whatsapp, telegram"))
+vocabulary! {
+	/// A messenger the customer writes the brand on.
+	pub enum Messenger, "properties.channel is not one of whatsapp, telegram" {
+		Whatsapp => "whatsapp",
+		Telegram => "telegram",
 	}
 }
 
@@ -187,62 +173,28 @@ impl fmt::Display for MessageRef {
 	}
 }
 
-/// Why a landing's antispam doubted a lead it still sent: it may be a person, so it is kept
-/// and shown, marked. A lead the honeypot caught never arrives, so it has no mark here.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum LeadSuspect {
-	/// The visitor's address sent more than the landing allows in its window.
-	RateLimited,
-	/// The form came back sooner after it was shown than a person types.
-	TooFast,
-}
-
-impl LeadSuspect {
-	pub const ALL: [Self; 2] = [Self::RateLimited, Self::TooFast];
-
-	pub fn as_str(self) -> &'static str {
-		match self {
-			Self::RateLimited => "rate_limited",
-			Self::TooFast => "too_fast",
-		}
-	}
-
-	pub fn parse(raw: &str) -> Result<Self, Invalid> {
-		match raw {
-			"rate_limited" => Ok(Self::RateLimited),
-			"too_fast" => Ok(Self::TooFast),
-			_ => Err(Invalid::new("properties.suspect is not one of rate_limited, too_fast")),
-		}
+vocabulary! {
+	/// Why a landing's antispam doubted a lead it still sent: it may be a person, so it is kept
+	/// and shown, marked. A lead the honeypot caught never arrives, so it has no mark here.
+	pub enum LeadSuspect, "properties.suspect is not one of rate_limited, too_fast" {
+		/// The visitor's address sent more than the landing allows in its window.
+		RateLimited => "rate_limited",
+		/// The form came back sooner after it was shown than a person types.
+		TooFast => "too_fast",
 	}
 }
 
-/// Which of a landing's flows a lead came through (FORM-VARIANTS-SPEC): a quote asked for, a
-/// price estimated from what the visitor picked, or a fixed price for a well-defined job.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum LeadFlow {
-	Quote,
-	Estimate,
-	Fixed,
+vocabulary! {
+	/// Which of a landing's flows a lead came through (FORM-VARIANTS-SPEC): a quote asked for, a
+	/// price estimated from what the visitor picked, or a fixed price for a well-defined job.
+	pub enum LeadFlow, "properties.flow is not one of quote, estimate, fixed" {
+		Quote => "quote",
+		Estimate => "estimate",
+		Fixed => "fixed",
+	}
 }
 
 impl LeadFlow {
-	pub const ALL: [Self; 3] = [Self::Quote, Self::Estimate, Self::Fixed];
-
-	pub fn as_str(self) -> &'static str {
-		match self {
-			Self::Quote => "quote",
-			Self::Estimate => "estimate",
-			Self::Fixed => "fixed",
-		}
-	}
-
-	pub fn parse(raw: &str) -> Result<Self, Invalid> {
-		Self::ALL
-			.into_iter()
-			.find(|f| f.as_str() == raw)
-			.ok_or_else(|| Invalid::new("properties.flow is not one of quote, estimate, fixed"))
-	}
-
 	/// Whether the landing showed the visitor a price in this flow, and so must say which.
 	pub fn is_priced(self) -> bool {
 		match self {
@@ -314,7 +266,7 @@ impl LeadOffer {
 	}
 }
 
-/// 1–40 of `[a-z0-9_-]`: an estimate's input or value id, as kitstart's pricing model names it.
+/// 1–40 of `[a-z0-9_-]`: an estimate's input or value id, as a pricing model names it.
 fn is_input_slug(s: &str) -> bool {
 	(1..=40).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
 }

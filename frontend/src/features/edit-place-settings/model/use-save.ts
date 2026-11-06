@@ -5,9 +5,8 @@ import { ApiError } from "@/shared/api";
 import { useT } from "@/shared/i18n";
 import { notifyFailure } from "@/shared/ui/notify";
 
-import { type FieldErrors, NO_ERRORS, fieldErrorsOf } from "./field-errors";
-
-export type SaveState = { kind: "idle" } | { kind: "saving" } | { kind: "conflict" } | { kind: "invalid"; errors: FieldErrors };
+/** `invalid`: the 422's `fields`, each path with the server's reason. */
+export type SaveState = { kind: "idle" } | { kind: "saving" } | { kind: "conflict" } | { kind: "invalid"; fields: Record<string, string> };
 
 /**
  * A PUT against the `updated_at` the form was read at. A 409 and a 422 become
@@ -25,12 +24,12 @@ export function useSave(key: PlaceKey, expectedUpdatedAt: string | null, onSaved
       onSaved(view);
     } catch (e) {
       if (e instanceof ApiError && e.failure.kind === "conflict") return setState({ kind: "conflict" });
-      if (e instanceof ApiError && e.failure.kind === "invalid_fields") return setState({ kind: "invalid", errors: fieldErrorsOf(e.failure.fields) });
+      if (e instanceof ApiError && e.failure.kind === "invalid_fields") return setState({ kind: "invalid", fields: e.failure.fields });
       setState({ kind: "idle" });
       notifyFailure(e, t);
     }
   };
 
-  const errors = state.kind === "invalid" ? state.errors : NO_ERRORS;
-  return { state, errors, save };
+  const refused = state.kind === "invalid" ? state.fields : {};
+  return { state, refused, save };
 }

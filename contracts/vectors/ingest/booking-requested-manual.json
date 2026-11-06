@@ -1,0 +1,44 @@
+{
+  "name": "a call asked for, with a day and a part of it",
+  "key": "booking.requested@1",
+  "head": {
+    "id": "0199b3a0-6c00-7000-8000-000000000011",
+    "occurredAt": "2026-10-05T08:00:00.000Z",
+    "sourceId": "aquafix-site",
+    "subject": {
+      "brandId": "aquafix",
+      "leadId": "lead-42-0a1b2c3d"
+    }
+  },
+  "properties": {
+    "lead_ref": "lead-42-0a1b2c3d",
+    "provider": "manual",
+    "preferred_date": "2026-10-07",
+    "preferred_part": "morning"
+  },
+  "body": {
+    "events": [
+      {
+        "id": "0199b3a0-6c00-7000-8000-000000000011",
+        "schema": "sa.funnel.v1",
+        "type": "booking.requested",
+        "typeVersion": 1,
+        "occurredAt": "2026-10-05T08:00:00.000Z",
+        "source": {
+          "kind": "site",
+          "id": "aquafix-site"
+        },
+        "subject": {
+          "brandId": "aquafix",
+          "leadId": "lead-42-0a1b2c3d"
+        },
+        "properties": {
+          "lead_ref": "lead-42-0a1b2c3d",
+          "provider": "manual",
+          "preferred_date": "2026-10-07",
+          "preferred_part": "morning"
+        }
+      }
+    ]
+  }
+}

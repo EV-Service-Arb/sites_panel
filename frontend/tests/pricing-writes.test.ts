@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
 
+import type { PricingModel } from "@evinvest/sites-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { type PricingModel, clearPricing, previewPrice } from "@/entities/pricing";
+import { clearPricing, previewPrice } from "@/entities/pricing";
 import { trySave } from "@/features/edit-pricing/model/save";
 import { answersFor, needFor } from "@/features/preview-price/model/answers";
 import { type Timers, createRunner } from "@/features/preview-price/model/runner";
@@ -10,7 +11,7 @@ import { PREVIEW_DEBOUNCE_MS } from "@/features/preview-price/model/use-preview"
 
 import { pricingRoute } from "../scripts/stub-pricing.ts";
 
-const cleaning = JSON.parse(readFileSync(new URL("./fixtures/pricing/valid/cleaning.json", import.meta.url), "utf8")) as PricingModel;
+const cleaning = JSON.parse(readFileSync(new URL("../../contracts/vectors/pricing/valid/cleaning.json", import.meta.url), "utf8")) as PricingModel;
 const item = (updated_at: string | null, by: string | null = "someone@example.test") => ({ brand_id: "vifnet", locales: ["fr", "en"], model: cleaning, updated_at, updated_by: by });
 
 /** Each call answers the next of `replies`, and is recorded. */
@@ -144,7 +145,7 @@ describe("the preview's debounce", () => {
 describe("the dev stub", () => {
   const route = (method: string, path: string, body: Record<string, unknown> = {}, role = "admin") => pricingRoute(method, path, body, role, "t@example.test");
 
-  it("lists vifnet with kitstart's model and aquafix with none", () => {
+  it("lists vifnet with the vectors' cleaning model and aquafix with none", () => {
     const list = route("GET", "/pricing")?.body as { items: { brand_id: string; model: unknown }[] };
     expect(list.items.map((i) => [i.brand_id, i.model === null])).toEqual([
       ["aquafix", true],
@@ -160,7 +161,7 @@ describe("the dev stub", () => {
 
   it("answers 422 with a path the editor can show", () => {
     const model = { ...cleaning, inputs: cleaning.inputs.map((i) => (i.id === "bedrooms" ? { ...i, labels: { fr: "Chambres" } } : i)) };
-    expect(route("PUT", "/pricing/aquafix", { model, expected_updated_at: null })).toEqual({ status: 422, body: { path: "inputs.bedrooms.labels.en", error: 'no "en" label' } });
+    expect(route("PUT", "/pricing/aquafix", { model, expected_updated_at: null })).toEqual({ status: 422, body: { path: "inputs[1].labels.en", code: "labelMissing", error: "labelMissing (stub)" } });
   });
 
   it("lets an operator read and preview, not write", () => {

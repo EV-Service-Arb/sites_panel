@@ -1,6 +1,7 @@
+import type { PricingInputs, PricingModel } from "@evinvest/sites-contract";
 import { useEffect, useState } from "react";
 
-import { type PricingAnswers, type PricingModel, previewPrice } from "@/entities/pricing";
+import { previewPrice } from "@/entities/pricing";
 import { ApiError } from "@/shared/api";
 
 import { type Runner, type Settled, createRunner } from "./runner";
@@ -19,7 +20,7 @@ interface Payload {
   brand: string;
   model: PricingModel;
   need: string;
-  answers: PricingAnswers;
+  answers: PricingInputs;
 }
 
 const stateOf = (result: Settled<number | null>): PreviewState => {
@@ -34,7 +35,7 @@ const stateOf = (result: Settled<number | null>): PreviewState => {
  * algorithm), asked once typing pauses. The answer is held with the request
  * it answers, so a newer draft shows "pending" rather than an old price.
  */
-export function usePreview(brand: string, model: PricingModel | null, need: string | null, answers: PricingAnswers): PreviewState {
+export function usePreview(brand: string, model: PricingModel | null, need: string | null, answers: PricingInputs): PreviewState {
   const [answered, setAnswered] = useState<{ key: string; state: PreviewState } | null>(null);
   const [runner] = useState<Runner<Payload>>(() =>
     createRunner<Payload, number | null>({

@@ -1,0 +1,16 @@
+{
+  "problems": [
+    {
+      "path": "providers.doctolib",
+      "code": "provider_unknown"
+    }
+  ],
+  "config": {
+    "default": "manual",
+    "providers": {
+      "doctolib": {
+        "url": "https://www.doctolib.fr/x"
+      }
+    }
+  }
+}

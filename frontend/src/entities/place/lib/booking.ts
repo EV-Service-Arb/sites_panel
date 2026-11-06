@@ -1,7 +1,6 @@
-import { PAGE_PROVIDERS } from "@/shared/config/booking";
-import type { T } from "@/shared/i18n";
+import { type BookingConfig, PAGE_PROVIDERS } from "@evinvest/sites-contract";
 
-import type { BookingConfig } from "../model/booking";
+import type { T } from "@/shared/i18n";
 
 /** "Default: Google Calendar; Link: https://…; Google Calendar: https://…" — the history's line, in form order. */
 export function bookingText(b: BookingConfig, t: T): string {

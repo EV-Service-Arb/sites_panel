@@ -1,7 +1,8 @@
+import { PRICING_LIMITS } from "@evinvest/sites-contract";
 import { Button } from "@evinvest/uikit";
 import { ArrowDown, ArrowUp, Plus, X } from "lucide-react";
 
-import { PRICING_LIMITS, labelOf } from "@/entities/pricing";
+import { labelOf } from "@/entities/pricing";
 import { useLocale, useT } from "@/shared/i18n";
 import { useButtonSize } from "@/shared/ui/touch";
 

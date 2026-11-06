@@ -1,6 +1,8 @@
-import { type EditedFields, MESSENGER_SWITCHES, type MessengerSwitch, type Messengers, type PlaceSettings, messengerOn } from "@/entities/place";
+import { MESSENGERS, type Messenger, type PlaceProblem, checkPlaceLive } from "@evinvest/sites-contract";
 
-import { type BookingDraft, bookingDraftOf, bookingDraftProblems, bookingOf } from "./booking-draft";
+import { type EditedFields, type PlaceSettings, messengerOn } from "@/entities/place";
+
+import { type BookingDraft, bookingDraftOf, bookingOf } from "./booking-draft";
 import { type HoursDraftRow, hoursDraftOf, hoursOf, hoursValid } from "./hours-draft";
 
 /** The form's state: text as typed. An empty field means "the site's own". */
@@ -10,7 +12,7 @@ export interface SettingsDraft {
   /** The bot's username as typed; a leading `@` is dropped on save. */
   telegram: string;
   /** Every switch spelled out: on unless the place turned it off. */
-  messengers: Record<MessengerSwitch, boolean>;
+  messengers: Record<Messenger, boolean>;
   hours: HoursDraftRow[];
   serviceArea: string[];
   booking: BookingDraft;
@@ -33,35 +35,15 @@ export function normalisePhone(raw: string): string {
   return raw.replace(/[\s().-]/g, "");
 }
 
-const E164 = /^\+[1-9]\d{6,14}$/;
-
-/**
- * A soft check: the server's rule decides (its 422 is shown on the field), this
- * only warns while typing. Empty is fine — the site keeps its own number.
- */
-export function looksLikeE164(raw: string): boolean {
-  const s = normalisePhone(raw);
-  return s === "" || E164.test(s);
-}
-
 /** "@aquafix_devis_bot " → "aquafix_devis_bot": the username as the server stores it. */
 export function normaliseBot(raw: string): string {
   return raw.trim().replace(/^@/, "");
 }
 
-/** `panel_core::place`'s rule for a Telegram username. */
-const BOT = /^[A-Za-z][A-Za-z0-9_]{1,28}[Bb][Oo][Tt]$/;
-
-/** Like `looksLikeE164`: a hint while typing, the server's 422 decides. Empty is fine — no bot. */
-export function looksLikeBot(raw: string): boolean {
-  const s = normaliseBot(raw);
-  return s === "" || BOT.test(s);
-}
-
 /** Only the switches turned off are stored: absent is on, so an all-on place keeps no `messengers` at all. */
-function messengersOf(draft: Record<MessengerSwitch, boolean>): Messengers | null {
-  const off: Messengers = {};
-  for (const m of MESSENGER_SWITCHES) if (!draft[m]) off[m] = false;
+function messengersOf(draft: Record<Messenger, boolean>): EditedFields["messengers"] | null {
+  const off: EditedFields["messengers"] = {};
+  for (const m of MESSENGERS) if (!draft[m]) off[m] = false;
   return Object.keys(off).length > 0 ? off : null;
 }
 
@@ -99,8 +81,17 @@ export function settingsOf(draft: SettingsDraft, base: PlaceSettings): PlaceSett
   return { edited: editedOf(draft), rest: base.rest };
 }
 
+export type ProblemCode = PlaceProblem["code"] | "default_choose";
+
+/** Why the server would refuse the draft, keyed as its 422 keys them; and the form's own: booking pages typed with no default picked. */
+export function draftProblems(draft: SettingsDraft): Map<string, ProblemCode> {
+  const problems = new Map<string, ProblemCode>(checkPlaceLive(editedOf(draft)).problems.map((p) => [p.path, p.code]));
+  if (draft.booking.default === null && bookingOf(draft.booking) !== null) problems.set("booking.default", "default_choose");
+  return problems;
+}
+
 export function draftValid(draft: SettingsDraft): boolean {
-  return hoursValid(draft.hours) && bookingDraftProblems(draft.booking).size === 0;
+  return draftProblems(draft).size === 0 && hoursValid(draft.hours);
 }
 
 export function draftChanged(draft: SettingsDraft, base: PlaceSettings): boolean {

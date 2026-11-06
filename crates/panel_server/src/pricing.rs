@@ -17,8 +17,8 @@
 //! Item: {brand_id, locales, model | null, updated_at | null, updated_by | null}
 //! ```
 //!
-//! `path` is kitstart's, relative to the model: `needs.standard.inputs[2]`,
-//! `inputs[0].options[1].labels` (`""` when the model is not an object at all).
+//! `path` is relative to the model, `code` one of `PRICING_CODES`: `needs.standard.inputs[2]`,
+//! `inputs[0].options[1].labels.en` (`""` when the model is not an object at all).
 
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
@@ -48,7 +48,7 @@ use crate::{
 	places::editor,
 };
 
-/// How long the sites' read may take before they are answered `{}`: kitstart gives up at 3 s.
+/// How long the sites' read may take before they are answered `{}`: a site gives up at 3 s.
 const LIVE_WITHIN: Duration = Duration::from_millis(2500);
 
 pub(crate) fn routes() -> Vec<ApiRoute> {
@@ -76,7 +76,7 @@ impl IntoResponse for PricingApiError {
 		match self {
 			Self::Api(e) => e.into_response(),
 			Self::Stale(current) => (StatusCode::CONFLICT, Json(json!({ "error": "stale", "current": item_json(&current) }))).into_response(),
-			Self::Invalid(p) => (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({ "error": p.why, "path": relative(&p.path) }))).into_response(),
+			Self::Invalid(p) => (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({ "error": p.why, "code": p.code.as_str(), "path": p.path }))).into_response(),
 		}
 	}
 }
@@ -107,12 +107,6 @@ impl From<PricingError> for PricingApiError {
 }
 
 type PricingResult<T> = Result<T, PricingApiError>;
-
-/// kitstart's path without its `model` root: the body's `model` is the editor's whole form, so
-/// the path names a field in it.
-fn relative(path: &str) -> &str {
-	path.strip_prefix("model.").unwrap_or(if path == "model" { "" } else { path })
-}
 
 fn item_json(v: &PricingView) -> Value {
 	json!({
@@ -258,13 +252,6 @@ pub(crate) async fn live(State(panel): State<Panel>, Extension(reads): Extension
 #[cfg(test)]
 mod tests {
 	use super::*;
-
-	#[test]
-	fn paths_are_relative_to_the_model() {
-		assert_eq!(relative("model.needs.standard.inputs[2]"), "needs.standard.inputs[2]");
-		assert_eq!(relative("model"), "");
-		assert_eq!(relative("model.format"), "format");
-	}
 
 	#[test]
 	fn a_removal_names_what_it_removes() {

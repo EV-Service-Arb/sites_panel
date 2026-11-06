@@ -1,0 +1,192 @@
+[
+  {
+    "provider": "google_calendar",
+    "url": "https://calendar.app.google/AbCd1234XyZ",
+    "problem": null
+  },
+  {
+    "provider": "google_calendar",
+    "url": "https://calendar.google.com/calendar/appointments/schedules/AcZssZ3x",
+    "problem": null
+  },
+  {
+    "provider": "google_calendar",
+    "url": "https://calendar.google.com/calendar/appointments/AcZ?gv=true",
+    "problem": null
+  },
+  {
+    "provider": "google_calendar",
+    "url": "https://calendar.app.google/",
+    "problem": "google"
+  },
+  {
+    "provider": "google_calendar",
+    "url": "https://calendar.google.com/calendar/r",
+    "problem": "google"
+  },
+  {
+    "provider": "google_calendar",
+    "url": "https://calendar.google.com/calendar/appointments/",
+    "problem": "google"
+  },
+  {
+    "provider": "google_calendar",
+    "url": "https://evil.calendar.app.google.example/x",
+    "problem": "google"
+  },
+  {
+    "provider": "google_calendar",
+    "url": "https://calendly.com/aquafix/30min",
+    "problem": "google"
+  },
+  {
+    "provider": "cal_com",
+    "url": "https://cal.evinvest.ltd/aquafix/devis",
+    "problem": null
+  },
+  {
+    "provider": "cal_com",
+    "url": "https://cal.com/vifnet/menage",
+    "problem": null
+  },
+  {
+    "provider": "cal_com",
+    "url": "https://app.cal.com/vifnet/menage",
+    "problem": "cal_host"
+  },
+  {
+    "provider": "cal_com",
+    "url": "https://cal.com/",
+    "problem": "cal_path"
+  },
+  {
+    "provider": "link",
+    "url": "https://booking.example.fr/rdv?x=1",
+    "problem": null
+  },
+  {
+    "provider": "link",
+    "url": "https://example.fr",
+    "problem": null
+  },
+  {
+    "provider": "link",
+    "url": "http://example.fr/rdv",
+    "problem": "scheme"
+  },
+  {
+    "provider": "link",
+    "url": "ftp://example.fr/rdv",
+    "problem": "scheme"
+  },
+  {
+    "provider": "link",
+    "url": "javascript:alert(1)",
+    "problem": "scheme"
+  },
+  {
+    "provider": "link",
+    "url": "https://user:pw@example.fr/rdv",
+    "problem": "userinfo"
+  },
+  {
+    "provider": "link",
+    "url": "https://user@example.fr/rdv",
+    "problem": "userinfo"
+  },
+  {
+    "provider": "link",
+    "url": "https://example.fr:8443/rdv",
+    "problem": "port"
+  },
+  {
+    "provider": "link",
+    "url": "https://example.fr/rdv#ref",
+    "problem": "fragment"
+  },
+  {
+    "provider": "link",
+    "url": "https://127.0.0.1/rdv",
+    "problem": "ip"
+  },
+  {
+    "provider": "link",
+    "url": "https://127.1/rdv",
+    "problem": "ip"
+  },
+  {
+    "provider": "link",
+    "url": "https://0x7f.0.0.1/rdv",
+    "problem": "ip"
+  },
+  {
+    "provider": "link",
+    "url": "https://[::1]/rdv",
+    "problem": "ip"
+  },
+  {
+    "provider": "link",
+    "url": "https://localhost/rdv",
+    "problem": "host"
+  },
+  {
+    "provider": "link",
+    "url": "https://Example.fr/rdv",
+    "problem": null
+  },
+  {
+    "provider": "link",
+    "url": "https://example.fr\\rdv",
+    "problem": "backslash"
+  },
+  {
+    "provider": "cal_com",
+    "url": "https://cal.com/vifnet/menage/",
+    "problem": "cal_path"
+  },
+  {
+    "provider": "cal_com",
+    "url": "https://cal.com/vifnet",
+    "problem": "cal_path"
+  },
+  {
+    "provider": "cal_com",
+    "url": "https://Cal.Com/vifnet/menage",
+    "problem": null
+  },
+  {
+    "provider": "link",
+    "url": "https://exa mple.fr/rdv",
+    "problem": "format"
+  },
+  {
+    "provider": "link",
+    "url": "https://exämple.fr/rdv",
+    "problem": "format"
+  },
+  {
+    "provider": "link",
+    "url": "https://-a.fr/rdv",
+    "problem": "host"
+  },
+  {
+    "provider": "link",
+    "url": "https://",
+    "problem": "host"
+  },
+  {
+    "provider": "link",
+    "url": "",
+    "problem": "format"
+  },
+  {
+    "provider": "link",
+    "url": "https://example.fr/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "problem": "format"
+  },
+  {
+    "provider": "link",
+    "url": "https://example.fr/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "problem": null
+  }
+]

@@ -3,9 +3,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import en from "../messages/en.json";
 import ru from "../messages/ru.json";
 
+import { LEAD_CHANNELS } from "@evinvest/sites-contract";
+
 import { markMessaged } from "@/entities/lead/api/leads";
-import { CHANNELS, MESSENGERS, awaitingMessage, leadParser } from "@/entities/lead/model/lead";
-import { MESSENGER_SWITCHES } from "@/entities/place/model/settings";
+import { awaitingMessage, leadParser } from "@/entities/lead/model/lead";
 import { leadFilterFrom, messageRefOf, narrows, paramsWith } from "@/features/lead-filters/model/params";
 import { oneOfOr, parse } from "@/shared/lib/parse";
 
@@ -68,12 +69,6 @@ describe("a word from a list the backend may grow", () => {
   it("refuses what is not a string, saying where", () => {
     expect(() => parse(parser, 42)).toThrow(/^\$: expected a string/);
     expect(() => parse(parser, null)).toThrow(/^\$: expected a string/);
-  });
-});
-
-describe("the landing's messenger switches", () => {
-  it("are the lead's messengers, so a new one generated from panel_core gets a switch", () => {
-    expect(MESSENGER_SWITCHES).toBe(MESSENGERS);
   });
 });
 
@@ -144,7 +139,7 @@ describe("the channel and ref filters in the URL", () => {
 
 describe("the channel badge's words", () => {
   const key = (channel: string) => `channel.${channel}`;
-  const missing = (catalogue: Record<string, string>) => CHANNELS.map(key).filter((k) => !(k in catalogue));
+  const missing = (catalogue: Record<string, string>) => LEAD_CHANNELS.map(key).filter((k) => !(k in catalogue));
 
   it("exist in English for every channel the contract names", () => {
     expect(missing(en)).toEqual([]);

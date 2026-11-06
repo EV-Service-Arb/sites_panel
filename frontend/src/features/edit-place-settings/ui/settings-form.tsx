@@ -5,7 +5,8 @@ import { ChannelPreview, ConflictAlert, type PlaceSettingsView, StaleAlert } fro
 import { useT } from "@/shared/i18n";
 import { useButtonSize } from "@/shared/ui/touch";
 
-import { type SettingsDraft, draftChanged, draftOf, draftValid, editedOf, settingsOf } from "../model/draft";
+import { type SettingsDraft, draftChanged, draftOf, draftProblems, draftValid, editedOf, settingsOf } from "../model/draft";
+import { fieldErrorsOf } from "../model/field-errors";
 import { useSave } from "../model/use-save";
 import { AreaChips } from "./area-chips";
 import { BookingFields } from "./booking-fields";
@@ -37,7 +38,10 @@ export function SettingsForm({ place, onSaved, onReload, fresher, onTakeFresh }:
   const button = useButtonSize();
   const base = place.settings;
   const [draft, setDraft] = useState<SettingsDraft>(() => draftOf(base.edited));
-  const { state, errors, save } = useSave(place, place.updated_at, onSaved);
+  const { state, refused, save } = useSave(place, place.updated_at, onSaved);
+  // An hours row says its own; the server's reason wins over the form's on one path.
+  const own = [...draftProblems(draft)].filter(([path]) => !path.startsWith("hours["));
+  const errors = fieldErrorsOf({ ...Object.fromEntries(own.map(([path, code]) => [path, t(`placeSettings.problem.${code}`)])), ...refused });
   const set = (patch: Partial<SettingsDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const changed = draftChanged(draft, base);
   useEffect(() => {
@@ -70,7 +74,7 @@ export function SettingsForm({ place, onSaved, onReload, fresher, onTakeFresh }:
       <MessengerSwitches value={draft.messengers} onChange={(messengers) => set({ messengers })} errors={errors.byField.messengers} />
       <HoursEditor rows={draft.hours} onChange={(hours) => set({ hours })} errors={errors.byField.hours} />
       <AreaChips names={draft.serviceArea} onChange={(serviceArea) => set({ serviceArea })} errors={errors.byField.serviceArea} />
-      <BookingFields draft={draft.booking} onChange={(booking) => set({ booking })} serverErrors={errors.byKey} />
+      <BookingFields draft={draft.booking} onChange={(booking) => set({ booking })} errors={errors.byKey} />
       <KeptFields rest={base.rest} />
       <ChannelPreview fields={editedOf(draft)} />
       <div className="flex flex-wrap gap-2">

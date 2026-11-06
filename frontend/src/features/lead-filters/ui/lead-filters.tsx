@@ -1,8 +1,9 @@
+import { BOOKING_STATUSES, LEAD_CHANNELS, LEAD_FLOWS } from "@evinvest/sites-contract";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger, Label, Switch, buttonVariants } from "@evinvest/uikit";
 import { ChevronDown } from "lucide-react";
 import { useId } from "react";
 
-import { BOOKING_STATUSES, CHANNELS, FLOWS, type LeadCounts, type LeadFilter, STAGES } from "@/entities/lead";
+import { type LeadCounts, type LeadFilter, STAGES } from "@/entities/lead";
 import { useT } from "@/shared/i18n";
 import { DESKTOP_QUERY, useMediaQuery } from "@/shared/lib/use-media-query";
 import { FilterSelect } from "@/shared/ui/filter-select";
@@ -68,7 +69,7 @@ function SecondaryFilters({ filter, brands, locations, onChange }: Props) {
         label={t("filter.channel")}
         allLabel={t("filter.channel.all")}
         value={filter.channel}
-        options={CHANNELS.map((c) => ({ value: c, label: t(`channel.${c}`) }))}
+        options={LEAD_CHANNELS.map((c) => ({ value: c, label: t(`channel.${c}`) }))}
         onChange={(v) => onChange({ channel: channelFilterOf(v) })}
       />
       <RefSearch value={filter.messageRef} onChange={(messageRef) => onChange({ messageRef })} />
@@ -86,7 +87,7 @@ function SecondaryFilters({ filter, brands, locations, onChange }: Props) {
         label={t("filter.flow")}
         allLabel={t("filter.flow.all")}
         value={filter.flow}
-        options={FLOWS.map((f) => ({ value: f, label: t(`flow.${f}`) }))}
+        options={LEAD_FLOWS.map((f) => ({ value: f, label: t(`flow.${f}`) }))}
         onChange={(v) => onChange({ flow: flowFilterOf(v) })}
       />
       <FilterSelect

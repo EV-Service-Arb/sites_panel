@@ -1,6 +1,7 @@
+import type { Messenger } from "@evinvest/sites-contract";
 import { Button, toast } from "@evinvest/uikit";
 
-import { type Lead, type Messenger, markMessaged, refOf } from "@/entities/lead";
+import { type Lead, markMessaged, refOf } from "@/entities/lead";
 import { useT } from "@/shared/i18n";
 import { useKeyedWrite } from "@/shared/lib/use-keyed-write";
 import { notifyFailure } from "@/shared/ui/notify";

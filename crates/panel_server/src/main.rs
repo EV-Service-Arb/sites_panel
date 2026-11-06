@@ -137,7 +137,7 @@ enum PricingCmd {
 	Show { brand: String },
 	/// The last changes, newest first.
 	History { brand: String },
-	/// Save a model (kitstart's JSON, from a file or `-` for stdin), checked as the editor's is.
+	/// Save a model (its JSON, from a file or `-` for stdin), checked as the editor's is.
 	/// Journaled as `by = cli`.
 	Set { brand: String, file: std::path::PathBuf },
 	/// Take the model off the sites: they go back to their baked one. Journaled as `by = cli`.

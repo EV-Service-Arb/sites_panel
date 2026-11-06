@@ -1,27 +1,16 @@
-import { Button, FieldDescription, FieldError, ToggleGroup, ToggleGroupItem } from "@evinvest/uikit";
+import { DAYS } from "@evinvest/sites-contract";
+import { Button, FieldError, ToggleGroup, ToggleGroupItem } from "@evinvest/uikit";
 import { X } from "lucide-react";
 import { useId } from "react";
 
-import { DAYS, formatDays } from "@/entities/place";
+import { formatDays } from "@/entities/place";
 import { type T, useT } from "@/shared/i18n";
 import { TimeInput } from "@/shared/ui/time-input";
 import { useButtonSize, useControlSize } from "@/shared/ui/touch";
 
-import { type HoursDraftRow, type RowProblem, rowNotes, rowProblems } from "../model/hours-draft";
+import { type HoursDraftRow, type RowProblem, rowProblems } from "../model/hours-draft";
 
-function problemText(p: RowProblem, t: T): string {
-  switch (p.kind) {
-    case "no_days":
-      return t("placeSettings.hours.noDays");
-    case "bad_opens":
-    case "bad_closes":
-      return t("placeSettings.hours.badTime");
-    case "same_time":
-      return t("placeSettings.hours.sameTime");
-    case "overlap":
-      return t("placeSettings.hours.overlap", { days: formatDays(p.days, t) });
-  }
-}
+const problemText = (p: RowProblem, t: T): string => ("days" in p ? t("placeSettings.hours.overlap", { days: formatDays(p.days, t) }) : t(`placeSettings.problem.${p.code}`));
 
 export interface HoursRowProps {
   rows: readonly HoursDraftRow[];
@@ -64,7 +53,6 @@ export function HoursRowEditor({ rows, row, onChange, onRemove }: HoursRowProps)
           <X aria-hidden="true" />
         </Button>
       </div>
-      {rowNotes(row).includes("overnight") && <FieldDescription>{t("placeSettings.hours.overnight")}</FieldDescription>}
       {reasons.map((r) => (
         <FieldError key={r}>{r}</FieldError>
       ))}

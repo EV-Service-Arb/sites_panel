@@ -100,7 +100,7 @@ pub fn internal() -> Router<Panel> {
 
 /// The sites' reads at once, places, pricing and experiments together.
 const INTERNAL_CONCURRENT: usize = 32;
-/// kitstart gives up after 3 s.
+/// a site gives up after 3 s.
 const INTERNAL_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Why a change to a place failed, in the contract's shapes.

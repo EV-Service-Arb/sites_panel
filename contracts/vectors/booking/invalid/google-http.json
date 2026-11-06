@@ -1,0 +1,16 @@
+{
+  "problems": [
+    {
+      "path": "providers.google_calendar.url",
+      "code": "scheme"
+    }
+  ],
+  "config": {
+    "default": "google_calendar",
+    "providers": {
+      "google_calendar": {
+        "url": "http://calendar.app.google/AbC123xyz"
+      }
+    }
+  }
+}

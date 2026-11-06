@@ -1,4 +1,4 @@
-import type { PricingInput } from "../model/model";
+import type { PricingInput } from "@evinvest/sites-contract";
 
 /** An option's effect value whatever its kind: cents for `add`, basis points otherwise. */
 export function optionValues(input: PricingInput): { id: string; labels: Readonly<Record<string, string>>; value: number }[] {

@@ -1,0 +1,52 @@
+{
+  "name": "a callback for a fixed price, from no place",
+  "key": "lead.created@1",
+  "head": {
+    "id": "0199b3a0-6c00-7000-8000-000000000003",
+    "occurredAt": "2026-10-05T08:00:00.000Z",
+    "sourceId": "vifnet-site",
+    "subject": {
+      "brandId": "vifnet",
+      "leadId": "lead-8-deadbeef"
+    }
+  },
+  "properties": {
+    "channel": "callback",
+    "flow": "fixed",
+    "quoted_cents": 8900,
+    "pricing_valid_from": "2026-10-01"
+  },
+  "pii": {
+    "phone": "+33123456789",
+    "need": "Vitres"
+  },
+  "body": {
+    "events": [
+      {
+        "id": "0199b3a0-6c00-7000-8000-000000000003",
+        "schema": "sa.funnel.v1",
+        "type": "lead.created",
+        "typeVersion": 1,
+        "occurredAt": "2026-10-05T08:00:00.000Z",
+        "source": {
+          "kind": "site",
+          "id": "vifnet-site"
+        },
+        "subject": {
+          "brandId": "vifnet",
+          "leadId": "lead-8-deadbeef"
+        },
+        "properties": {
+          "channel": "callback",
+          "flow": "fixed",
+          "quoted_cents": 8900,
+          "pricing_valid_from": "2026-10-01"
+        },
+        "pii": {
+          "phone": "+33123456789",
+          "need": "Vitres"
+        }
+      }
+    ]
+  }
+}

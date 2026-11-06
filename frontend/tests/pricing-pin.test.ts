@@ -1,13 +1,14 @@
 import { readFileSync } from "node:fs";
 
+import type { PricingModel } from "@evinvest/sites-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { type PricingItem, type PricingModel, pricingSavedSince } from "@/entities/pricing";
+import { type PricingItem, pricingSavedSince } from "@/entities/pricing";
 import { tryClear } from "@/features/clear-pricing/model/clear";
 import { type Resource, shownOf } from "@/shared/lib/use-resource";
 import { pinFrom } from "@/views/pricing/model/pin";
 
-const cleaning = JSON.parse(readFileSync(new URL("./fixtures/pricing/valid/cleaning.json", import.meta.url), "utf8")) as PricingModel;
+const cleaning = JSON.parse(readFileSync(new URL("../../contracts/vectors/pricing/valid/cleaning.json", import.meta.url), "utf8")) as PricingModel;
 const item = (updated_at: string, model: PricingModel | null = cleaning, by = "admin@example.test"): PricingItem => ({
   brand_id: "vifnet",
   locales: ["fr", "en"],

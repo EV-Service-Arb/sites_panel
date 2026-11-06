@@ -1,0 +1,20 @@
+{
+  "problems": [
+    {
+      "path": "default",
+      "code": "default_unknown"
+    },
+    {
+      "path": "providers.calendly",
+      "code": "provider_unknown"
+    }
+  ],
+  "config": {
+    "default": "calendly",
+    "providers": {
+      "calendly": {
+        "url": "https://calendly.com/vifnet/menage"
+      }
+    }
+  }
+}

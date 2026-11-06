@@ -25,7 +25,7 @@ use axum::{
 use jiff::Timestamp;
 use panel::{
 	Panel,
-	experiment::{ExperimentError, ExperimentView, live_json},
+	experiment::{ExperimentError, ExperimentView, LiveExperiments},
 };
 use panel_core::{
 	Invalid,
@@ -153,17 +153,14 @@ async fn configure(State(panel): State<Panel>, Extension(caller): Extension<Call
 /// What a site gets: its brand's overrides, or none — and none too for a brand id that cannot
 /// be one, a store that fails or does not answer in time. The site then runs its code's config,
 /// which is what it would do on an error.
-pub(crate) async fn live(State(panel): State<Panel>, Extension(reads): Extension<Arc<InternalReads>>, Path(brand): Path<String>) -> Json<Value> {
-	let none = || Json(json!({ "experiments": {} }));
+pub(crate) async fn live(State(panel): State<Panel>, Extension(reads): Extension<Arc<InternalReads>>, Path(brand): Path<String>) -> Json<LiveExperiments> {
+	let none = || Json(LiveExperiments::default());
 	let Ok(brand) = BrandId::parse(&brand) else {
 		return none();
 	};
 	reads.record(&brand, InternalEndpoint::Experiments);
 	match tokio::time::timeout(LIVE_WITHIN, panel.live_experiments(&brand)).await {
-		Ok(Ok(overrides)) => {
-			let experiments: Map<String, Value> = overrides.iter().map(|(k, o)| (k.clone(), live_json(o))).collect();
-			Json(json!({ "experiments": experiments }))
-		}
+		Ok(Ok(live)) => Json(live),
 		Ok(Err(e)) => {
 			crate::report(&e, "serving a brand's experiments to a site");
 			none()

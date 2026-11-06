@@ -1,13 +1,12 @@
+import { LEAD_CHANNELS, LEAD_FLOWS, LEAD_SUSPECTS, MESSENGERS, type Messenger } from "@evinvest/sites-contract";
+
 import { type Infer, arrayOf, bool, cents, dictOf, isoDay, nullable, num, object, oneOf, oneOfOr, record, recordOf, str } from "@/shared/lib/parse";
 
 import { leadBookingParser } from "./booking";
-import { CHANNELS, CONTACT_SLA_SECONDS, FLOWS, MESSENGERS, type Channel, type Messenger, STAGES, SUSPECTS, type Stage } from "./generated";
+import { CONTACT_SLA_SECONDS, STAGES, type Stage } from "./generated";
 
-export { CHANNELS, CONTACT_SLA_SECONDS, MANUAL_CHANNELS, MESSENGERS, STAGES, SUSPECTS } from "./generated";
-export type { Channel, ManualChannel, Messenger, Stage, Suspect } from "./generated";
-
-/** A lead's channel as read: one the panel knows, or `other` for one a newer backend added. */
-export type LeadChannel = Channel | "other";
+export { CONTACT_SLA_SECONDS, MANUAL_CHANNELS, STAGES } from "./generated";
+export type { ManualChannel, Stage } from "./generated";
 
 const slaParser = object({ waiting_since: str, waiting_seconds: num, overdue: bool });
 
@@ -18,7 +17,7 @@ export const leadParser = object({
   job_id: nullable(str),
   stage: oneOf(STAGES),
   /** How the customer reached the brand; null for a lead seen before its creation, `other` for a channel newer than this build. */
-  channel: nullable(oneOfOr(CHANNELS, "other")),
+  channel: nullable(oneOfOr(LEAD_CHANNELS, "other")),
   /** The ref the landing gave the customer to quote in a messenger (`AQ-7K3F`). */
   message_ref: nullable(str),
   /** When the customer first wrote on a messenger, and on which (null too for a messenger newer than this build). */
@@ -34,14 +33,14 @@ export const leadParser = object({
   lost_at: nullable(str),
   lost_reason: nullable(str),
   /** Kept for good once marked: progress does not clear it. */
-  suspect: nullable(oneOf(SUSPECTS)),
+  suspect: nullable(oneOf(LEAD_SUSPECTS)),
   last_event_at: str,
   /** Set while the lead waits for its first contact; overdue after 30 minutes. */
   sla: nullable(slaParser),
   /** What the customer left, for the roles that see it. */
   pii: nullable(record),
   /** The form variant the site used; the three fields below are absent from older leads. */
-  flow: nullable(oneOf(FLOWS)),
+  flow: nullable(oneOf(LEAD_FLOWS)),
   /** EUR TTC in integer cents, with `estimate` and `fixed` only. */
   quoted_cents: nullable(cents),
   /** The day the price model used took effect. */

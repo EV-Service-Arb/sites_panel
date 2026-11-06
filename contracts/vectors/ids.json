@@ -1,0 +1,194 @@
+{
+  "opaque": [
+    {
+      "value": "01J9Z:lead-42.x_1",
+      "ok": true
+    },
+    {
+      "value": "123456",
+      "ok": true
+    },
+    {
+      "value": "L-33600000000",
+      "ok": true
+    },
+    {
+      "value": "lead-42-0a1b2c3d",
+      "ok": true
+    },
+    {
+      "value": "royat",
+      "ok": true
+    },
+    {
+      "value": "",
+      "ok": false
+    },
+    {
+      "value": "+33600000000",
+      "ok": false
+    },
+    {
+      "value": "33600000000",
+      "ok": false
+    },
+    {
+      "value": "06-12-34-56-78",
+      "ok": false
+    },
+    {
+      "value": "06.12.34.56.78",
+      "ok": false
+    },
+    {
+      "value": "a@b.c",
+      "ok": false
+    },
+    {
+      "value": "a b",
+      "ok": false
+    },
+    {
+      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "ok": false
+    },
+    {
+      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "ok": true
+    },
+    {
+      "value": "-lead",
+      "ok": false
+    }
+  ],
+  "analyticsId": [
+    {
+      "value": "0199b39f-1d2e-7a4b-9c3d-5e6f7a8b9c0d",
+      "ok": true
+    },
+    {
+      "value": "ph:anon.1_2",
+      "ok": true
+    },
+    {
+      "value": "",
+      "ok": false
+    },
+    {
+      "value": "a b",
+      "ok": false
+    },
+    {
+      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "ok": true
+    },
+    {
+      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "ok": false
+    },
+    {
+      "value": "\u00e9",
+      "ok": false
+    }
+  ],
+  "messageRef": [
+    {
+      "value": "AQ-7K3F",
+      "ok": true
+    },
+    {
+      "value": "VFX-0123ABCD",
+      "ok": true
+    },
+    {
+      "value": "aq-7k3f",
+      "ok": false
+    },
+    {
+      "value": "A-7K3F",
+      "ok": false
+    },
+    {
+      "value": "AQUA-7K3F",
+      "ok": true
+    },
+    {
+      "value": "AQUAF-7K3F",
+      "ok": false
+    },
+    {
+      "value": "AQ-7K",
+      "ok": false
+    },
+    {
+      "value": "AQ-7K3FABCDE",
+      "ok": false
+    },
+    {
+      "value": "AQ-7KIF",
+      "ok": false
+    },
+    {
+      "value": "AQ-7KLF",
+      "ok": false
+    },
+    {
+      "value": "AQ-7KOF",
+      "ok": false
+    },
+    {
+      "value": "AQ-7KUF",
+      "ok": false
+    },
+    {
+      "value": "AQ 7K3F",
+      "ok": false
+    },
+    {
+      "value": "AQ-7K3",
+      "ok": false
+    }
+  ],
+  "leadRef": [
+    {
+      "value": "lead-42-0a1b2c3d",
+      "ok": true
+    },
+    {
+      "value": "lead-1-00000000",
+      "ok": true
+    },
+    {
+      "value": "lead-9999999999999999999-0a1b2c3d",
+      "ok": true
+    },
+    {
+      "value": "lead-99999999999999999999-0a1b2c3d",
+      "ok": false
+    },
+    {
+      "value": "lead-0-0a1b2c3d",
+      "ok": false
+    },
+    {
+      "value": "lead-42-0A1B2C3D",
+      "ok": false
+    },
+    {
+      "value": "42",
+      "ok": false
+    },
+    {
+      "value": "lead-42-0a1b2c3",
+      "ok": false
+    },
+    {
+      "value": "lead-042-0a1b2c3d",
+      "ok": false
+    },
+    {
+      "value": "lead--0a1b2c3d",
+      "ok": false
+    }
+  ]
+}

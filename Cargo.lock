@@ -2439,6 +2439,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+ "ts-rs",
  "uuid",
  "zeroize",
 ]
@@ -2468,8 +2469,10 @@ dependencies = [
  "jiff",
  "sa_alerts",
  "sa_auth",
+ "serde",
  "serde_json",
  "thiserror",
+ "ts-rs",
  "uuid",
 ]
 
@@ -2478,9 +2481,15 @@ name = "panel_gen"
 version = "0.1.0"
 dependencies = [
  "ev_lib",
+ "panel",
+ "panel_contracts",
  "panel_core",
  "panel_server",
+ "prost",
+ "prost-types",
  "sa_auth",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

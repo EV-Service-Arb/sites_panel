@@ -1,0 +1,16 @@
+{
+  "problems": [
+    {
+      "path": "providers.google_calendar.url",
+      "code": "fragment"
+    }
+  ],
+  "config": {
+    "default": "google_calendar",
+    "providers": {
+      "google_calendar": {
+        "url": "https://calendar.app.google/AbC123xyz#book"
+      }
+    }
+  }
+}

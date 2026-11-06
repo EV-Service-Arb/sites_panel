@@ -1,7 +1,8 @@
+import type { PricingInputs, PricingModel } from "@evinvest/sites-contract";
+
 import { http } from "@/shared/api";
 
 import { type PricingChange, type PricingItem, pricingChangesParser, pricingItemParser, pricingListParser, previewParser } from "../model/item";
-import type { PricingAnswers, PricingModel } from "../model/model";
 
 const brandPath = (brand: string) => `/pricing/${encodeURIComponent(brand)}`;
 
@@ -34,6 +35,6 @@ export async function fetchPricingChanges(brand: string): Promise<PricingChange[
 }
 
 /** The server prices `model` as the site would: the editor never computes a price itself. */
-export async function previewPrice(brand: string, model: PricingModel, need: string, inputs: PricingAnswers): Promise<number | null> {
+export async function previewPrice(brand: string, model: PricingModel, need: string, inputs: PricingInputs): Promise<number | null> {
   return (await http.send("POST", `${brandPath(brand)}/preview`, { model, need, inputs }, previewParser)).cents;
 }

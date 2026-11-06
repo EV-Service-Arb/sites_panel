@@ -2,9 +2,3 @@
 
 export const CURRENCIES = ["EUR", "USD", "GBP", "AUD"] as const;
 export type Currency = (typeof CURRENCIES)[number];
-
-export const BOOKING_PROVIDERS = ["manual", "link", "google_calendar", "cal_com"] as const;
-export type BookingProvider = (typeof BOOKING_PROVIDERS)[number];
-
-export const PAGE_PROVIDERS = ["link", "google_calendar", "cal_com"] as const;
-export type PageProvider = (typeof PAGE_PROVIDERS)[number];

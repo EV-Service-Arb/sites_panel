@@ -1,0 +1,26 @@
+# @evinvest/sites-contract against the vectors panel_core is held to (contracts/vectors), built
+# as it is published.
+name: sites-contract
+on:
+  push:
+    branches: [main]
+    paths: ["ts/sites-contract/**", "contracts/**", ".github/workflows/sites-contract.yml"]
+  pull_request:
+    paths: ["ts/sites-contract/**", "contracts/**", ".github/workflows/sites-contract.yml"]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ts/sites-contract
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build

@@ -1,4 +1,4 @@
-import { type PricingModel, type PricingProblem, checkPricingModel } from "@/entities/pricing";
+import { type PricingModel, type PricingProblem, checkPricingModel } from "@evinvest/sites-contract";
 
 export type ImportResult = { kind: "ok"; model: PricingModel } | { kind: "not_json" } | { kind: "invalid"; problems: PricingProblem[] };
 

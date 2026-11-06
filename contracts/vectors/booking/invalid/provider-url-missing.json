@@ -1,0 +1,14 @@
+{
+  "problems": [
+    {
+      "path": "providers.link.url",
+      "code": "required"
+    }
+  ],
+  "config": {
+    "default": "manual",
+    "providers": {
+      "link": {}
+    }
+  }
+}

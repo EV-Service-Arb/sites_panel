@@ -1,9 +1,11 @@
+import type { PricingInput, PricingInputKind } from "@evinvest/sites-contract";
+
 import type { InputDraft, PricingDraft } from "./draft";
 import { FIELD } from "./fields";
 
 type Segment = string | number;
 
-/** `model.inputs[2].options.studio.labels.en` → `["inputs", 2, "options", "studio", "labels", "en"]`. */
+/** `inputs[2].options.studio.labels.en` → `["inputs", 2, "options", "studio", "labels", "en"]`. */
 export function segmentsOf(path: string): Segment[] {
   const out: Segment[] = [];
   for (const part of path.split(".")) {
@@ -12,14 +14,19 @@ export function segmentsOf(path: string): Segment[] {
     if (m[1]) out.push(m[1]);
     for (const index of (m[2] ?? "").matchAll(/\[(\d+)\]/g)) out.push(Number(index[1]));
   }
-  return out[0] === "model" ? out.slice(1) : out;
+  return out;
 }
 
 /** A row named by its index (`inputs[2]`) or by its slug (`inputs.bedrooms`). */
 const pick = <T extends { id: string }>(rows: readonly T[], at: Segment | undefined): T | undefined =>
   typeof at === "number" ? rows[at] : at === undefined ? undefined : rows.find((r) => r.id === at);
 
-const EFFECTS = new Set(["addCents", "multiplyBp", "discountBp"]);
+/** The field an option of each kind carries its effect in. */
+export const EFFECT_FIELD = { add: "addCents", multiply: "multiplyBp", discount: "discountBp" } as const satisfies {
+  [K in PricingInputKind]: Exclude<keyof Extract<PricingInput, { kind: K }>["options"][number], "id" | "labels">;
+};
+
+const EFFECTS = new Set<string>(Object.values(EFFECT_FIELD));
 
 function inInput(input: InputDraft, rest: Segment[]): string {
   const [head, sel, ...tail] = rest;
@@ -39,7 +46,7 @@ function inInput(input: InputDraft, rest: Segment[]): string {
 const GENERAL: Record<string, string> = { validFrom: FIELD.validFrom, roundToCents: FIELD.roundTo, minimumCents: FIELD.minimum };
 
 /**
- * The editor field a model path names — kitstart's and the server's paths
+ * The editor field a model path names — the contract's and the server's paths
  * alike, by index or by slug — or the nearest row or list that holds it.
  * Null for what the editor has no field for (`format`, `currency`, the model
  * as a whole): those are told above the form.

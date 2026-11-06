@@ -1,0 +1,20 @@
+{
+  "problems": [
+    {
+      "path": "",
+      "code": "unknown_key"
+    },
+    {
+      "path": "default",
+      "code": "required"
+    },
+    {
+      "path": "providers",
+      "code": "required"
+    }
+  ],
+  "config": {
+    "provider": "link",
+    "url": "https://book.example.fr/vifnet"
+  }
+}

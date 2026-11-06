@@ -33,7 +33,7 @@ export function errorsOf(problems: readonly DraftProblem[], revealAll: boolean, 
     first ??= field;
     byField.set(field, [...(byField.get(field) ?? []), shown]);
   };
-  if (server) file(server.field, server.field === null ? { text: `${server.path}: ${server.message}` } : { text: server.message });
+  if (server) file(server.field, server.field === null && server.path !== "" ? { text: `${server.path}: ${server.message}` } : { text: server.message });
   for (const p of problems) if (revealAll || !QUIET.has(p.code)) file(p.field, { code: p.code, vars: p.vars });
   return { byField, general, first };
 }

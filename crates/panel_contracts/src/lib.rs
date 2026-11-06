@@ -28,6 +28,9 @@ pub mod scope {
 
 pub use pbjson_types;
 
+/// `sa.v1`'s `FileDescriptorSet`, source info included: what `panel_gen` writes the TS wire from.
+pub const SA_V1_DESCRIPTORS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/sa.v1.fds"));
+
 /// The `schema` every `sa.funnel.v1` event carries.
 pub const SCHEMA: &str = "sa.funnel.v1";
 

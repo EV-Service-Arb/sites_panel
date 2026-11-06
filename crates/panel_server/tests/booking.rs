@@ -504,7 +504,7 @@ async fn the_push_route_answers_registered_providers_only() {
 }
 
 /// A site's `booking.requested` before its lead's `lead.created`: 409 with Retry-After, which
-/// kitstart's outbox sends again; once the lead is there, the same batch is journaled.
+/// the site's outbox sends again; once the lead is there, the same batch is journaled.
 #[tokio::test]
 async fn a_request_before_its_lead_is_answered_409_to_retry() {
 	let db = TestDb::create().await;

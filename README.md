@@ -114,10 +114,10 @@ same way, and looks a lead up by the ref the customer brought:
 
 ## Place settings
 
-A landing (kitstart) bakes its places into its build, and lays over them what the panel
+A landing (sites-tools) bakes its places into its build, and lays over them what the panel
 answers for each one: phones, WhatsApp, the Telegram bot and the messenger switches, opening
-hours, service area, and for storefronts an address, a pin, a photo, a landmark, a rating
-(kitstart's `PlaceLive`). Changing a number is
+hours, service area, a review link, and for storefronts an address, a pin, a photo, a landmark,
+a rating (`PlaceLive`). Changing a number is
 an edit in the panel or a `panel place set`, not a release. A site fetches at most every
 10 minutes; the panel being down or slow only delays a change, the site serves what it baked.
 
@@ -135,8 +135,8 @@ devops from the contracts: `provides.internal` here, `consumes` on the landing) 
 `/api/internal` has no session and is not published: the public IngressRoute must exclude it,
 and the NetworkPolicy lets the landings' pods in. Admins edit in the panel (operators read);
 every change, from the panel or the CLI (`by = cli`), is journaled with what was before and
-after, and can be reverted. The settings are checked as kitstart reads them, refused field
-by field (`422`) where kitstart would quietly drop them. The session API is in
+after, and can be reverted. The settings are checked field by field by the rules a site reads
+them with (`@evinvest/sites-contract`), refused (`422`) where a site would quietly drop them. The session API is in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#place-settings).
 
 ## Running it locally

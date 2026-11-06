@@ -1,4 +1,9 @@
-import { type NeedKind, type PricingInputKind, type PricingModel, hundredthsText, optionValues } from "@/entities/pricing";
+import type { NeedPricing, PricingInputKind, PricingModel } from "@evinvest/sites-contract";
+
+import { hundredthsText, optionValues } from "@/entities/pricing";
+
+export const NEED_KINDS = ["estimate", "fixed"] as const satisfies readonly NeedPricing["kind"][];
+export type NeedKind = NeedPricing["kind"];
 
 /**
  * The editor's state: text as typed, so a half-typed "12," is kept rather than

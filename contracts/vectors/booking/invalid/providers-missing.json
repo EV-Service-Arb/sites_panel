@@ -1,0 +1,11 @@
+{
+  "problems": [
+    {
+      "path": "providers",
+      "code": "required"
+    }
+  ],
+  "config": {
+    "default": "manual"
+  }
+}

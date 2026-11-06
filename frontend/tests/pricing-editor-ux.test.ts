@@ -1,10 +1,11 @@
 import { readFileSync } from "node:fs";
 
+import type { PricingModel } from "@evinvest/sites-contract";
 import { type ReactElement, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { type PricingItem, type PricingModel, PricingStatus, changedParts, pricingStamp } from "@/entities/pricing";
+import { type PricingItem, PricingStatus, changedParts, pricingStamp } from "@/entities/pricing";
 import { type PricingEditor, PricingEditorForm } from "@/features/edit-pricing";
 import { PASTE_FIELD_CLASS, PROBLEMS_CLASS } from "@/features/edit-pricing/config/paste";
 import { draftOf } from "@/features/edit-pricing/model/draft";
@@ -18,7 +19,7 @@ import { LocaleProvider } from "@/shared/i18n";
 import { formatMoment } from "@/shared/lib/format";
 
 const render = (element: ReactElement) => renderToStaticMarkup(createElement(LocaleProvider, { value: "en" }, element));
-const cleaning = JSON.parse(readFileSync(new URL("./fixtures/pricing/valid/cleaning.json", import.meta.url), "utf8")) as PricingModel;
+const cleaning = JSON.parse(readFileSync(new URL("../../contracts/vectors/pricing/valid/cleaning.json", import.meta.url), "utf8")) as PricingModel;
 const item = (model: PricingModel | null, updated_at: string | null = "2026-10-03T12:34:56Z"): PricingItem => ({
   brand_id: "vifnet",
   locales: ["fr", "en"],

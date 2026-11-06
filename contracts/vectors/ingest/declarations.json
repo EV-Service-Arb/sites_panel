@@ -1,0 +1,383 @@
+[
+  {
+    "name": "as a landing declares it",
+    "declaration": {
+      "key": "hero",
+      "variants": [
+        "control",
+        "short"
+      ],
+      "weights": [
+        1,
+        1
+      ],
+      "enabled": true
+    },
+    "ok": true
+  },
+  {
+    "name": "a holdout and a summary",
+    "declaration": {
+      "key": "hero",
+      "variants": [
+        "control",
+        "short"
+      ],
+      "weights": [
+        1,
+        1
+      ],
+      "enabled": true,
+      "holdout": 0.25,
+      "summary": "  A shorter hero converts better  "
+    },
+    "ok": true
+  },
+  {
+    "name": "one variant",
+    "declaration": {
+      "key": "hero",
+      "variants": [
+        "control"
+      ],
+      "weights": [
+        1
+      ],
+      "enabled": true
+    },
+    "ok": false
+  },
+  {
+    "name": "33 variants",
+    "declaration": {
+      "key": "hero",
+      "variants": [
+        "v0",
+        "v1",
+        "v2",
+        "v3",
+        "v4",
+        "v5",
+        "v6",
+        "v7",
+        "v8",
+        "v9",
+        "v10",
+        "v11",
+        "v12",
+        "v13",
+        "v14",
+        "v15",
+        "v16",
+        "v17",
+        "v18",
+        "v19",
+        "v20",
+        "v21",
+        "v22",
+        "v23",
+        "v24",
+        "v25",
+        "v26",
+        "v27",
+        "v28",
+        "v29",
+        "v30",
+        "v31",
+        "v32"
+      ],
+      "weights": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "enabled": true
+    },
+    "ok": false
+  },
+  {
+    "name": "32 variants",
+    "declaration": {
+      "key": "hero",
+      "variants": [
+        "v0",
+        "v1",
+        "v2",
+        "v3",
+        "v4",
+        "v5",
+        "v6",
+        "v7",
+        "v8",
+        "v9",
+        "v10",
+        "v11",
+        "v12",
+        "v13",
+        "v14",
+        "v15",
+        "v16",
+        "v17",
+        "v18",
+        "v19",
+        "v20",
+        "v21",
+        "v22",
+        "v23",
+        "v24",
+        "v25",
+        "v26",
+        "v27",
+        "v28",
+        "v29",
+        "v30",
+        "v31"
+      ],
+      "weights": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "enabled": true
+    },
+    "ok": true
+  },
+  {
+    "name": "a variant twice",
+    "declaration": {
+      "key": "hero",
+      "variants": [
+        "a",
+        "a"
+      ],
+      "weights": [
+        1,
+        1
+      ],
+      "enabled": true
+    },
+    "ok": false
+  },
+  {
+    "name": "a variant not a slug",
+    "declaration": {
+      "key": "hero",
+      "variants": [
+        "control",
+        "Short"
+      ],
+      "weights": [
+        1,
+        1
+      ],
+      "enabled": true
+    },
+    "ok": false
+  },
+  {
+    "name": "a key not a key",
+    "declaration": {
+      "key": "Hero",
+      "variants": [
+        "control",
+        "short"
+      ],
+      "weights": [
+        1,
+        1
+      ],
+      "enabled": true
+    },
+    "ok": false
+  },
+  {
+    "name": "a key of 65",
+    "declaration": {
+      "key": "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh",
+      "variants": [
+        "control",
+        "short"
+      ],
+      "weights": [
+        1,
+        1
+      ],
+      "enabled": true
+    },
+    "ok": false
+  },
+  {
+    "name": "a weight per variant but one",
+    "declaration": {
+      "key": "hero",
+      "variants": [
+        "control",
+        "short"
+      ],
+      "weights": [
+        1
+      ],
+      "enabled": true
+    },
+    "ok": false
+  },
+  {
+    "name": "a negative weight",
+    "declaration": {
+      "key": "hero",
+      "variants": [
+        "control",
+        "short"
+      ],
+      "weights": [
+        1,
+        -1
+      ],
+      "enabled": true
+    },
+    "ok": false
+  },
+  {
+    "name": "weights summing to nothing",
+    "declaration": {
+      "key": "hero",
+      "variants": [
+        "control",
+        "short"
+      ],
+      "weights": [
+        0,
+        0
+      ],
+      "enabled": true
+    },
+    "ok": false
+  },
+  {
+    "name": "a holdout of 1",
+    "declaration": {
+      "key": "hero",
+      "variants": [
+        "control",
+        "short"
+      ],
+      "weights": [
+        1,
+        1
+      ],
+      "enabled": true,
+      "holdout": 1
+    },
+    "ok": false
+  },
+  {
+    "name": "a negative holdout",
+    "declaration": {
+      "key": "hero",
+      "variants": [
+        "control",
+        "short"
+      ],
+      "weights": [
+        1,
+        1
+      ],
+      "enabled": true,
+      "holdout": -0.1
+    },
+    "ok": false
+  },
+  {
+    "name": "a summary of 201",
+    "declaration": {
+      "key": "hero",
+      "variants": [
+        "control",
+        "short"
+      ],
+      "weights": [
+        1,
+        1
+      ],
+      "enabled": true,
+      "summary": "sssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss"
+    },
+    "ok": false
+  },
+  {
+    "name": "a summary of 200 once trimmed",
+    "declaration": {
+      "key": "hero",
+      "variants": [
+        "control",
+        "short"
+      ],
+      "weights": [
+        1,
+        1
+      ],
+      "enabled": true,
+      "summary": " ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss "
+    },
+    "ok": true
+  }
+]

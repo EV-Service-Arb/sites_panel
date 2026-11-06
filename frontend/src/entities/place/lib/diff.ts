@@ -1,6 +1,8 @@
+import { MESSENGERS } from "@evinvest/sites-contract";
+
 import type { T } from "@/shared/i18n";
 
-import { EDITED_KEYS, type EditedFields, MESSENGER_SWITCHES, type PlaceSettings } from "../model/settings";
+import { EDITED_KEYS, type EditedFields, type PlaceSettings } from "../model/settings";
 import { bookingText } from "./booking";
 import { formatHours } from "./hours";
 
@@ -35,7 +37,7 @@ function editedText(key: EditedKey, fields: EditedFields, t: T): string | null {
 
 /** "WhatsApp, Telegram off"; null while every messenger is on, as with no switches at all. */
 export function messengersText(fields: Pick<EditedFields, "messengers">, t: T): string | null {
-  const off = MESSENGER_SWITCHES.filter((m) => fields.messengers?.[m] === false);
+  const off = MESSENGERS.filter((m) => fields.messengers?.[m] === false);
   return off.length === 0 ? null : t("placeSettings.messengers.off", { names: off.map((m) => t(`placeSettings.preview.${m}`)).join(", ") });
 }
 

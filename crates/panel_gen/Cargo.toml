@@ -11,9 +11,15 @@ readme.workspace = true
 
 [dependencies]
 ev_lib = { workspace = true, features = ["ts_gen"] }
+panel.workspace = true
+panel_contracts.workspace = true
 panel_core.workspace = true
 panel_server.workspace = true
+prost.workspace = true
+prost-types.workspace = true
 sa_auth = { workspace = true, features = ["catalog", "ts"] }
+serde.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

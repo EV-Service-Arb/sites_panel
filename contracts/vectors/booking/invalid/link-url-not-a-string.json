@@ -1,0 +1,16 @@
+{
+  "problems": [
+    {
+      "path": "providers.link.url",
+      "code": "url_type"
+    }
+  ],
+  "config": {
+    "default": "manual",
+    "providers": {
+      "link": {
+        "url": 42
+      }
+    }
+  }
+}

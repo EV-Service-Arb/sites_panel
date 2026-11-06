@@ -1,10 +1,12 @@
-import { EFFECT_FIELD, PRICING_CURRENCY, PRICING_FORMAT, type PricingModel, type ProblemCode, checkPricingModel, isDay, parseHundredths } from "@/entities/pricing";
+import { PRICING_CURRENCY, PRICING_FORMAT, type PricingCode, type PricingModel, checkPricingModel } from "@evinvest/sites-contract";
+
+import { parseHundredths } from "@/entities/pricing";
 
 import type { PricingDraft } from "./draft";
 import { FIELD, within } from "./fields";
-import { fieldOfPath } from "./paths";
+import { EFFECT_FIELD, fieldOfPath } from "./paths";
 
-export type DraftCode = ProblemCode | "required" | "money" | "percent";
+export type DraftCode = PricingCode | "required" | "money" | "percent";
 
 /** One thing wrong with the draft, filed under its field (null: the model as a whole). */
 export interface DraftProblem {
@@ -26,7 +28,7 @@ export interface Serialized {
 
 const problem = (field: string | null, code: DraftCode, vars: Record<string, string | number> = {}): DraftProblem => ({ field, code, vars });
 
-/** Labels with words in them, trimmed; a blank one is no label (kitstart refuses blanks). */
+/** Labels with words in them, trimmed; a blank one is no label (the contract refuses blanks). */
 function labelsOf(labels: Record<string, string>): Record<string, string> {
   return Object.fromEntries(Object.entries(labels).flatMap(([locale, text]) => (text.trim() === "" ? [] : [[locale, text.trim()]])));
 }
@@ -51,16 +53,15 @@ function slugged(out: DraftProblem[], id: string, field: string): void {
 }
 
 /**
- * The draft as the model kitstart reads — exactly its fields, integer cents and
+ * The draft as the model a site reads — exactly its fields, integer cents and
  * basis points — with every problem the editor can name before the server
  * does: what the draft cannot even say (an empty slug, "12,345 €", a label
- * missing in one of the brand's `locales`) and then kitstart's own rules on
+ * missing in one of the brand's `locales`) and then the contract's own rules on
  * what it says.
  */
 export function modelOf(draft: PricingDraft, locales: readonly string[]): Serialized {
   const local: DraftProblem[] = [];
   if (draft.validFrom.trim() === "") local.push(problem(FIELD.validFrom, "required"));
-  else if (!isDay(draft.validFrom)) local.push(problem(FIELD.validFrom, "date"));
   const roundToCents = amount(local, FIELD.roundTo, draft.roundTo, "money");
   const minimumCents = amount(local, FIELD.minimum, draft.minimum, "money");
 
