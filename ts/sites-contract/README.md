@@ -7,7 +7,8 @@ only TS form. No runtime dependencies, no Node imports: it is bundled into landi
 the panel's front end.
 
 ```text
-src/generated/contract.ts  panel_core's shapes, vocabularies and limits (`nix run .#gen`)
+src/generated/*.ts         panel_core's shapes, vocabularies and limits (`nix run .#gen`), a
+                           module per domain
 src/generated/wire.ts      the protos as protojson: the envelope, every type's properties
 src/*.ts                   the one TS implementation of what both sides run, held to
                            contracts/vectors with panel_core:
