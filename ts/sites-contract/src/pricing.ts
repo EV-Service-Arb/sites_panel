@@ -20,8 +20,8 @@ export type PricingInputs = Readonly<Record<string, string>>;
 /** The labels of an input or an option, by locale. */
 export type PricingLabels = PricingInput["labels"];
 
-const SLUG = new RegExp(LIMIT.slug);
-const LOCALE = new RegExp(LIMIT.locale);
+const SLUG = /* @__PURE__ */ new RegExp(LIMIT.slug);
+const LOCALE = /* @__PURE__ */ new RegExp(LIMIT.locale);
 
 const EFFECT_FIELD = { add: "addCents", multiply: "multiplyBp", discount: "discountBp" } as const satisfies Record<PricingInputKind, string>;
 const EFFECT_MAX = { add: LIMIT.maxPriceCents, multiply: LIMIT.maxMultiplyBp, discount: LIMIT.maxDiscountBp } as const satisfies Record<PricingInputKind, number>;

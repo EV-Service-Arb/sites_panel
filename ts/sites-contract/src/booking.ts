@@ -13,8 +13,8 @@ export interface BookingProblem {
 export const isBookingProvider = (v: unknown): v is BookingProvider => BOOKING_PROVIDERS.some(p => p === v);
 export const isPageProvider = (v: unknown): v is PageProvider => PAGE_PROVIDERS.some(p => p === v);
 
-const LEAD_REF = new RegExp(LIMIT.leadRef);
-const CAL_SEGMENT = new RegExp(LIMIT.calComSegment);
+const LEAD_REF = /* @__PURE__ */ new RegExp(LIMIT.leadRef);
+const CAL_SEGMENT = /* @__PURE__ */ new RegExp(LIMIT.calComSegment);
 const LABEL = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
 const APPOINTMENTS = "/calendar/appointments/";
 

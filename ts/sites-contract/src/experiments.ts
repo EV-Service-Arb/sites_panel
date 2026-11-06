@@ -30,8 +30,8 @@ export function parseLiveExperiments(body: unknown): LiveExperiments | null {
 /** Why the panel would refuse an experiment as declared. */
 export type DeclarationProblem = "key" | "variants" | "variant" | "duplicate_variant" | "weights" | "holdout" | "summary";
 
-const KEY = new RegExp(EXPERIMENT_LIMITS.key);
-const VARIANT = new RegExp(EXPERIMENT_LIMITS.variant);
+const KEY = /* @__PURE__ */ new RegExp(EXPERIMENT_LIMITS.key);
+const VARIANT = /* @__PURE__ */ new RegExp(EXPERIMENT_LIMITS.variant);
 
 /**
  * Why the panel would refuse this experiment of `experiments.declared@1`, or `null`

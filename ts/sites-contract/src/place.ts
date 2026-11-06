@@ -10,9 +10,9 @@ export interface PlaceProblem {
   code: PlaceCode | BookingCode;
 }
 
-const E164 = new RegExp(LIMIT.e164);
-const TELEGRAM_BOT = new RegExp(LIMIT.telegramBot);
-const TIME = new RegExp(LIMIT.time);
+const E164 = /* @__PURE__ */ new RegExp(LIMIT.e164);
+const TELEGRAM_BOT = /* @__PURE__ */ new RegExp(LIMIT.telegramBot);
+const TIME = /* @__PURE__ */ new RegExp(LIMIT.time);
 
 class Check {
   readonly problems: PlaceProblem[] = [];
