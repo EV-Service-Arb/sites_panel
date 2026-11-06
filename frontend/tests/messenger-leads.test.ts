@@ -7,7 +7,7 @@ import { LEAD_CHANNELS } from "@evinvest/sites-contract";
 
 import { markMessaged } from "@/entities/lead/api/leads";
 import { awaitingMessage, leadParser } from "@/entities/lead/model/lead";
-import { leadFilterFrom, messageRefOf, narrows, paramsWith } from "@/features/lead-filters/model/params";
+import { leadFilterFrom, narrows, paramsWith } from "@/features/lead-filters/model/params";
 import { oneOfOr, parse } from "@/shared/lib/parse";
 
 const row = { brand: "aquafix", lead_id: "l1", stage: "created", manual: false, last_event_at: "2026-10-07T10:00:00Z" };
@@ -85,30 +85,6 @@ describe("marking a lead as messaged", () => {
     expect(calls.map((c) => [c.init.method, c.url])).toEqual([["POST", "/api/sites/leads/aquafix/l1/messaged"]]);
     expect(JSON.parse(String(calls[0]?.init.body))).toEqual({ channel: "whatsapp" });
     expect(new Headers(calls[0]?.init.headers).get("Idempotency-Key")).toBe("key-1");
-  });
-});
-
-describe("the message ref an operator types", () => {
-  it("is trimmed and upper-cased into the form the API matches", () => {
-    expect(messageRefOf(" aq-7k3f ")).toBe("AQ-7K3F");
-  });
-
-  it("is found in what is pasted with it: the label, spaces instead of the dash", () => {
-    expect(["Réf. AQ-7K3F", "ref aq 7k3f", "AQ 7K3F", "Ref: AQ7K3F", "  réf.AQ-7K3F "].map(messageRefOf)).toEqual(["AQ-7K3F", "AQ-7K3F", "AQ-7K3F", "AQ-7K3F", "AQ-7K3F"]);
-  });
-
-  it("reads Crockford's look-alikes in the code as Crockford does, not in the prefix", () => {
-    expect(["AQ-7K3I", "AQ-7K3L", "AQ-7KO3", "aq-o1il"].map(messageRefOf)).toEqual(["AQ-7K31", "AQ-7K31", "AQ-7K03", "AQ-0111"]);
-    expect(messageRefOf("OQ-7K3F")).toBe("OQ-7K3F");
-  });
-
-  it("is none for a U, a one-letter prefix, a code too short, or nothing", () => {
-    expect(messageRefOf("AQ-7K3U")).toBeNull();
-    expect(messageRefOf("A-7K3F")).toBeNull();
-    expect(messageRefOf("AQ-7K3")).toBeNull();
-    expect(messageRefOf("Réf.")).toBeNull();
-    expect(messageRefOf("")).toBeNull();
-    expect(messageRefOf(null)).toBeNull();
   });
 });
 

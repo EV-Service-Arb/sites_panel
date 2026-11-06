@@ -1,3 +1,5 @@
+import { validHoldout, validWeights } from "@evinvest/experiments";
+
 import { EXPERIMENT_LIMITS } from "./generated/experiment-limits.js";
 import type { LiveExperiments, LiveOverride } from "./generated/types.js";
 import type { ExperimentDeclaration } from "./generated/wire.js";
@@ -44,9 +46,8 @@ export function declarationProblem(d: ExperimentDeclaration): DeclarationProblem
   if (d.variants.length < 2 || d.variants.length > EXPERIMENT_LIMITS.maxVariants) return "variants";
   if (!d.variants.every(v => VARIANT.test(v))) return "variant";
   if (new Set(d.variants).size !== d.variants.length) return "duplicate_variant";
-  const weightsOk = d.weights.length === d.variants.length && d.weights.every(w => Number.isFinite(w) && w >= 0) && d.weights.reduce((a, b) => a + b, 0) > 0;
-  if (!weightsOk) return "weights";
-  if (d.holdout !== undefined && !(Number.isFinite(d.holdout) && d.holdout >= 0 && d.holdout < 1)) return "holdout";
+  if (validWeights(d.weights, d.variants.length) === undefined) return "weights";
+  if (d.holdout !== undefined && validHoldout(d.holdout) === undefined) return "holdout";
   if (d.summary !== undefined && charCount(trim(d.summary)) > EXPERIMENT_LIMITS.maxSummary) return "summary";
   return null;
 }

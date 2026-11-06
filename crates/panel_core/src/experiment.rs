@@ -64,13 +64,13 @@ fn is_variant(s: &str) -> bool {
 	(1..=32).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
 }
 
-/// Weights a landing takes for `variants` variants: as many, each a finite number ≥ 0, and
-/// their sum > 0.
+/// Weights a landing takes for `variants` variants (`@evinvest/experiments`' `validWeights`,
+/// `contracts/vectors/overrides.json`): as many, each a finite number ≥ 0, and their sum > 0.
 pub fn weights_ok(weights: &[f64], variants: usize) -> bool {
 	weights.len() == variants && weights.iter().all(|w| w.is_finite() && *w >= 0.0) && weights.iter().sum::<f64>() > 0.0
 }
 
-/// A holdout a landing takes: in [0, 1).
+/// A holdout a landing takes (`validHoldout`): in [0, 1).
 pub fn holdout_ok(h: f64) -> bool {
 	h.is_finite() && (0.0..1.0).contains(&h)
 }

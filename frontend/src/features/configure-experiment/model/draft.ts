@@ -1,4 +1,6 @@
-import { type Experiment, type ExperimentPatch, sameHoldout, sameWeights, validHoldout, validWeights } from "@/entities/experiment";
+import { validHoldout, validWeights } from "@evinvest/sites-contract";
+
+import { type Experiment, type ExperimentPatch, sameHoldout, sameWeights } from "@/entities/experiment";
 
 /** The form as typed: a weight per variant, and the holdout in percent ("" for none). */
 export interface Draft {
@@ -38,10 +40,10 @@ export type DraftCheck =
  */
 export function checkDraft(e: Experiment, d: Draft): DraftCheck {
   const parsed = d.weights.map(parseDecimal);
-  const weights = parsed.every((w): w is number => w !== null) && validWeights(parsed, e.variants.length) ? parsed : null;
+  const weights = parsed.every((w): w is number => w !== null) && validWeights(parsed, e.variants.length) !== undefined ? parsed : null;
   const holdoutRaw = d.holdout.trim();
   const pct = holdoutRaw === "" ? 0 : parseDecimal(holdoutRaw);
-  const holdout = pct !== null && validHoldout(pct / 100) ? (pct === 0 ? null : pct / 100) : undefined;
+  const holdout = pct !== null && validHoldout(pct / 100) !== undefined ? (pct === 0 ? null : pct / 100) : undefined;
 
   const errors: DraftErrors = {};
   if (weights === null) errors.weights = true;

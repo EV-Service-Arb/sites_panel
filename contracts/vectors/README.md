@@ -7,13 +7,15 @@ changed is the contract changed, on both sides at once; a site sends a new shape
 panel that accepts it is live.
 
 ```text
-pricing/     a brand's price list: valid, invalid (with their problems), locales, priced cases
-booking/     a place's booking config and its URL rule; booking.requested's properties
-place.json   a place's live settings, field by field: what is kept, what is refused and why
-phone.json   a typed phone number → E.164, or null
-ids.json     the ids and refs a lead's events carry: opaque ids, analytics ids, message refs
-ingest/      the bodies a site sends (`siteEvent`), byte for byte, each accepted by the panel;
-             declarations.json: an experiment as declared, taken or refused
+pricing/          a brand's price list: valid, invalid (with their problems), locales, priced cases
+booking/          a place's booking config and its URL rule; booking.requested's properties
+place.json        a place's live settings, field by field: what is kept, what is refused and why
+phone.json        a typed phone number → E.164, or null
+message-ref.json  a message ref as an operator types it → the ref, or null
+overrides.json    an experiment override's weights and holdout: taken or dropped
+ids.json          the ids and refs a lead's events carry: opaque ids, analytics ids, message refs
+ingest/           the bodies a site sends (`siteEvent`), byte for byte, each accepted by the panel;
+                  declarations.json: an experiment as declared, taken or refused
 ```
 
 Problems are `{ path, code }`, compared as sets: JSON objects are read sorted in Rust and in

@@ -133,7 +133,7 @@
               && (under "frontend" || under "ts/sites-contract/src" || (type == "directory" && builtins.elem rel [ "ts" "ts/sites-contract" ]));
           };
           sourceRoot = "source/frontend";
-          npmDepsHash = "sha256-8Dr9hgPyz/OvBjM5+yFenhWI4FoC+1Gcefw3bypoe+A=";
+          npmDepsHash = "sha256-5Yd0nJnTKvE70mh7azistHWKjdx1MKBUd4Uyjv2Wayk=";
           installPhase = ''
             runHook preInstall
             cp -r dist "$out"

@@ -1,11 +1,10 @@
+import { messageRefOf } from "@evinvest/sites-contract";
 import { InputGroup, InputGroupAddon, InputGroupInput, cn } from "@evinvest/uikit";
 import { Search } from "lucide-react";
 import { useState } from "react";
 
 import { useT } from "@/shared/i18n";
 import { useControlSize } from "@/shared/ui/touch";
-
-import { messageRefOf } from "../model/params";
 
 /**
  * The messenger ref a customer quoted ("Réf. AQ-7K3F"), matched exactly in any

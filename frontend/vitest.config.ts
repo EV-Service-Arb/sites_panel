@@ -5,7 +5,12 @@ import { defineConfig } from "vitest/config";
 // screens obey live in plain modules (`model/`, `lib/`), so no DOM is needed.
 export default defineConfig({
   resolve: {
-    alias: { "@": fileURLToPath(new URL("./src", import.meta.url)), "@evinvest/sites-contract": fileURLToPath(new URL("../ts/sites-contract/src/index.ts", import.meta.url)) },
+    alias: {
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
+      "@evinvest/sites-contract": fileURLToPath(new URL("../ts/sites-contract/src/index.ts", import.meta.url)),
+      // sites-contract's own dependency, resolved from here: its sources are imported by path.
+      "@evinvest/experiments": fileURLToPath(new URL("./node_modules/@evinvest/experiments", import.meta.url)),
+    },
   },
   test: {
     environment: "node",

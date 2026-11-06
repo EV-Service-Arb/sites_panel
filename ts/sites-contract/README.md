@@ -3,7 +3,7 @@
 The Service-Arb sites ↔ panel contract, in TS: what a landing reads from the panel and sends
 to it. Its source is the panel — `crates/panel_core` and `contracts/proto/sa/v1` in
 [EV-Service-Arb/sites_panel](https://github.com/EV-Service-Arb/sites_panel) — and this is its
-only TS form. No runtime dependencies, no Node imports: it is bundled into landing pages and
+only TS form. Its one dependency is `@evinvest/experiments` (zero-dep), no Node imports: it is bundled into landing pages and
 the panel's front end.
 
 ```text
@@ -15,9 +15,10 @@ src/*.ts                   the one TS implementation of what both sides run, hel
   price      priceOf: what a page runs        pricing         checkPricingModel
   booking    bookingRequested, isLeadRef      booking-config  checkBookingConfig, checkBookingUrl
   place      checkPlaceLive: a place's live settings, field by field
-  phone      normalizePhone, phoneProblem
+  phone      normalizePhone, phoneProblem     message-ref     messageRefOf: a ref as typed
   ingest     siteEvent, ingestBody, uuidV7, isOpaqueId: the only way a site builds an event
-  experiments parseLiveExperiments, declarationProblem
+  experiments parseLiveExperiments, declarationProblem; validWeights, validHoldout are
+             @evinvest/experiments' (what applyOverrides takes), re-exported
 ```
 
 A page bundles what it runs and not the panel's checks: they sit in modules of their own.

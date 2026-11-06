@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { type Experiment, experimentsParser, sharesOf, statusOf, validHoldout, validWeights } from "@/entities/experiment";
+import { type Experiment, experimentsParser, sharesOf, statusOf } from "@/entities/experiment";
 import { RESET_PATCH, checkDraft, draftOf, enabledPatch, parseDecimal, resetMovesWeights } from "@/features/configure-experiment/model/draft";
 import { parseLiveMessage } from "@/shared/lib/live/protocol";
 import { ParseError, parse } from "@/shared/lib/parse";
@@ -37,22 +37,6 @@ describe("the experiments answer", () => {
     expect(read({ posthog_url: null }).posthog_url).toBeNull();
     expect(() => read({ posthog_url: "javascript:alert(1)" })).toThrow(ParseError);
     expect(() => read({ posthog_url: "not a url" })).toThrow(ParseError);
-  });
-});
-
-describe("the rules a landing applies an override by", () => {
-  it("want weights of the variants' length, none negative, summing above 0", () => {
-    expect(validWeights([1, 0], 2)).toBe(true);
-    expect(validWeights([1], 2)).toBe(false);
-    expect(validWeights([0, 0], 2)).toBe(false);
-    expect(validWeights([-1, 2], 2)).toBe(false);
-  });
-
-  it("want a holdout in [0, 1)", () => {
-    expect(validHoldout(0)).toBe(true);
-    expect(validHoldout(0.99)).toBe(true);
-    expect(validHoldout(1)).toBe(false);
-    expect(validHoldout(-0.1)).toBe(false);
   });
 });
 

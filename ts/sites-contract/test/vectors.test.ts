@@ -13,10 +13,13 @@ import {
   ingestBody,
   isLeadRef,
   isOpaqueId,
+  messageRefOf,
   normalizePhone,
   preferredDateInWindow,
   priceOf,
   siteEvent,
+  validHoldout,
+  validWeights,
   type ExperimentDeclaration,
   type PageProvider,
   type PricingInputs,
@@ -86,6 +89,22 @@ describe("booking", () => {
 describe("phone", () => {
   it.each(list("phone.json").map(p => [p.raw, p.e164]))("%j reads as %s", (raw, e164) => {
     expect(normalizePhone(raw)).toBe(e164);
+  });
+});
+
+describe("message ref", () => {
+  it.each(list("message-ref.json").map(v => [v.typed, v.ref]))("%j reads as %s", (typed, ref) => {
+    expect(messageRefOf(typed)).toBe(ref);
+  });
+});
+
+describe("an override a landing takes or drops", () => {
+  const o = read("overrides.json") as { weights: { weights: number[]; variants: number; ok: boolean }[]; holdout: { value: number; ok: boolean }[] };
+  it.each(o.weights.map(v => [v.weights, v.variants, v.ok]))("weights %j for %i variants: %s", (weights, variants, ok) => {
+    expect(validWeights(weights, variants) !== undefined).toBe(ok);
+  });
+  it.each(o.holdout.map(v => [v.value, v.ok]))("holdout %d: %s", (value, ok) => {
+    expect(validHoldout(value) !== undefined).toBe(ok);
   });
 });
 

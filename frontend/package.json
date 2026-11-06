@@ -15,6 +15,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@evinvest/experiments": "^0.6.1",
     "@evinvest/mfe": "^0.3.0",
     "@evinvest/uikit": "^0.27.0",
     "lucide-react": "^0.453.0",

@@ -134,7 +134,9 @@ panel_core's checks and arithmetic ◀─ contracts/vectors ─▶ ts/sites-cont
 - **Shapes exist once, logic twice.** A type, a vocabulary, a limit, a protojson message is
   written in Rust (or a proto) and generated. What a browser and the panel both run — the
   checks, `priceOf`, a phone number, the ingest builders — exists exactly twice, in
-  `panel_core` and in the package, and both suites read the same vector files in place.
+  `panel_core` and in the package, and both suites read the same vector files in place. An
+  override's validity is what the landings' `applyOverrides` takes: its TS form is
+  `@evinvest/experiments`', re-exported by the package.
 - **Problems are codes.** A check answers `{path, code}` (`PRICING_CODES`, `BOOKING_CODES`,
   `PLACE_CODES`): a site logs them, the editor says each in its own words; the Rust also keeps
   an English `why` for the CLI and a 422's text.

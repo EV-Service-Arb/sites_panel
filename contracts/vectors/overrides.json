@@ -1,0 +1,83 @@
+{
+  "weights": [
+    {
+      "weights": [
+        1,
+        1
+      ],
+      "variants": 2,
+      "ok": true
+    },
+    {
+      "weights": [
+        1,
+        0
+      ],
+      "variants": 2,
+      "ok": true
+    },
+    {
+      "weights": [
+        0.25,
+        0.5,
+        0.25
+      ],
+      "variants": 3,
+      "ok": true
+    },
+    {
+      "weights": [
+        0,
+        0
+      ],
+      "variants": 2,
+      "ok": false
+    },
+    {
+      "weights": [
+        -1,
+        2
+      ],
+      "variants": 2,
+      "ok": false
+    },
+    {
+      "weights": [
+        1
+      ],
+      "variants": 2,
+      "ok": false
+    },
+    {
+      "weights": [
+        1,
+        1,
+        1
+      ],
+      "variants": 2,
+      "ok": false
+    }
+  ],
+  "holdout": [
+    {
+      "value": 0,
+      "ok": true
+    },
+    {
+      "value": 0.5,
+      "ok": true
+    },
+    {
+      "value": 0.999,
+      "ok": true
+    },
+    {
+      "value": 1,
+      "ok": false
+    },
+    {
+      "value": -0.1,
+      "ok": false
+    }
+  ]
+}

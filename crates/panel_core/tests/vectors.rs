@@ -9,7 +9,7 @@ use std::{
 
 use panel_core::{
 	booking::{self, PageProvider, check_config, check_url},
-	experiment::Declaration,
+	experiment::{Declaration, holdout_ok, weights_ok},
 	fact::{AnalyticsId, MessageRef},
 	ids::is_opaque,
 	phone,
@@ -183,6 +183,26 @@ fn every_id_and_ref_a_lead_carries() {
 	each("analyticsId", &|s| AnalyticsId::parse(s).is_ok());
 	each("messageRef", &|s| MessageRef::parse(s).is_ok());
 	each("leadRef", &booking::is_lead_ref);
+}
+
+#[test]
+fn every_message_ref_as_an_operator_types_it() {
+	for v in list("message-ref.json") {
+		let typed = v["typed"].as_str().unwrap();
+		assert_eq!(MessageRef::from_typed(typed).ok().as_ref().map(MessageRef::as_str), v["ref"].as_str(), "{typed:?}");
+	}
+}
+
+#[test]
+fn every_override_a_landing_takes_or_drops() {
+	let o = read(&dir("overrides.json"));
+	for v in o["weights"].as_array().unwrap() {
+		let weights: Vec<f64> = serde_json::from_value(v["weights"].clone()).unwrap();
+		assert_eq!(weights_ok(&weights, v["variants"].as_u64().unwrap() as usize), v["ok"].as_bool().unwrap(), "{v}");
+	}
+	for v in o["holdout"].as_array().unwrap() {
+		assert_eq!(holdout_ok(v["value"].as_f64().unwrap()), v["ok"].as_bool().unwrap(), "{v}");
+	}
 }
 
 #[test]

@@ -1,4 +1,4 @@
-import { BOOKING_STATUSES, LEAD_CHANNELS, LEAD_FLOWS, LEAD_LIMITS } from "@evinvest/sites-contract";
+import { BOOKING_STATUSES, LEAD_CHANNELS, LEAD_FLOWS, messageRefOf } from "@evinvest/sites-contract";
 
 import { type LeadCounts, type LeadFilter, STAGES, type Stage } from "@/entities/lead";
 import type { MessageKey, T } from "@/shared/i18n";
@@ -66,31 +66,6 @@ export function bookingFilterOf(v: string | null): LeadFilter["booking"] {
 /** A channel the API takes (anything else answers 400): every lead otherwise. */
 export function channelFilterOf(v: string | null): LeadFilter["channel"] {
   return LEAD_CHANNELS.find((c) => c === v) ?? null;
-}
-
-const MESSAGE_REF = new RegExp(LEAD_LIMITS.messageRef);
-
-/** A label pasted with the ref ("Réf. ", "ref ", "Ref: "): the prefilled WhatsApp line ends "Réf. AQ-7K3F". */
-const REF_LABEL = /^R[EÉ]F(?:[EÉ]RENCE)?(?:[.:#]\s*|\s+)/;
-
-/** The prefix and the code, apart: a dash, spaces, or both between them. */
-const REF_PARTS = /^([A-Z]{2,4})[\s-]*([0-9A-Z]{4,8})$/;
-
-/**
- * A ref as an operator types or pastes it ("aq-7k3f ", "Réf. AQ-7K3F",
- * "ref aq 7k3f", "AQ 7K3F") in the form the API matches, `AQ-7K3F`. In the
- * code Crockford's look-alikes are read as it reads them: O is 0, I and L
- * are 1. Null when it cannot be one, which the API would answer 400. The
- * server normalises the same way (`MessageRef::from_typed`).
- */
-export function messageRefOf(raw: string | null): string | null {
-  const text = (raw ?? "").trim().toUpperCase().replace(REF_LABEL, "").trim();
-  const parts = REF_PARTS.exec(text);
-  const prefix = parts?.[1];
-  const code = parts?.[2];
-  if (prefix === undefined || code === undefined) return null;
-  const ref = `${prefix}-${code.replace(/O/g, "0").replace(/[IL]/g, "1")}`;
-  return MESSAGE_REF.test(ref) ? ref : null;
 }
 
 export function stageOrNull(v: string | null): Stage | null {
