@@ -7,7 +7,7 @@ use panel_core::{
 	booking::{BookingMatch, BookingState, BookingStatus, DayPart, Provider},
 	fact::{LeadChannel, LeadFlow, MessageRef, Messenger},
 	funnel::Totals,
-	ids::{BrandId, LeadId, LocationId},
+	ids::{BrandId, LeadId},
 	lead::Stage,
 };
 use serde_json::Value;
@@ -188,12 +188,35 @@ macro_rules! overdue {
 }
 pub(super) use overdue;
 
+/// The row's place (`$b`, `$l`) is linked to one of the GMBs `$p` binds ([`gmbs`]); `NULL` narrows nothing.
+macro_rules! linked {
+	($b:literal, $l:literal, $p:literal) => {
+		concat!(
+			"(",
+			$p,
+			" IS NULL OR EXISTS (SELECT 1 FROM places g WHERE g.brand_id = ",
+			$b,
+			" AND g.location_id = ",
+			$l,
+			" AND g.gmb_id IN (SELECT value FROM json_each(",
+			$p,
+			"))))"
+		)
+	};
+}
+
+/// A selection of GMBs as [`linked`] binds it.
+fn gmbs(selected: Option<&[i64]>) -> Option<String> {
+	selected.map(|g| serde_json::to_string(g).expect("a list of integers serializes"))
+}
+
 /// Which leads to list.
 #[derive(Clone, Debug, Default)]
 pub struct LeadFilter {
 	pub stage: Option<Stage>,
 	pub brand: Option<BrandId>,
-	pub location: Option<LocationId>,
+	/// Only the leads of places linked to one of these GMBs.
+	pub gmbs: Option<Vec<i64>>,
 	/// Only leads created before this and still waiting for their first contact.
 	pub waiting_since_before: Option<Timestamp>,
 	/// Only leads created at or after this.
@@ -223,8 +246,9 @@ pub async fn leads(conn: &mut SqliteConnection, f: &LeadFilter) -> eyre::Result<
 	};
 	sqlx::query_as::<_, Row>(concat!(
 		lead_select!(),
-		"WHERE ($1 IS NULL OR l.stage = $1) AND ($2 IS NULL OR l.brand_id = $2) AND ($3 IS NULL OR l.location_id = $3) \
-		 AND ($4 IS NULL OR (",
+		"WHERE ($1 IS NULL OR l.stage = $1) AND ($2 IS NULL OR l.brand_id = $2) AND ",
+		linked!("l.brand_id", "l.location_id", "$3"),
+		" AND ($4 IS NULL OR (",
 		overdue!(),
 		"$4)) \
 		 AND ($5 IS NULL OR (COALESCE(l.created_at, l.last_event_at), l.brand_id, l.lead_id) < ($5, $6, $7)) \
@@ -236,7 +260,7 @@ pub async fn leads(conn: &mut SqliteConnection, f: &LeadFilter) -> eyre::Result<
 	))
 	.bind(f.stage.map(Stage::as_str))
 	.bind(f.brand.as_ref().map(BrandId::as_str))
-	.bind(f.location.as_ref().map(LocationId::as_str))
+	.bind(gmbs(f.gmbs.as_deref()))
 	.bind(f.waiting_since_before.map(to_db))
 	.bind(after_at)
 	.bind(after_brand)
@@ -398,24 +422,26 @@ pub struct FunnelRow {
 /// The personal funnel's totals over the leads that came in from `from` to `to`, UTC days,
 /// both included; for one brand or all.
 pub async fn funnel(conn: &mut SqliteConnection, from: Date, to: Date, brand: Option<&BrandId>) -> eyre::Result<Totals> {
-	Ok(funnel_rows(conn, from, to, brand, false).await?.pop().map(|r| r.totals).unwrap_or_default())
+	Ok(funnel_rows(conn, from, to, brand, None, false).await?.pop().map(|r| r.totals).unwrap_or_default())
 }
 
 /// [`funnel`], one row per location (a lead without one is under `None`) when `by_location`,
-/// else a single row, or none when no lead came in.
-pub async fn funnel_rows(conn: &mut SqliteConnection, from: Date, to: Date, brand: Option<&BrandId>, by_location: bool) -> eyre::Result<Vec<FunnelRow>> {
+/// else a single row, or none when no lead came in; only the places linked to `selected` GMBs when some.
+pub async fn funnel_rows(conn: &mut SqliteConnection, from: Date, to: Date, brand: Option<&BrandId>, selected: Option<&[i64]>, by_location: bool) -> eyre::Result<Vec<FunnelRow>> {
 	type Sums = (Option<String>, Option<String>, i64, i64, i64, i64, i64, i64, i64, i64);
-	let rows: Vec<Sums> = sqlx::query_as(
+	let rows: Vec<Sums> = sqlx::query_as(concat!(
 		"SELECT CASE WHEN $4 THEN brand_id END, CASE WHEN $4 THEN location_id END, \
 		 sum(leads), sum(contacted), sum(quoted), sum(won), \
 		 sum(completed), sum(paid), sum(lost_now), sum(manual) \
-		 FROM reporting_funnel_daily WHERE day BETWEEN $1 AND $2 AND ($3 IS NULL OR brand_id = $3) \
-		 GROUP BY 1, 2 ORDER BY 1, 2 NULLS LAST",
-	)
+		 FROM reporting_funnel_daily f WHERE day BETWEEN $1 AND $2 AND ($3 IS NULL OR brand_id = $3) AND ",
+		linked!("f.brand_id", "f.location_id", "$5"),
+		" GROUP BY 1, 2 ORDER BY 1, 2 NULLS LAST"
+	))
 	.bind(day_to_db(from))
 	.bind(day_to_db(to))
 	.bind(brand.map(BrandId::as_str))
 	.bind(by_location)
+	.bind(gmbs(selected))
 	.fetch_all(&mut *conn)
 	.await
 	.wrap_err("summing the funnel")?;
@@ -460,19 +486,21 @@ pub struct PaymentSum {
 /// The payments of the leads that came in from `from` to `to` — the funnel's cohort, whenever
 /// they were paid — per currency, and per location when `by_location` (keyed as
 /// [`funnel_rows`] keys its rows).
-pub async fn funnel_payments(conn: &mut SqliteConnection, from: Date, to: Date, brand: Option<&BrandId>, by_location: bool) -> eyre::Result<Vec<PaymentSum>> {
+pub async fn funnel_payments(conn: &mut SqliteConnection, from: Date, to: Date, brand: Option<&BrandId>, selected: Option<&[i64]>, by_location: bool) -> eyre::Result<Vec<PaymentSum>> {
 	type Sums = (Option<String>, Option<String>, String, i64, i64, i64);
-	let rows: Vec<Sums> = sqlx::query_as(
+	let rows: Vec<Sums> = sqlx::query_as(concat!(
 		"SELECT CASE WHEN $4 THEN l.brand_id END, CASE WHEN $4 THEN l.location_id END, p.currency, \
 		 sum(p.billed), sum(p.commission), count(*) \
 		 FROM payments p JOIN leads l ON l.brand_id = p.brand_id AND l.lead_id = p.lead_id \
-		 WHERE date(l.created_at / 1000000, 'unixepoch') BETWEEN $1 AND $2 AND ($3 IS NULL OR l.brand_id = $3) \
-		 GROUP BY 1, 2, 3 ORDER BY 1, 2 NULLS LAST, 3",
-	)
+		 WHERE date(l.created_at / 1000000, 'unixepoch') BETWEEN $1 AND $2 AND ($3 IS NULL OR l.brand_id = $3) AND ",
+		linked!("l.brand_id", "l.location_id", "$5"),
+		" GROUP BY 1, 2, 3 ORDER BY 1, 2 NULLS LAST, 3"
+	))
 	.bind(day_to_db(from))
 	.bind(day_to_db(to))
 	.bind(brand.map(BrandId::as_str))
 	.bind(by_location)
+	.bind(gmbs(selected))
 	.fetch_all(&mut *conn)
 	.await
 	.wrap_err("summing the payments")?;
@@ -503,9 +531,9 @@ pub struct PlaceRow {
 }
 
 /// Every place the panel knows, by brand: the locations a lead names, and those registered by
-/// hand or by an edit of their settings.
-pub async fn places(conn: &mut SqliteConnection) -> eyre::Result<Vec<PlaceRow>> {
-	let rows: Vec<(String, String, Option<i64>, bool, bool)> = sqlx::query_as(
+/// hand or by an edit of their settings; only those linked to `selected` GMBs when some.
+pub async fn places(conn: &mut SqliteConnection, selected: Option<&[i64]>) -> eyre::Result<Vec<PlaceRow>> {
+	let rows: Vec<(String, String, Option<i64>, bool, bool)> = sqlx::query_as(concat!(
 		"WITH known AS ( \
 		   SELECT brand_id, location_id FROM leads WHERE location_id IS NOT NULL \
 		   UNION SELECT brand_id, location_id FROM places) \
@@ -513,8 +541,11 @@ pub async fn places(conn: &mut SqliteConnection) -> eyre::Result<Vec<PlaceRow>> 
 		   (SELECT max(l.created_at) FROM leads l WHERE l.brand_id = k.brand_id AND l.location_id = k.location_id), \
 		   EXISTS (SELECT 1 FROM place_settings s, json_each(s.settings) WHERE s.brand_id = k.brand_id AND s.location_id = k.location_id), \
 		   coalesce((SELECT p.withdrawn FROM places p WHERE p.brand_id = k.brand_id AND p.location_id = k.location_id), 0) \
-		 FROM known k ORDER BY k.brand_id, k.location_id",
-	)
+		 FROM known k WHERE ",
+		linked!("k.brand_id", "k.location_id", "$1"),
+		" ORDER BY k.brand_id, k.location_id"
+	))
+	.bind(gmbs(selected))
 	.fetch_all(&mut *conn)
 	.await
 	.wrap_err("listing the places")?;
@@ -532,15 +563,18 @@ pub async fn places(conn: &mut SqliteConnection) -> eyre::Result<Vec<PlaceRow>> 
 }
 
 /// How many leads are at each stage (the stages none is at are absent), and how many of
-/// them wait for their first contact since before `waiting_since_before`.
-pub async fn stage_counts(conn: &mut SqliteConnection, brand: Option<&BrandId>, location: Option<&LocationId>, waiting_since_before: Timestamp) -> eyre::Result<(Vec<(Stage, u64)>, u64)> {
+/// them wait for their first contact since before `waiting_since_before`; only the leads of places linked to
+/// `selected` GMBs when some.
+pub async fn stage_counts(conn: &mut SqliteConnection, brand: Option<&BrandId>, selected: Option<&[i64]>, waiting_since_before: Timestamp) -> eyre::Result<(Vec<(Stage, u64)>, u64)> {
 	let rows: Vec<(String, i64, i64)> = sqlx::query_as(concat!(
 		"SELECT l.stage, count(*), count(*) FILTER (WHERE ",
 		overdue!(),
-		"$3) FROM leads l WHERE ($1 IS NULL OR l.brand_id = $1) AND ($2 IS NULL OR l.location_id = $2) GROUP BY l.stage"
+		"$3) FROM leads l WHERE ($1 IS NULL OR l.brand_id = $1) AND ",
+		linked!("l.brand_id", "l.location_id", "$2"),
+		" GROUP BY l.stage"
 	))
 	.bind(brand.map(BrandId::as_str))
-	.bind(location.map(LocationId::as_str))
+	.bind(gmbs(selected))
 	.bind(to_db(waiting_since_before))
 	.fetch_all(&mut *conn)
 	.await

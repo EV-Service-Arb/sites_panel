@@ -60,9 +60,9 @@ async fn the_runtime_does_its_work_on_a_fresh_database() {
 			currency: "EUR".into(),
 		};
 		panel.record_payment(by, &brand, &lead, payment, now).await.unwrap();
-		let slices = panel.funnel_slices(today, today, None, FunnelBy::Location).await.unwrap();
+		let slices = panel.funnel_slices(today, today, None, None, FunnelBy::Location).await.unwrap();
 		assert_eq!(slices[0].payments[0].billed, 100);
-		assert_eq!(panel.places().await.unwrap().len(), 1);
+		assert_eq!(panel.places(None).await.unwrap().len(), 1);
 		assert_eq!(panel.lead_counts(Some(&brand), None, now).await.unwrap().overdue, 0);
 
 		// By a colleague, so that the fan-out has leads of its own to tell.

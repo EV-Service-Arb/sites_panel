@@ -14,8 +14,8 @@ Design, `@evinvest/uikit`, React in the elements' light DOM (the org's MFE patte
 anything else under /sites                                       "nothing here"
 
 window events (CONTRACT §9)
-  in:  sa:live {server message}   sa:live-status {status}
-  out: sa:live-status-request     sa:title-count {count} (nav only)   sa:unauthenticated   ev:navigate {href}
+  in:  sa:live {server message}   sa:live-status {status}   sa:gmbs {ids: number[] | null}
+  out: sa:live-status-request     sa:gmbs-request   sa:title-count {count} (nav only)   sa:unauthenticated   ev:navigate {href}
 ```
 
 ```text
@@ -55,6 +55,14 @@ must not reach the host's own nodes. No preflight and no fonts ship: the host ha
 
 The pay buttons on Invoices load banking's wallet bundle from evinvest.ltd, pinned by SRI
 (`shared/config/wallet-bundle.ts`): the conductor's CSP must name it.
+
+## The host's selection
+
+The host's outline selects GMBs (`sa:gmbs`; `null` is every one, `[]` none); each element asks as it connects
+(`sa:gmbs-request`) and shows nothing until told (`app/gmb-gate.tsx`). Every screen narrows to the places linked to
+them (`places.gmb_id`; a place linked to none is outside any selection): the leads, counts and funnels by the API's
+`gmb`, the brand-level lists (experiments, pricing, bookings without a lead) to the brands of the selected places, and
+the nav's marks to both. Invoices name no place. The element never sets the selection: the outline is its one editor.
 
 ## Live updates
 

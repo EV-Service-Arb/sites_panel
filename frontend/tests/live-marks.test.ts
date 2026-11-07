@@ -47,11 +47,18 @@ describe("the nav's badges", () => {
   });
 
   it("keep the leads baseline only when storage holds a count", () => {
-    expect(parseSeen("42")).toBe(42);
-    expect(parseSeen(null)).toBeNull();
-    expect(parseSeen("-1")).toBeNull();
-    expect(parseSeen("1e3")).toBeNull();
-    expect(parseSeen("{}")).toBeNull();
+    expect(parseSeen("42|*", "*")).toBe(42);
+    expect(parseSeen(null, "*")).toBeNull();
+    expect(parseSeen("-1|*", "*")).toBeNull();
+    expect(parseSeen("1e3|*", "*")).toBeNull();
+    expect(parseSeen("{}", "*")).toBeNull();
+  });
+
+  it("drop the leads baseline counted under another selection", () => {
+    expect(parseSeen("42|3,7", "3,7")).toBe(42);
+    expect(parseSeen("42|3,7", "3")).toBeNull();
+    expect(parseSeen("42|*", "")).toBeNull();
+    expect(parseSeen("42", "*")).toBeNull();
   });
 });
 

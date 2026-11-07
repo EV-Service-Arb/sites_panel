@@ -8,6 +8,7 @@ import { may, useMe } from "@/entities/session";
 import { AddPlaceButton } from "@/features/add-place";
 import { type Period, rangeOf } from "@/features/funnel-filters";
 import { useT } from "@/shared/i18n";
+import { gmbsKey, useGmbs } from "@/shared/lib/gmbs";
 import { replaceQuery, useQuery } from "@/shared/lib/router";
 import { useLastNonNull } from "@/shared/lib/use-last-non-null";
 import { useResource } from "@/shared/lib/use-resource";
@@ -42,14 +43,16 @@ export function PlacesView() {
   // Title and form stay put while the sheet slides away.
   const shown = useLastNonNull(open);
   const refresh = () => setVersion((v) => v + 1);
+  const gmbs = useGmbs();
+  const key = `places:${range.from}:${range.to}:${gmbsKey(gmbs)}`;
   // The cards count leads, and say whether a place has live data or is withdrawn.
   const data = useResource(
-    `places:${range.from}:${range.to}:${version}`,
+    `${key}:${version}`,
     async () => {
-      const [funnel, places, pricing] = await Promise.all([fetchFunnelByLocation({ ...range, brand: null }), fetchPlaces(), fetchPricingList()]);
+      const [funnel, places, pricing] = await Promise.all([fetchFunnelByLocation({ ...range, brand: null, gmbs }), fetchPlaces(gmbs), fetchPricingList()]);
       return { rows: placeRows(funnel.locations, places), minSample: funnel.min_sample, brands: offeredBrands(places, pricing) };
     },
-    `places:${range.from}:${range.to}`,
+    key,
     { live: ["places", "leads", "lead"] },
   );
 

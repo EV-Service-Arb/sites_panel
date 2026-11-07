@@ -5,6 +5,7 @@ import { fetchFunnel } from "@/entities/funnel";
 import { brandsOf, usePlaces } from "@/entities/place";
 import { FunnelFilters, useFilterParams } from "@/features/funnel-filters";
 import { useT } from "@/shared/i18n";
+import { gmbsKey, useGmbs } from "@/shared/lib/gmbs";
 import { useResource } from "@/shared/lib/use-resource";
 import { ErrorState } from "@/shared/ui/error-state";
 import { ScreenFrame } from "@/shared/ui/screen-frame";
@@ -14,10 +15,11 @@ import { LeadsBlock } from "./leads-block";
 export function OverviewView() {
   const t = useT();
   const { period, brand, range, update } = useFilterParams();
+  const gmbs = useGmbs();
   const places = usePlaces();
-  const key = `funnel:${range.from}:${range.to}:${brand ?? ""}`;
+  const key = `funnel:${range.from}:${range.to}:${brand ?? ""}:${gmbsKey(gmbs)}`;
   // The counts move with every lead.
-  const funnel = useResource(key, () => fetchFunnel({ ...range, brand }), key, { live: ["leads", "lead"] });
+  const funnel = useResource(key, () => fetchFunnel({ ...range, brand, gmbs }), key, { live: ["leads", "lead"] });
 
   return (
     <ScreenFrame title={t("nav.overview")} actions={<FunnelFilters period={period} brand={brand} brands={brandsOf(places, brand)} onChange={update} />}>

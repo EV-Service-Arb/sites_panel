@@ -3,16 +3,17 @@ import { BOOKING_STATUSES, LEAD_CHANNELS, LEAD_FLOWS, messageRefOf } from "@evin
 import { type LeadCounts, type LeadFilter, STAGES, type Stage } from "@/entities/lead";
 import type { MessageKey, T } from "@/shared/i18n";
 
+type UrlFilter = Omit<LeadFilter, "gmbs">;
+
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const day = (v: string | null) => (v && DAY.test(v) ? v : null);
 
-/** The filter lives in the URL, so a view can be linked and survives a reload. */
-export function leadFilterFrom(params: URLSearchParams): LeadFilter {
+/** The filter lives in the URL, so a view can be linked and survives a reload; the places are the host's selection, not here. */
+export function leadFilterFrom(params: URLSearchParams): UrlFilter {
   const stage = params.get("stage");
   return {
     stage: STAGES.find((s) => s === stage) ?? null,
     brand: params.get("brand") || null,
-    location: params.get("location") || null,
     overdue: params.get("overdue") === "1",
     createdFrom: day(params.get("created_from")),
     createdTo: day(params.get("created_to")),
@@ -29,7 +30,6 @@ export function paramsWith(params: URLSearchParams, patch: Partial<LeadFilter>):
   const set = (k: string, v: string | null) => (v ? next.set(k, v) : next.delete(k));
   if ("stage" in patch) set("stage", patch.stage ?? null);
   if ("brand" in patch) set("brand", patch.brand ?? null);
-  if ("location" in patch) set("location", patch.location ?? null);
   if ("overdue" in patch) set("overdue", patch.overdue ? "1" : null);
   if ("createdFrom" in patch) set("created_from", patch.createdFrom ?? null);
   if ("createdTo" in patch) set("created_to", patch.createdTo ?? null);
@@ -47,11 +47,11 @@ export function suspectFilterOf(v: string | null): LeadFilter["suspect"] {
 }
 
 /** Whether any of `keys` narrows the list (every key of the filter by default). */
-export function narrows(filter: LeadFilter, keys: readonly (keyof LeadFilter)[] = FILTER_KEYS): boolean {
+export function narrows(filter: UrlFilter, keys: readonly (keyof UrlFilter)[] = FILTER_KEYS): boolean {
   return keys.some((k) => filter[k] !== null && filter[k] !== false);
 }
 
-const FILTER_KEYS: readonly (keyof LeadFilter)[] = ["stage", "brand", "location", "overdue", "createdFrom", "createdTo", "suspect", "flow", "booking", "channel", "messageRef"];
+const FILTER_KEYS: readonly (keyof UrlFilter)[] = ["stage", "brand", "overdue", "createdFrom", "createdTo", "suspect", "flow", "booking", "channel", "messageRef"];
 
 /** As with suspect: a word the API does not take would answer 400, so it reads as "every lead". */
 export function flowFilterOf(v: string | null): LeadFilter["flow"] {

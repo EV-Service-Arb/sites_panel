@@ -9,6 +9,7 @@ use panel::{
 use panel_core::{
 	ids::{BrandId, JobId, LeadId, LocationId},
 	lead::Stage,
+	place::Editor,
 };
 use sa_auth::SourceKind;
 use serde_json::json;
@@ -254,14 +255,14 @@ async fn slices_places_payments_and_counts() {
 	panel.move_lead(by, &brand(), &lead("L-3"), StageMove::Contacted { channel: None }, at(9)).await.unwrap();
 
 	let today = date(2026, 9, 30);
-	let all = panel.funnel_slices(today, today, None, FunnelBy::All).await.unwrap();
+	let all = panel.funnel_slices(today, today, None, None, FunnelBy::All).await.unwrap();
 	assert_eq!(all.len(), 1);
 	assert_eq!((all[0].brand.as_deref(), all[0].location.as_deref()), (None, None));
 	assert_eq!((all[0].totals.leads, all[0].totals.paid, all[0].totals.contacted), (4, 2, 1));
 	let sums: Vec<(&str, i64, i64, u64)> = all[0].payments.iter().map(|p| (p.currency.as_str(), p.billed, p.commission, p.payments)).collect();
 	assert_eq!(sums, [("EUR", 15_000, 2_250, 2), ("USD", 5_000, 500, 1)], "yesterday's lead is outside, whenever it was paid");
 
-	let slices = panel.funnel_slices(today, today, None, FunnelBy::Location).await.unwrap();
+	let slices = panel.funnel_slices(today, today, None, None, FunnelBy::Location).await.unwrap();
 	let keys: Vec<(Option<&str>, Option<&str>, u64, usize)> = slices.iter().map(|s| (s.brand.as_deref(), s.location.as_deref(), s.totals.leads, s.payments.len())).collect();
 	assert_eq!(
 		keys,
@@ -273,18 +274,18 @@ async fn slices_places_payments_and_counts() {
 		]
 	);
 	assert_eq!(slices[1].payments[0].billed, 15_000);
-	let two_days = panel.funnel_slices(date(2026, 9, 29), today, Some(&brand()), FunnelBy::Location).await.unwrap();
+	let two_days = panel.funnel_slices(date(2026, 9, 29), today, Some(&brand()), None, FunnelBy::Location).await.unwrap();
 	let paris = two_days.iter().find(|s| s.location.as_deref() == Some("paris-11")).unwrap();
 	assert_eq!((paris.totals.leads, paris.payments[0].billed, paris.payments[0].payments), (2, 24_999, 3));
 
 	let empty = date(2026, 9, 1);
-	let none = panel.funnel_slices(empty, empty, None, FunnelBy::All).await.unwrap();
+	let none = panel.funnel_slices(empty, empty, None, None, FunnelBy::All).await.unwrap();
 	assert_eq!((none.len(), none[0].totals.leads, none[0].payments.len()), (1, 0, 0), "zeros, not nothing");
-	assert!(panel.funnel_slices(empty, empty, None, FunnelBy::Location).await.unwrap().is_empty());
-	let only_vifnet = panel.funnel_slices(today, today, Some(&vifnet), FunnelBy::All).await.unwrap();
+	assert!(panel.funnel_slices(empty, empty, None, None, FunnelBy::Location).await.unwrap().is_empty());
+	let only_vifnet = panel.funnel_slices(today, today, Some(&vifnet), None, FunnelBy::All).await.unwrap();
 	assert_eq!((only_vifnet[0].totals.leads, only_vifnet[0].payments.len()), (1, 0));
 
-	let places = panel.places().await.unwrap();
+	let places = panel.places(None).await.unwrap();
 	let got: Vec<(&str, &str, Option<Timestamp>)> = places.iter().map(|p| (p.brand_id.as_str(), p.location_id.as_str(), p.last_lead_at)).collect();
 	assert_eq!(
 		got,
@@ -299,8 +300,40 @@ async fn slices_places_payments_and_counts() {
 	assert_eq!(counts.overdue, 1, "vifnet's, 41 minutes without contact");
 	let aquafix = panel.lead_counts(Some(&brand()), None, at(45)).await.unwrap();
 	assert_eq!((aquafix.stages.iter().map(|(_, n)| n).sum::<u64>(), aquafix.overdue), (4, 0));
-	let paris = panel.lead_counts(Some(&brand()), Some(&LocationId::parse("paris-11").unwrap()), at(45)).await.unwrap();
-	assert_eq!(paris.stages.iter().map(|(_, n)| n).sum::<u64>(), 2);
+
+	// The conductor's selection: the places linked to its GMBs; a place linked to none is outside it.
+	let paris = LocationId::parse("paris-11").unwrap();
+	panel.register_place(&Editor::Cli, &brand(), &paris, at(10)).await.unwrap();
+	panel.register_place(&Editor::Cli, &brand(), &LocationId::parse("lyon-2").unwrap(), at(10)).await.unwrap();
+	panel.link_gmb(&brand(), &paris, Some(7), at(11)).await.unwrap();
+	let listed = |gmbs: &[i64]| {
+		let q = LeadQuery {
+			gmbs: Some(gmbs.to_vec()),
+			limit: 50,
+			..LeadQuery::default()
+		};
+		let panel = panel.clone();
+		async move { panel.leads(&q, Pii::Withhold, at(45)).await.unwrap().leads.into_iter().map(|l| l.row.lead_id).collect::<Vec<_>>() }
+	};
+	let counted = |gmbs: &'static [i64]| {
+		let panel = panel.clone();
+		async move { panel.lead_counts(None, Some(gmbs), at(45)).await.unwrap().stages.iter().map(|(_, n)| n).sum::<u64>() }
+	};
+	assert_eq!(listed(&[7, 99]).await, ["L-1", "L-0"]);
+	assert_eq!(counted(&[7]).await, 2);
+	let selected = panel.funnel_slices(today, today, None, Some(&[7]), FunnelBy::All).await.unwrap();
+	assert_eq!((selected[0].totals.leads, selected[0].payments[0].billed), (1, 15_000));
+	let places = |gmbs: &'static [i64]| {
+		let panel = panel.clone();
+		async move { panel.places(Some(gmbs)).await.unwrap().into_iter().map(|p| p.location_id).collect::<Vec<_>>() }
+	};
+	assert_eq!(places(&[7]).await, ["paris-11"]);
+	for none in [&[][..], &[99]] {
+		assert!(listed(none).await.is_empty(), "{none:?} selects nothing");
+		assert_eq!(counted(none).await, 0);
+		assert!(places(none).await.is_empty());
+		assert!(panel.funnel_slices(today, today, None, Some(none), FunnelBy::Location).await.unwrap().is_empty());
+	}
 
 	let window = LeadQuery {
 		created_from: Some(at(1)),

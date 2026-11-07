@@ -2,11 +2,12 @@ import { Button } from "@evinvest/uikit";
 import { useCallback, useState } from "react";
 
 import { type LeadFilter, type LeadRef, decodeRef, encodeRef, fetchLeadCounts } from "@/entities/lead";
-import { brandsOf, locationsOf, usePlaces } from "@/entities/place";
+import { brandsOf, usePlaces } from "@/entities/place";
 import { CallFlowProvider, OutcomeSheet } from "@/features/call-lead";
 import { CreateLeadButton } from "@/features/create-lead";
 import { LeadFilters, leadFilterFrom, narrows, paramsWith } from "@/features/lead-filters";
 import { useT } from "@/shared/i18n";
+import { gmbsKey, useGmbs } from "@/shared/lib/gmbs";
 import { replaceQuery, useQuery } from "@/shared/lib/router";
 import { useLastNonNull } from "@/shared/lib/use-last-non-null";
 import { useResource } from "@/shared/lib/use-resource";
@@ -23,7 +24,8 @@ export function LeadsView() {
   const t = useT();
   const button = useButtonSize();
   const params = useQuery();
-  const filter = leadFilterFrom(params);
+  const gmbs = useGmbs();
+  const filter = { ...leadFilterFrom(params), gmbs };
   const open = decodeRef(params.get("lead"));
   // The card stays filled while the sheet slides away; the param is already gone by then.
   const shown = decodeRef(useLastNonNull(params.get("lead")));
@@ -42,26 +44,25 @@ export function LeadsView() {
     openLead(ref);
   };
   const filtered = narrows(filter);
-  const where = `${filter.brand ?? ""}/${filter.location ?? ""}`;
+  const where = `${filter.brand ?? ""}/${gmbsKey(gmbs)}`;
   const counts = useResource(`counts:${where}:${version}`, () => fetchLeadCounts(filter), `counts:${where}`, { live: ["leads", "lead"] });
 
   const places = usePlaces(version);
   const brands = brandsOf(places, filter.brand);
-  const locations = locationsOf(places, filter.brand, filter.location);
   const create = <CreateLeadButton brands={brands} places={places} onCreated={created} />;
 
   return (
     <CallFlowProvider onLogged={changed}>
       <ScreenFrame title={t("leads.title")} actions={create}>
-        <LeadFilters filter={filter} brands={brands} locations={locations} counts={counts.status === "ok" ? counts.data : null} onChange={setFilter} />
-        <UnmatchedBookings brand={filter.brand} version={version} onAttached={changed} />
+        <LeadFilters filter={filter} brands={brands} counts={counts.status === "ok" ? counts.data : null} onChange={setFilter} />
+        <UnmatchedBookings brand={filter.brand} gmbs={gmbs} version={version} onAttached={changed} />
         <LeadQueue
           filter={filter}
           version={version}
           selected={open}
           onOpen={openLead}
           empty={
-            <EmptyState title={t("leads.empty")} description={t(filtered ? "leads.empty.filtered" : "leads.empty.none")}>
+            <EmptyState title={t("leads.empty")} description={t(filtered ? "leads.empty.filtered" : gmbs !== null ? "leads.empty.selection" : "leads.empty.none")}>
               {filtered && (
                 <Button variant="outline" size={button()} onClick={() => replaceQuery(new URLSearchParams())}>
                   {t("leads.resetFilters")}

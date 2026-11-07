@@ -143,7 +143,7 @@ async fn the_places_list_knows_leads_counts_and_hand_registered_ones() {
 	panel.withdraw_place(&admin(), &brand, &vichy, true, now()).await.unwrap();
 
 	let rows: Vec<(String, bool, bool, bool)> = panel
-		.places()
+		.places(None)
 		.await
 		.unwrap()
 		.into_iter()
@@ -166,7 +166,7 @@ async fn the_places_list_knows_leads_counts_and_hand_registered_ones() {
 		.set_place(&admin(), &brand, &vichy, PlaceSettings::default(), Expected::At(current.updated_at), now())
 		.await
 		.unwrap();
-	assert!(!panel.places().await.unwrap().iter().any(|p| p.has_settings));
+	assert!(!panel.places(None).await.unwrap().iter().any(|p| p.has_settings));
 }
 
 #[tokio::test]

@@ -1,6 +1,6 @@
 export { addPlace, fetchPlaceSettings, fetchSettingsHistory, revertSettingsChange, savePlaceSettings, setPlaceWithdrawn } from "./api/settings";
 export type { PlaceKey } from "./api/settings";
-export { fetchPlaces } from "./api/places";
+export { fetchPlaces, selectedBrands } from "./api/places";
 export { brandsOf, locationsOf, placesParser } from "./model/place";
 export type { Place } from "./model/place";
 export { EDITED_KEYS, historyParser, placeSettingsParser, settingsParser, settingsToWire } from "./model/settings";

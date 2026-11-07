@@ -212,7 +212,7 @@ every request is a new event (`201`).
 
 ```text
 GET    /me                                        {sub, permissions}: the assertion's
-GET    /leads?stage&brand&location&overdue&suspect&flow&channel&message_ref&created_from&created_to&cursor&limit
+GET    /leads?stage&brand&gmb&overdue&suspect&flow&channel&message_ref&created_from&created_to&cursor&limit
                                                   {leads: [Lead], next_cursor}; newest created
                                                   first, limit ≤ 200 (default 50); created_*
                                                   UTC days, both included; suspect=only |
@@ -223,8 +223,8 @@ GET    /leads?stage&brand&location&overdue&suspect&flow&channel&message_ref&crea
                                                   | callback | whatsapp | telegram; message_ref=
                                                   a ref as pasted (Réf. aq 7k3f: label, case,
                                                   spaces; O→0, I/L→1 in the code), the leads
-                                                  carrying it
-GET    /leads/counts?brand&location               {stages: {created: n, …, lost: n} (every
+                                                  carrying it; gmb: see below
+GET    /leads/counts?brand&gmb                    {stages: {created: n, …, lost: n} (every
                                                   stage, 0 included), overdue, total}
 POST   /leads                                     {brand, location, need, phone?, channel?} → 201
                                                   {brand, lead_id: "p-<uuidv7>", event_id};
@@ -243,7 +243,7 @@ POST   /leads/{brand}/{lead}/calls/attempt        → 201 {attempt_id}
 POST   /leads/{brand}/{lead}/calls/{attempt}/outcome
                                                   {outcome: answered|no_answer|wrong_number|later}
 POST   /leads/{brand}/{lead}/payments             {billed, commission, currency}
-GET    /funnel?from&to&brand&by                   days, UTC, default the last 30, ≤ 366
+GET    /funnel?from&to&brand&gmb&by               days, UTC, default the last 30, ≤ 366
                                                   {from, to, brand, min_sample, posthog_url,
                                                    stages: [{stage,
                                                    reached, of_previous, of_leads}], lost, manual,
@@ -254,11 +254,14 @@ GET    /funnel?from&to&brand&by                   days, UTC, default the last 30
                                                    (location null for the leads naming none);
                                                    an empty window has no rows
 GET    /experiments?brand                         see [Experiments](#experiments)
-GET    /places                                    {places: [{brand, location, last_lead_at,
+GET    /places?gmb                                {places: [{brand, location, last_lead_at,
                                                   has_settings, withdrawn}]}: every location a
                                                   lead names, and every place registered
                                                   (below)
 ```
+
+`gmb` is the conductor's selection of GMBs (`3,7`; empty selects none; absent narrows nothing):
+only the leads, funnel and places of places linked to one of them (`places.gmb_id`).
 
 The funnel counts the leads that came in (were created) within the window, and `Paid` —
 `{currency, billed, commission, count}` in minor units, one per currency, never converted —

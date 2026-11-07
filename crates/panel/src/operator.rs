@@ -149,7 +149,8 @@ pub struct LeadPage {
 pub struct LeadQuery {
 	pub stage: Option<Stage>,
 	pub brand: Option<BrandId>,
-	pub location: Option<LocationId>,
+	/// Only those of places linked to one of these GMBs (the conductor's selection).
+	pub gmbs: Option<Vec<i64>>,
 	/// Only those waiting for their first contact past [`funnel::CONTACT_SLA`].
 	pub overdue: bool,
 	/// Only those created at or after this.
@@ -474,7 +475,7 @@ impl Panel {
 		let filter = LeadFilter {
 			stage: q.stage,
 			brand: q.brand.clone(),
-			location: q.location.clone(),
+			gmbs: q.gmbs.clone(),
 			waiting_since_before: q.overdue.then(|| now - funnel::CONTACT_SLA),
 			created_from: q.created_from,
 			created_before: q.created_before,
@@ -527,12 +528,12 @@ impl Panel {
 	}
 
 	/// [`Self::funnel`] cut `by`, each slice with the payments of its leads (whenever they were
-	/// paid). With [`FunnelBy::All`], a single slice, zeros included.
-	pub async fn funnel_slices(&self, from: Date, to: Date, brand: Option<&BrandId>, by: FunnelBy) -> eyre::Result<Vec<FunnelSlice>> {
+	/// paid), over the places linked to `gmbs` when some. With [`FunnelBy::All`], a single slice, zeros included.
+	pub async fn funnel_slices(&self, from: Date, to: Date, brand: Option<&BrandId>, gmbs: Option<&[i64]>, by: FunnelBy) -> eyre::Result<Vec<FunnelSlice>> {
 		let by_location = by == FunnelBy::Location;
 		let mut conn = self.store.pool().acquire().await.wrap_err("a connection")?;
-		let rows = reads::funnel_rows(&mut conn, from, to, brand, by_location).await?;
-		let payments = reads::funnel_payments(&mut conn, from, to, brand, by_location).await?;
+		let rows = reads::funnel_rows(&mut conn, from, to, brand, gmbs, by_location).await?;
+		let payments = reads::funnel_payments(&mut conn, from, to, brand, gmbs, by_location).await?;
 		drop(conn);
 		let mut slices: Vec<FunnelSlice> = rows
 			.into_iter()
@@ -563,15 +564,15 @@ impl Panel {
 	}
 
 	/// Every place the panel knows, by brand: see [`reads::places`].
-	pub async fn places(&self) -> eyre::Result<Vec<PlaceRow>> {
+	pub async fn places(&self, gmbs: Option<&[i64]>) -> eyre::Result<Vec<PlaceRow>> {
 		let mut conn = self.store.pool().acquire().await.wrap_err("a connection")?;
-		reads::places(&mut conn).await
+		reads::places(&mut conn, gmbs).await
 	}
 
-	/// How many leads are at each stage, for one brand, location, both or neither.
-	pub async fn lead_counts(&self, brand: Option<&BrandId>, location: Option<&LocationId>, now: Timestamp) -> eyre::Result<LeadCounts> {
+	/// How many leads are at each stage, for one brand or all, over the places linked to `gmbs` when some.
+	pub async fn lead_counts(&self, brand: Option<&BrandId>, gmbs: Option<&[i64]>, now: Timestamp) -> eyre::Result<LeadCounts> {
 		let mut conn = self.store.pool().acquire().await.wrap_err("a connection")?;
-		let (counted, overdue) = reads::stage_counts(&mut conn, brand, location, now - funnel::CONTACT_SLA).await?;
+		let (counted, overdue) = reads::stage_counts(&mut conn, brand, gmbs, now - funnel::CONTACT_SLA).await?;
 		let stages = Stage::ALL
 			.into_iter()
 			.map(|stage| (stage, counted.iter().find(|(s, _)| *s == stage).map_or(0, |(_, n)| *n)))

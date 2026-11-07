@@ -1,10 +1,11 @@
 import { Settled, Skeleton } from "@evinvest/uikit";
 
 import { fetchExperiments } from "@/entities/experiment";
-import { brandsOf, usePlaces } from "@/entities/place";
+import { brandsOf, selectedBrands, usePlaces } from "@/entities/place";
 import { may, useMe } from "@/entities/session";
 import { useFilterParams } from "@/features/funnel-filters";
 import { useT } from "@/shared/i18n";
+import { gmbsKey, useGmbs } from "@/shared/lib/gmbs";
 import { useResource } from "@/shared/lib/use-resource";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { ErrorState } from "@/shared/ui/error-state";
@@ -17,15 +18,25 @@ import { BrandExperiments } from "./brand-experiments";
 /**
  * The landings' A/B tests as config: what each brand declared, the split it
  * runs, and for an admin the kill switch and the weights. The numbers are
- * PostHog's, a link away; the panel does not count them again.
+ * PostHog's, a link away; the panel does not count them again. Those of the
+ * brands the host's selection has a place of.
  */
 export function ExperimentsView() {
   const t = useT();
   const me = useMe();
   const { brand, update } = useFilterParams();
+  const gmbs = useGmbs();
   const places = usePlaces();
-  const key = `experiments:${brand ?? ""}`;
-  const data = useResource(key, () => fetchExperiments(brand), key, { live: ["experiments"] });
+  const key = `experiments:${brand ?? ""}:${gmbsKey(gmbs)}`;
+  const data = useResource(
+    key,
+    async () => {
+      const [list, brands] = await Promise.all([fetchExperiments(brand), selectedBrands(gmbs)]);
+      return brands === null ? list : list.filter((e) => brands.has(e.brand));
+    },
+    key,
+    { live: ["experiments", "places"] },
+  );
   const list = data.status === "ok" ? data.data : [];
   const brands = brandsOf([...places, ...list], brand);
 

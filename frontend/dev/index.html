@@ -33,6 +33,9 @@
         tell("sa:live-status", { status: next });
       };
       window.addEventListener("sa:live-status-request", () => tell("sa:live-status", { status: live.status }));
+      // The conductor's outline selection; `?gmbs=3,7` (or `gmbs=` for none) narrows, absent selects every GMB.
+      const gmbs = new URLSearchParams(location.search).get("gmbs");
+      window.addEventListener("sa:gmbs-request", () => tell("sa:gmbs", { ids: gmbs === null ? null : gmbs.split(",").filter(Boolean).map(Number) }));
       window.addEventListener("sa:title-count", (e) => (document.title = e.detail.count > 0 ? `(${e.detail.count}) Leads — Sites — harness` : "Sites — harness"));
       window.addEventListener("sa:unauthenticated", () => location.assign(`/auth/login?return_to=${encodeURIComponent(location.pathname + location.search)}`));
       window.addEventListener("ev:navigate", (e) => {

@@ -16,7 +16,8 @@ import { useAttach } from "../model/use-attach";
 /** How many of the brand's newest leads are offered; an older one is attached by its id. */
 const RECENT = 50;
 
-const brandOnly = (brand: string): LeadFilter => ({ stage: null, brand, location: null, overdue: false, createdFrom: null, createdTo: null, suspect: null, flow: null, booking: null, channel: null, messageRef: null });
+// Every place of the brand: the booking's lead may be at one the outline does not select.
+const brandOnly = (brand: string): LeadFilter => ({ stage: null, brand, gmbs: null, overdue: false, createdFrom: null, createdTo: null, suspect: null, flow: null, booking: null, channel: null, messageRef: null });
 
 /**
  * Pick the lead a provider's booking belongs to: the brand's newest leads,

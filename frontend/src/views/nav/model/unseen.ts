@@ -57,8 +57,14 @@ const SEEN_KEY = "panel.leads.seen";
 
 export const seenKey = (userId: string) => `${SEEN_KEY}.${userId}`;
 
-/** localStorage holds text anyone could have written: a count, or nothing. */
-export function parseSeen(raw: string | null): number | null {
-  if (raw === null || !/^\d{1,9}$/.test(raw)) return null;
-  return Number(raw);
+/** The baseline as kept: the count and the selection it was counted under (`gmbsKey`). */
+export const seenText = (seen: number, selection: string) => `${seen}|${selection}`;
+
+/**
+ * localStorage holds text anyone could have written: a count, or nothing. A count of another
+ * selection is nothing too: the difference of two sets' totals is no arrival.
+ */
+export function parseSeen(raw: string | null, selection: string): number | null {
+  const m = raw === null ? null : /^(\d{1,9})\|(.*)$/.exec(raw);
+  return m === null || m[2] !== selection ? null : Number(m[1]);
 }

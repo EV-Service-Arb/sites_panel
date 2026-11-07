@@ -46,12 +46,16 @@ export interface HttpDeps {
   onUnauthenticated: () => void;
 }
 
-type Query = Record<string, string | number | boolean | null | undefined>;
+/** A list goes comma-joined, sent even empty (`gmb=` selects none); a scalar only when set. */
+type Query = Record<string, string | number | boolean | readonly number[] | null | undefined>;
 
 function withQuery(path: string, query?: Query): string {
   if (!query) return path;
   const qs = new URLSearchParams();
-  for (const [k, v] of Object.entries(query)) if (v !== undefined && v !== null && v !== "") qs.set(k, String(v));
+  for (const [k, v] of Object.entries(query)) {
+    if (Array.isArray(v)) qs.set(k, v.join(","));
+    else if (v !== undefined && v !== null && v !== "") qs.set(k, String(v));
+  }
   const s = qs.toString();
   return s ? `${path}?${s}` : path;
 }

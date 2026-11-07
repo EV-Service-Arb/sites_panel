@@ -1,6 +1,7 @@
 import type { BookingStatus, LeadChannel, LeadFlow, Messenger } from "@evinvest/sites-contract";
 
 import { IDEMPOTENCY_HEADER, http, ignoreBody } from "@/shared/api";
+import type { Gmbs } from "@/shared/lib/gmbs";
 import { object, str } from "@/shared/lib/parse";
 
 import { type LeadCard, type LeadCounts, type LeadPage, type LeadRef, type ManualChannel, type Stage, leadCardParser, leadCountsParser, leadPageParser, leadPath } from "../model/lead";
@@ -8,7 +9,8 @@ import { type LeadCard, type LeadCounts, type LeadPage, type LeadRef, type Manua
 export interface LeadFilter {
   stage: Stage | null;
   brand: string | null;
-  location: string | null;
+  /** The host's selection (`useGmbs`), never the URL's. */
+  gmbs: Gmbs;
   overdue: boolean;
   /** UTC days, `YYYY-MM-DD`, both included. */
   createdFrom: string | null;
@@ -29,7 +31,7 @@ export function fetchLeads(filter: LeadFilter, cursor: string | null, limit = 50
   return http.get("/leads", leadPageParser, {
     stage: filter.stage,
     brand: filter.brand,
-    location: filter.location,
+    gmb: filter.gmbs,
     overdue: filter.overdue ? true : null,
     created_from: filter.createdFrom,
     created_to: filter.createdTo,
@@ -43,9 +45,9 @@ export function fetchLeads(filter: LeadFilter, cursor: string | null, limit = 50
   });
 }
 
-/** Counts for the stage segments: the place filter only, so a segment counts what tapping it would list. */
-export function fetchLeadCounts(filter: Pick<LeadFilter, "brand" | "location">): Promise<LeadCounts> {
-  return http.get("/leads/counts", leadCountsParser, { brand: filter.brand, location: filter.location });
+/** Counts for the stage segments: the brand and the selection only, so a segment counts what tapping it would list. */
+export function fetchLeadCounts(filter: Pick<LeadFilter, "brand" | "gmbs">): Promise<LeadCounts> {
+  return http.get("/leads/counts", leadCountsParser, { brand: filter.brand, gmb: filter.gmbs });
 }
 
 export function fetchLeadCard(ref: LeadRef): Promise<LeadCard> {

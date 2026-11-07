@@ -2,6 +2,7 @@ import { panelMounted } from "@/shared/lib/router";
 import { SitesNav } from "@/views/nav";
 
 import { defineElement } from "./define-element";
+import { GmbGate } from "./gmb-gate";
 import { MeGate } from "./me-gate";
 import { PageSkeleton, SitesPanel } from "./sites-panel";
 
@@ -9,7 +10,9 @@ defineElement(
   "mfe-sites-panel",
   () => (
     <MeGate waiting={<PageSkeleton />}>
-      <SitesPanel />
+      <GmbGate waiting={<PageSkeleton />}>
+        <SitesPanel />
+      </GmbGate>
     </MeGate>
   ),
   panelMounted,
@@ -17,6 +20,8 @@ defineElement(
 
 defineElement("mfe-sites-nav", () => (
   <MeGate waiting={null}>
-    <SitesNav />
+    <GmbGate waiting={null}>
+      <SitesNav />
+    </GmbGate>
   </MeGate>
 ));

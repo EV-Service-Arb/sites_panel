@@ -5,6 +5,7 @@ import { type Root, createRoot } from "react-dom/client";
 
 import { settleHost } from "@/shared/config/host";
 import { LocaleProvider, localeOf } from "@/shared/i18n";
+import { followHostGmbs } from "@/shared/lib/gmbs";
 import { followHostLive } from "@/shared/lib/live";
 import { followLink } from "@/shared/lib/router";
 
@@ -52,6 +53,7 @@ export function defineElement(tag: string, render: () => ReactNode, onConnect: (
       settleHost({ api: attribute(this, "api"), base: attribute(this, "base"), csrfCookie: attribute(this, "csrf-cookie") });
       attachStylesheet();
       followHostLive();
+      followHostGmbs();
       const langHost = this.closest("[lang]");
       if (langHost === null) throw new Error(`<${tag}> is under no [lang]`);
       this.addEventListener("click", this.#click);

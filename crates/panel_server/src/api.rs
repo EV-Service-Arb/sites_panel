@@ -355,7 +355,7 @@ fn lead_dto(v: LeadView, now: Timestamp) -> LeadDto {
 struct LeadsQuery {
 	stage: Option<String>,
 	brand: Option<String>,
-	location: Option<String>,
+	gmb: Option<String>,
 	overdue: Option<bool>,
 	/// UTC days, both included.
 	created_from: Option<String>,
@@ -373,6 +373,18 @@ struct LeadsQuery {
 	message_ref: Option<String>,
 	cursor: Option<String>,
 	limit: Option<u32>,
+}
+
+/// `gmb` of a read: the conductor's selection, `1,7,12`; empty selects none, absent narrows nothing.
+fn gmbs(raw: Option<&str>) -> ApiResult<Option<Vec<i64>>> {
+	let Some(raw) = raw else { return Ok(None) };
+	if raw.is_empty() {
+		return Ok(Some(Vec::new()));
+	}
+	raw.split(',')
+		.map(|id| id.parse().map_err(|_| ApiError::BadRequest(format!("gmb is GMB ids split by commas, not {raw}"))))
+		.collect::<ApiResult<_>>()
+		.map(Some)
 }
 
 fn cursor_encode((at, brand, lead): &(Timestamp, String, String)) -> String {
@@ -396,7 +408,7 @@ async fn leads(State(panel): State<Panel>, Extension(caller): Extension<Caller>,
 	let query = LeadQuery {
 		stage: q.stage.as_deref().map(str::parse::<Stage>).transpose()?,
 		brand: q.brand.as_deref().map(BrandId::parse).transpose()?,
-		location: q.location.as_deref().map(LocationId::parse).transpose()?,
+		gmbs: gmbs(q.gmb.as_deref())?,
 		overdue: q.overdue.unwrap_or(false),
 		created_from: created_from.map(day_start).transpose()?,
 		created_before: created_to.map(next_day).transpose()?,
@@ -657,6 +669,7 @@ struct FunnelQuery {
 	brand: Option<String>,
 	/// `location`: one slice per location. Absent: the whole funnel.
 	by: Option<String>,
+	gmb: Option<String>,
 }
 
 /// A share as the front end may show it: `percent` only when `of` is large enough, and
@@ -737,7 +750,8 @@ async fn funnel(State(panel): State<Panel>, q: Result<Query<FunnelQuery>, axum::
 		Some(_) => return Err(ApiError::BadRequest("by is location, or absent".into())),
 	};
 	let brand = q.brand.as_deref().map(BrandId::parse).transpose()?;
-	let slices = panel.funnel_slices(from, to, brand.as_ref(), by).await?;
+	let selected = gmbs(q.gmb.as_deref())?;
+	let slices = panel.funnel_slices(from, to, brand.as_ref(), selected.as_deref(), by).await?;
 	let mut body = json!({
 		"from": from.to_string(),
 		"to": to.to_string(),
@@ -772,9 +786,16 @@ async fn funnel(State(panel): State<Panel>, q: Result<Query<FunnelQuery>, axum::
 
 // ── places, counts ──────────────────────────────────────────────────────────────────────
 
-async fn places(State(panel): State<Panel>) -> ApiResult<Json<Value>> {
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PlacesQuery {
+	gmb: Option<String>,
+}
+
+async fn places(State(panel): State<Panel>, q: Result<Query<PlacesQuery>, axum::extract::rejection::QueryRejection>) -> ApiResult<Json<Value>> {
+	let Query(q) = q.map_err(|e| ApiError::BadRequest(e.body_text()))?;
 	let places: Vec<Value> = panel
-		.places()
+		.places(gmbs(q.gmb.as_deref())?.as_deref())
 		.await?
 		.into_iter()
 		.map(|p| {
@@ -794,14 +815,13 @@ async fn places(State(panel): State<Panel>) -> ApiResult<Json<Value>> {
 #[serde(deny_unknown_fields)]
 struct CountsQuery {
 	brand: Option<String>,
-	location: Option<String>,
+	gmb: Option<String>,
 }
 
 async fn lead_counts(State(panel): State<Panel>, q: Result<Query<CountsQuery>, axum::extract::rejection::QueryRejection>) -> ApiResult<Json<Value>> {
 	let Query(q) = q.map_err(|e| ApiError::BadRequest(e.body_text()))?;
 	let brand = q.brand.as_deref().map(BrandId::parse).transpose()?;
-	let location = q.location.as_deref().map(LocationId::parse).transpose()?;
-	let counts = panel.lead_counts(brand.as_ref(), location.as_ref(), Timestamp::now()).await?;
+	let counts = panel.lead_counts(brand.as_ref(), gmbs(q.gmb.as_deref())?.as_deref(), Timestamp::now()).await?;
 	let total: u64 = counts.stages.iter().map(|(_, n)| n).sum();
 	let stages: serde_json::Map<String, Value> = counts.stages.into_iter().map(|(stage, n)| (stage.as_str().to_owned(), json!(n))).collect();
 	Ok(Json(json!({ "stages": stages, "overdue": counts.overdue, "total": total })))

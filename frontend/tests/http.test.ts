@@ -30,6 +30,14 @@ describe("a call", () => {
     await http.get("/leads", any, { stage: "created", brand: null });
     expect(calls.map((c) => c.url)).toEqual(["/api/sites/leads?stage=created"]);
   });
+
+  it("sends a selection even empty: none selected is not every place", async () => {
+    const { http, calls } = harness(() => json(200, {}));
+    await http.get("/places", any, { gmb: [3, 7] });
+    await http.get("/places", any, { gmb: [] });
+    await http.get("/places", any, { gmb: null });
+    expect(calls.map((c) => c.url)).toEqual(["/api/sites/places?gmb=3%2C7", "/api/sites/places?gmb=", "/api/sites/places"]);
+  });
 });
 
 describe("the CSRF header", () => {

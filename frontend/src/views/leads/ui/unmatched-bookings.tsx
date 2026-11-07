@@ -3,21 +3,32 @@ import { ChevronDown } from "lucide-react";
 import { useState } from "react";
 
 import { type UnmatchedBooking, fetchUnmatched } from "@/entities/booking";
+import { selectedBrands } from "@/entities/place";
 import { AttachDialog } from "@/features/attach-booking";
 import { useLocale, useT } from "@/shared/i18n";
+import { type Gmbs, gmbsKey } from "@/shared/lib/gmbs";
 import { formatSlot } from "@/shared/lib/instant";
 import { useResource } from "@/shared/lib/use-resource";
 import { useButtonSize } from "@/shared/ui/touch";
 
 /**
  * Bookings a provider took that no lead was found for, under the queue's
- * brand. Folded, and absent while there are none: it is a chore that comes
+ * brand and of a brand the selection has a place of. Folded, and absent while there are none: it is a chore that comes
  * up, not a screen. Follows the `bookings` topic live.
  */
-export function UnmatchedBookings({ brand, version, onAttached }: { brand: string | null; version: number; onAttached: () => void }) {
+export function UnmatchedBookings({ brand, gmbs, version, onAttached }: { brand: string | null; gmbs: Gmbs; version: number; onAttached: () => void }) {
   const t = useT();
   const [picked, setPicked] = useState<UnmatchedBooking | null>(null);
-  const list = useResource(`unmatched:${brand ?? ""}:${version}`, () => fetchUnmatched(brand), `unmatched:${brand ?? ""}`, { live: ["bookings"] });
+  const key = `unmatched:${brand ?? ""}:${gmbsKey(gmbs)}`;
+  const list = useResource(
+    `${key}:${version}`,
+    async () => {
+      const [bookings, brands] = await Promise.all([fetchUnmatched(brand), selectedBrands(gmbs)]);
+      return brands === null ? bookings : bookings.filter((b) => brands.has(b.brand));
+    },
+    key,
+    { live: ["bookings", "places"] },
+  );
   const bookings = list.status === "ok" ? list.data : [];
   if (bookings.length === 0 && picked === null) return null;
 

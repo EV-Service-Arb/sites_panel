@@ -1,9 +1,11 @@
 import { Settled, Skeleton } from "@evinvest/uikit";
 import { useState } from "react";
 
+import { selectedBrands } from "@/entities/place";
 import { type PricingItem, fetchPricingList, followsPricing } from "@/entities/pricing";
 import { useT } from "@/shared/i18n";
 import { utcDay } from "@/shared/lib/format";
+import { gmbsKey, useGmbs } from "@/shared/lib/gmbs";
 import { replaceQuery, useQuery } from "@/shared/lib/router";
 import { useResource } from "@/shared/lib/use-resource";
 import { EmptyState } from "@/shared/ui/empty-state";
@@ -16,14 +18,25 @@ import { BrandSelect } from "./brand-select";
 /**
  * A brand's prices as its sites quote them: the model in the panel (or none:
  * the sites' baked one), its editor for an admin, a preview priced by the
- * server, the JSON way in and out, and the history.
+ * server, the JSON way in and out, and the history. The brands the host's
+ * selection has a place of.
  */
 export function PricingView() {
   const t = useT();
   const params = useQuery();
   // Fixed for the page's life: a new empty draft's "valid from" must not move under it at midnight.
   const [today] = useState(() => utcDay(new Date()));
-  const list = useResource("pricing:list", fetchPricingList, "pricing:list", { live: followsPricing(null) });
+  const gmbs = useGmbs();
+  const key = `pricing:list:${gmbsKey(gmbs)}`;
+  const list = useResource(
+    key,
+    async () => {
+      const [items, brands] = await Promise.all([fetchPricingList(), selectedBrands(gmbs)]);
+      return brands === null ? items : items.filter((i) => brands.has(i.brand_id));
+    },
+    key,
+    { live: (e) => followsPricing(null)(e) || e.topic === "places" },
+  );
   const items: PricingItem[] = list.status === "ok" ? list.data : [];
   const wanted = params.get("brand");
   const brand = items.find((i) => i.brand_id === wanted)?.brand_id ?? items[0]?.brand_id ?? null;

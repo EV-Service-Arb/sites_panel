@@ -13,10 +13,10 @@ import { bookingFilterOf, channelFilterOf, flowFilterOf, narrows, stageOrNull, s
 import { RefSearch } from "./ref-search";
 import { StageSegments } from "./stage-segments";
 
-type Props = { filter: LeadFilter; brands: string[]; locations: string[]; counts: LeadCounts | null; onChange: (patch: Partial<LeadFilter>) => void };
+type Props = { filter: LeadFilter; brands: string[]; counts: LeadCounts | null; onChange: (patch: Partial<LeadFilter>) => void };
 
 /**
- * Stage, brand, location, channel, a messenger ref and "overdue only" — the questions the queue is sorted
+ * Stage, brand, channel, a messenger ref and "overdue only" — the questions the queue is sorted
  * by. On a phone the stages an operator works through are segments under the
  * thumb, and the rest folds under "More filters" (the mockup's hybrid).
  */
@@ -41,7 +41,7 @@ export function LeadFilters(props: Props) {
     );
   }
 
-  const more = narrows(filter, ["brand", "location", "overdue", "suspect", "flow", "booking", "channel", "messageRef"]);
+  const more = narrows(filter, ["brand", "overdue", "suspect", "flow", "booking", "channel", "messageRef"]);
   return (
     <div className="flex flex-col gap-2">
       <StageSegments stage={filter.stage} counts={props.counts} onChange={(stage) => onChange({ stage })} />
@@ -58,13 +58,12 @@ export function LeadFilters(props: Props) {
   );
 }
 
-function SecondaryFilters({ filter, brands, locations, onChange }: Props) {
+function SecondaryFilters({ filter, brands, onChange }: Props) {
   const t = useT();
   const id = useId();
   return (
     <>
-      <FilterSelect label={t("filter.brand")} allLabel={t("filter.brand.all")} value={filter.brand} options={brands.map((b) => ({ value: b, label: b }))} onChange={(brand) => onChange({ brand, location: null })} />
-      <FilterSelect label={t("filter.location")} allLabel={t("filter.location.all")} value={filter.location} options={locations.map((l) => ({ value: l, label: l }))} onChange={(location) => onChange({ location })} />
+      <FilterSelect label={t("filter.brand")} allLabel={t("filter.brand.all")} value={filter.brand} options={brands.map((b) => ({ value: b, label: b }))} onChange={(brand) => onChange({ brand })} />
       <FilterSelect
         label={t("filter.channel")}
         allLabel={t("filter.channel.all")}
