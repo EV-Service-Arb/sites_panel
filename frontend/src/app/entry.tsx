@@ -18,10 +18,10 @@ defineElement(
   panelMounted,
 );
 
-defineElement("mfe-sites-nav", () => (
+defineElement("mfe-sites-nav", (element) => (
   <MeGate waiting={null}>
     <GmbGate waiting={null}>
-      <SitesNav />
+      <SitesNav element={element} />
     </GmbGate>
   </MeGate>
 ));

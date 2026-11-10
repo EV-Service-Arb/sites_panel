@@ -16,6 +16,7 @@ anything else under /sites                                       "nothing here"
 window events (CONTRACT §9)
   in:  sa:live {server message}   sa:live-status {status}   sa:gmbs {ids: number[] | null}
   out: sa:live-status-request     sa:gmbs-request   sa:title-count {count} (nav only)   sa:unauthenticated   ev:navigate {href}
+  from the nav element: ev:keymap — a key per view it lists (l p r i o e), under the scope its host assigns it
 ```
 
 ```text

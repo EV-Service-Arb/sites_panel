@@ -39,7 +39,7 @@ function attribute(el: HTMLElement, name: string): string {
  * LIGHT DOM, overlays portaled into it, the locale off the closest `[lang]`, `[data-ready]` once the first render
  * committed. `api`, `base` and `csrf-cookie` are read on connect; the host sets them before.
  */
-export function defineElement(tag: string, render: () => ReactNode, onConnect: () => () => void = () => () => {}): void {
+export function defineElement(tag: string, render: (element: HTMLElement) => ReactNode, onConnect: () => () => void = () => () => {}): void {
   class SitesElement extends HTMLElement {
     static apiVersion = API_VERSION;
     #root: Root | undefined;
@@ -63,7 +63,7 @@ export function defineElement(tag: string, render: () => ReactNode, onConnect: (
         this.#root?.render(
           <LocaleProvider value={localeOf(langHost.getAttribute("lang") ?? undefined)}>
             <PortalProvider container={this}>
-              {render()}
+              {render(this)}
               <ReadyMark host={this} />
             </PortalProvider>
           </LocaleProvider>,

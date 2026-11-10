@@ -70,18 +70,25 @@ export function panelMounted(): () => void {
   };
 }
 
-/**
- * A plain link click inside `root`: routed here when a panel is on the page to show it, otherwise offered to
- * the host's router (`ev:navigate` on window), and left to the browser when the host does not take it.
- */
+/** Routed here when a panel is on the page to show it, otherwise offered to the host's router (`ev:navigate` on window). Whether either took it. */
+function route(href: string): boolean {
+  if (panels > 0 && placeOf(new URL(href, window.location.origin).pathname, host().base).kind !== "outside") {
+    navigate(href, { replace: false });
+    return true;
+  }
+  return dispatchNavigate(window, href);
+}
+
+/** A plain link click inside `root`, routed; left to the browser when nothing takes it. */
 export function followLink(e: MouseEvent, root: HTMLElement): void {
   if (!(e.target instanceof Element)) return;
   const anchor = e.target.closest("a[href]");
   if (!(anchor instanceof HTMLAnchorElement) || !root.contains(anchor)) return;
   const href = delegatedHref(e, anchor, window.location);
-  if (href === null) return;
-  if (panels > 0 && placeOf(new URL(href, window.location.origin).pathname, host().base).kind !== "outside") {
-    e.preventDefault();
-    navigate(href, { replace: false });
-  } else if (dispatchNavigate(window, href)) e.preventDefault();
+  if (href !== null && route(href)) e.preventDefault();
+}
+
+/** A same-origin path, routed as a link click is; loaded when nothing takes it. */
+export function goTo(href: string): void {
+  if (!route(href)) window.location.assign(href);
 }
