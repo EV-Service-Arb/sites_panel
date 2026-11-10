@@ -39,7 +39,7 @@ export function EventList({ events }: { events: LeadEvent[] }) {
         <li key={e.id} className="flex flex-col gap-0.5 border-l-2 border-border pl-3 text-sm">
           <span className="flex flex-wrap items-center gap-2">
             <span className="font-mono text-xs text-ink">{e.type}</span>
-            {e.manual && <Badge variant="outline">{t("leads.manual")}</Badge>}
+            {e.manual && <Badge tone="neutral">{t("leads.manual")}</Badge>}
             <span className="text-xs tabular-nums text-ink-soft">{formatDateTime(e.occurred_at, locale)}</span>
           </span>
           {e.type === "lead.messaged" && <MessagedLine properties={e.properties} />}

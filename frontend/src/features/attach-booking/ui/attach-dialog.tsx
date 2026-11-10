@@ -69,7 +69,7 @@ function Picker({ booking, onAttached }: { booking: UnmatchedBooking; onAttached
                 <CommandItem key={lead.lead_id} value={candidateText(lead)} disabled={busy} onSelect={() => pick(lead.lead_id)} className="flex-col items-start gap-0.5">
                   <span className="flex w-full items-center gap-2">
                     <span className="truncate font-medium">{c.need ?? c.name ?? lead.lead_id}</span>
-                    {same && <Badge variant="success">{t("attach.sameContact")}</Badge>}
+                    {same && <Badge tone="positive">{t("attach.sameContact")}</Badge>}
                   </span>
                   <span className="text-xs text-ink-soft">
                     {[c.name, c.phone, lead.location, lead.created_at && formatDateTime(lead.created_at, locale)].filter(Boolean).join(" · ")}

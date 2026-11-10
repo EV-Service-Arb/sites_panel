@@ -39,7 +39,7 @@ export function LeadsBlock({ funnel }: { funnel: Funnel }) {
                   </span>
                   {/* Its own line: beside the numbers it overflows a 360px screen. */}
                   {hot && step.of_previous && (
-                    <Badge variant="destructive" className="col-span-full justify-self-start">
+                    <Badge tone="error" className="col-span-full justify-self-start">
                       {t("funnel.biggestLoss")} {t("funnel.lostCount", { n: step.of_previous.of - step.reached })}
                     </Badge>
                   )}

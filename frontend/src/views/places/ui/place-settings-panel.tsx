@@ -79,7 +79,7 @@ function PlacePanes({ base, latest, version, saved, onWritten, onReload, onTakeF
     <div className="flex flex-col gap-4">
       <PlaceStatus view={latest} />
       {saved && (
-        <Alert variant="success">
+        <Alert tone="positive">
           <AlertDescription>{t("placeSettings.saved")}</AlertDescription>
         </Alert>
       )}
@@ -117,7 +117,7 @@ function PlaceStatus({ view }: { view: PlaceSettingsView }) {
     <div className="flex flex-col gap-2 text-sm">
       {view.withdrawn && (
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="destructive">{t("placeSettings.badge.withdrawn")}</Badge>
+          <Badge tone="error">{t("placeSettings.badge.withdrawn")}</Badge>
           <span className="text-ink-mid">{t("placeSettings.withdrawn.body")}</span>
         </div>
       )}

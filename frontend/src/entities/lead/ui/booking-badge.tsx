@@ -1,24 +1,24 @@
 import type { BookingStatus } from "@evinvest/sites-contract";
-import { Badge, type BadgeVariant } from "@evinvest/uikit";
+import { Badge, type Tone } from "@evinvest/uikit";
 
 import { useLocale, useT } from "@/shared/i18n";
 
 import { bookingWhen } from "../lib/booking-text";
 import type { LeadBooking } from "../model/booking";
 
-const VARIANT: Record<Exclude<BookingStatus, "none">, BadgeVariant> = {
-  requested: "outline",
-  booked: "success",
-  canceled: "outline",
-  done: "secondary",
-  no_show: "destructive",
+const VARIANT: Record<Exclude<BookingStatus, "none">, Tone> = {
+  requested: "neutral",
+  booked: "positive",
+  canceled: "neutral",
+  done: "neutral",
+  no_show: "error",
 };
 
 /** Where the booking stands; nothing at all for a lead without one. */
 export function BookingBadge({ booking }: { booking: LeadBooking }) {
   const t = useT();
   if (booking.status === "none") return null;
-  return <Badge variant={VARIANT[booking.status]}>{t(`booking.status.${booking.status}`)}</Badge>;
+  return <Badge tone={VARIANT[booking.status]}>{t(`booking.status.${booking.status}`)}</Badge>;
 }
 
 /**

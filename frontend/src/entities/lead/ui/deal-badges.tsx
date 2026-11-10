@@ -11,7 +11,7 @@ export function FlowBadge({ flow, short = false }: { flow: LeadFlow | null; shor
   const t = useT();
   if (flow === null) return null;
   return (
-    <Badge variant="outline" title={t(`flow.${flow}`)} className={cn(flow === "quote" && "text-ink-soft")}>
+    <Badge tone="neutral" title={t(`flow.${flow}`)} className={cn(flow === "quote" && "text-ink-soft")}>
       {short ? t(`flow.short.${flow}`) : t(`flow.${flow}`)}
     </Badge>
   );

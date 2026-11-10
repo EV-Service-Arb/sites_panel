@@ -85,7 +85,7 @@ function PasteForm({ onLoaded }: { onLoaded: (model: PricingModel) => void }) {
         <FieldDescription id={`${id}-hint`}>{t("pricing.json.hint")}</FieldDescription>
       </Field>
       {refused && (
-        <Alert variant="destructive">
+        <Alert tone="error">
           <AlertDescription>
             {"notJson" in refused ? (
               t("pricing.json.notJson")

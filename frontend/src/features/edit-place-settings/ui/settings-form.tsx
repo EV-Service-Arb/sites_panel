@@ -59,7 +59,7 @@ export function SettingsForm({ place, onSaved, onReload, fresher, onTakeFresh }:
       {state.kind === "conflict" && <ConflictAlert onReload={onReload} />}
       {fresher && changed && state.kind !== "conflict" && <StaleAlert fresher={fresher} onLoad={onTakeFresh} />}
       {state.kind === "invalid" && (
-        <Alert variant="destructive">
+        <Alert tone="error">
           <AlertDescription>
             {t("placeSettings.invalid")}
             {errors.other.map((o) => (

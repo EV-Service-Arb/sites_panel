@@ -21,7 +21,7 @@ export function ConflictAlert({ current, onTakeFresh, onOverwrite }: { current: 
   const locale = useLocale();
   const button = useButtonSize();
   return (
-    <Alert variant="destructive" className="flex flex-col gap-2" role="alert">
+    <Alert tone="error" className="flex flex-col gap-2" role="alert">
       <AlertTitle>{t("pricing.conflict.title")}</AlertTitle>
       <AlertDescription>{current ? whoWhen(current, locale, t, "conflict") : t("pricing.conflict.unknown")}</AlertDescription>
       <div className="flex flex-wrap gap-2">

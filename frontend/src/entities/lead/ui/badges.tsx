@@ -1,5 +1,5 @@
 import type { LeadChannel, LeadSuspect } from "@evinvest/sites-contract";
-import { Badge, type BadgeVariant, cn } from "@evinvest/uikit";
+import { Badge, type Tone, cn } from "@evinvest/uikit";
 import { CircleHelp, FileText, type LucideIcon, MessageCircle, PhoneIncoming, PhoneOutgoing, Send } from "lucide-react";
 
 import { useT } from "@/shared/i18n";
@@ -8,19 +8,19 @@ import { useNow } from "@/shared/lib/use-now";
 
 import { type Lead, type Stage, slaAt } from "../model/lead";
 
-const STAGE_VARIANT: Record<Stage, BadgeVariant> = {
+const STAGE_VARIANT: Record<Stage, Tone> = {
   created: "primary",
-  contacted: "secondary",
-  quoted: "secondary",
-  won: "secondary",
-  completed: "secondary",
-  paid: "success",
-  lost: "outline",
+  contacted: "neutral",
+  quoted: "neutral",
+  won: "neutral",
+  completed: "neutral",
+  paid: "positive",
+  lost: "neutral",
 };
 
 export function StageBadge({ stage }: { stage: Stage }) {
   const t = useT();
-  return <Badge variant={STAGE_VARIANT[stage]}>{t(`stage.${stage}`)}</Badge>;
+  return <Badge tone={STAGE_VARIANT[stage]}>{t(`stage.${stage}`)}</Badge>;
 }
 
 /**
@@ -32,7 +32,7 @@ export function SuspectBadge({ suspect, short = false }: { suspect: LeadSuspect 
   if (suspect === null) return null;
   const full = t("suspect.badge", { reason: t(`suspect.reason.${suspect}`) });
   return (
-    <Badge variant="outline" title={full} className={cn("border-accent-warn bg-accent-warn/15 text-accent-warn", !short && "whitespace-normal")}>
+    <Badge tone="neutral" title={full} className={cn("border-accent-warn bg-accent-warn/15 text-accent-warn", !short && "whitespace-normal")}>
       {short ? t("suspect.short") : full}
       {short && <span className="sr-only">{`: ${t(`suspect.reason.${suspect}`)}`}</span>}
     </Badge>
@@ -47,9 +47,9 @@ export function SlaBadge({ sla }: { sla: Lead["sla"] }) {
   const { seconds, overdue } = slaAt(sla, now);
   const time = formatWait(seconds, t);
   return overdue ? (
-    <Badge variant="destructive">{t("leads.overdue", { time })}</Badge>
+    <Badge tone="error">{t("leads.overdue", { time })}</Badge>
   ) : (
-    <Badge variant="outline">{t("leads.waiting", { time })}</Badge>
+    <Badge tone="neutral">{t("leads.waiting", { time })}</Badge>
   );
 }
 
@@ -81,7 +81,7 @@ export function ChannelBadge({ channel, short = false }: { channel: LeadChannel 
   const label = t(`channel.${channel}`);
   const iconOnly = short || channel === "other";
   return (
-    <Badge variant="outline" title={iconOnly ? label : undefined} className="text-ink-mid">
+    <Badge tone="neutral" title={iconOnly ? label : undefined} className="text-ink-mid">
       <ChannelIcon channel={channel} />
       {iconOnly ? <span className="sr-only">{label}</span> : label}
     </Badge>

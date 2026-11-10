@@ -37,7 +37,7 @@ function SlotLine({ slot, n }: { slot: ChannelSlot; n: number }) {
   const detail = slot.channel === "callback" ? t("placeSettings.preview.always") : (slot.value ?? t("placeSettings.preview.siteOwn"));
   return (
     <li className="flex flex-wrap items-center gap-2 text-sm">
-      <Badge variant={n === 1 ? "primary" : "outline"} className="tabular-nums">
+      <Badge tone={n === 1 ? "primary" : "neutral"} className="tabular-nums">
         {n}
       </Badge>
       <span className="text-ink">{t(`placeSettings.preview.${slot.channel}`)}</span>

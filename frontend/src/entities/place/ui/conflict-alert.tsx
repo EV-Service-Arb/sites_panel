@@ -8,7 +8,7 @@ export function ConflictAlert({ onReload }: { onReload: () => void }) {
   const t = useT();
   const button = useButtonSize();
   return (
-    <Alert variant="destructive" className="flex flex-col gap-2">
+    <Alert tone="error" className="flex flex-col gap-2">
       <AlertTitle>{t("placeSettings.conflict.title")}</AlertTitle>
       <AlertDescription>{t("placeSettings.conflict.body")}</AlertDescription>
       <Button type="button" variant="outline" size={button("sm")} className="self-start" onClick={onReload}>

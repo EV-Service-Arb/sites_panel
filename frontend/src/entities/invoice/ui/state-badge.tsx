@@ -11,14 +11,14 @@ export function InvoiceStateBadge({ state }: { state: InvoiceState }) {
   const label = t(`invoices.state.${state}`);
   switch (stateTone(state)) {
     case "positive":
-      return <Badge variant="success">{label}</Badge>;
+      return <Badge tone="positive">{label}</Badge>;
     case "pending":
-      return <Badge variant="secondary">{label}</Badge>;
+      return <Badge tone="neutral">{label}</Badge>;
     case "neutral":
-      return <Badge variant="outline">{label}</Badge>;
+      return <Badge tone="neutral">{label}</Badge>;
     case "ended":
       return (
-        <Badge variant="outline" className="text-ink-soft">
+        <Badge tone="neutral" className="text-ink-soft">
           {label}
         </Badge>
       );

@@ -32,7 +32,7 @@ export function LeadDetails({ lead, onChanged }: { lead: Lead; onChanged: () => 
         <SlaBadge sla={lead.sla} />
         <SuspectBadge suspect={lead.suspect} />
         <ChannelBadge channel={lead.channel} />
-        {lead.manual && <Badge variant="outline">{t("leads.manual")}</Badge>}
+        {lead.manual && <Badge tone="neutral">{t("leads.manual")}</Badge>}
         <span className="text-sm text-ink-soft">
           {lead.brand} · {lead.location ?? t("places.unknown")}
         </span>

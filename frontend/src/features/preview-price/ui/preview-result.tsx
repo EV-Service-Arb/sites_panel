@@ -30,7 +30,7 @@ export function PreviewResult({ state, onShowPath }: { state: PreviewState; onSh
       );
     case "invalid":
       return (
-        <Alert variant="destructive" className="flex flex-col gap-2">
+        <Alert tone="error" className="flex flex-col gap-2">
           <AlertDescription className="wrap-anywhere">{t("pricing.preview.invalid", { path: state.path, message: state.message })}</AlertDescription>
           <Button type="button" variant="link" className="self-start px-0" onClick={() => onShowPath(state.path)}>
             {t("pricing.preview.showField")}
@@ -39,7 +39,7 @@ export function PreviewResult({ state, onShowPath }: { state: PreviewState; onSh
       );
     case "failed":
       return (
-        <Alert variant="destructive">
+        <Alert tone="error">
           <AlertDescription>{state.error instanceof ApiError ? failureText(state.error.failure, t) : t("state.error", { detail: String(state.error) })}</AlertDescription>
         </Alert>
       );

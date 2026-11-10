@@ -22,9 +22,9 @@ export function StatusBadge({ experiment }: Props) {
   const t = useT();
   const locale = useLocale();
   const status = statusOf(experiment);
-  if (status === "running") return <Badge variant="success">{t("experiments.status.running")}</Badge>;
-  if (status === "holdout") return <Badge variant="outline">{t("experiments.status.holdout", { share: formatPercent((experiment.effective.holdout ?? 0) * 100, locale) })}</Badge>;
-  return <Badge variant="outline" className="text-ink-soft">{t(`experiments.status.${status}`)}</Badge>;
+  if (status === "running") return <Badge tone="positive">{t("experiments.status.running")}</Badge>;
+  if (status === "holdout") return <Badge tone="neutral">{t("experiments.status.holdout", { share: formatPercent((experiment.effective.holdout ?? 0) * 100, locale) })}</Badge>;
+  return <Badge tone="neutral" className="text-ink-soft">{t(`experiments.status.${status}`)}</Badge>;
 }
 
 /** The effective split, the control first: "a 50 % · b 50 %". */

@@ -30,8 +30,8 @@ export function PlaceCard({ row, onOpen }: { row: PlaceRow; onOpen: (() => void)
         )}
         {row.site && (row.site.hasSettings || row.site.withdrawn) && (
           <div className="flex flex-wrap gap-1">
-            {row.site.hasSettings && <Badge variant="secondary">{t("placeSettings.badge.live")}</Badge>}
-            {row.site.withdrawn && <Badge variant="destructive">{t("placeSettings.badge.withdrawn")}</Badge>}
+            {row.site.hasSettings && <Badge tone="neutral">{t("placeSettings.badge.live")}</Badge>}
+            {row.site.withdrawn && <Badge tone="error">{t("placeSettings.badge.withdrawn")}</Badge>}
           </div>
         )}
       </CardHeader>

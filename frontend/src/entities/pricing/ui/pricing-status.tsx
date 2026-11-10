@@ -31,7 +31,7 @@ export function PricingStatus({ item, action, focusOnMount = false }: PricingSta
       <CardHeader>
         <CardTitle className="flex flex-wrap items-center gap-2">
           <span id={titleId}>{t("pricing.status.title")}</span>
-          {item.model ? <Badge variant="success">{t("pricing.status.live")}</Badge> : <Badge variant="outline">{t("pricing.status.baked")}</Badge>}
+          {item.model ? <Badge tone="positive">{t("pricing.status.live")}</Badge> : <Badge tone="neutral">{t("pricing.status.baked")}</Badge>}
         </CardTitle>
         <CardDescription>{item.model ? t("pricing.status.validFrom", { day: formatDay(item.model.validFrom, locale) }) : t("pricing.status.none")}</CardDescription>
         {action && <CardAction>{action}</CardAction>}

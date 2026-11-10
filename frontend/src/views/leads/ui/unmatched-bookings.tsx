@@ -42,7 +42,7 @@ export function UnmatchedBookings({ brand, gmbs, version, onAttached }: { brand:
       <Collapsible>
         <CollapsibleTrigger className="group flex w-full items-center gap-2 px-4 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
           <span className="font-medium text-ink">{t("unmatched.title")}</span>
-          <Badge variant="primary">{bookings.length}</Badge>
+          <Badge tone="primary">{bookings.length}</Badge>
           <ChevronDown aria-hidden className="ml-auto size-4 text-ink-soft transition-transform group-aria-expanded:rotate-180" />
         </CollapsibleTrigger>
         <CollapsibleContent className="border-t border-border">
@@ -70,7 +70,7 @@ function UnmatchedRow({ booking, onAttach }: { booking: UnmatchedBooking; onAtta
       <ItemContent className="min-w-0">
         <ItemTitle className="flex flex-wrap items-center gap-2 tabular-nums">
           {formatSlot(booking.start_at, booking.end_at, locale)}
-          {booking.status === "canceled" && <Badge variant="outline">{t("booking.status.canceled")}</Badge>}
+          {booking.status === "canceled" && <Badge tone="neutral">{t("booking.status.canceled")}</Badge>}
         </ItemTitle>
         <ItemDescription>
           {booking.brand} · {t(`booking.provider.${booking.provider}`)}

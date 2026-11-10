@@ -70,7 +70,7 @@ export function ConfigureForm({ experiment, onSaved, onDone }: { experiment: Exp
 export function WeightsWarning() {
   const t = useT();
   return (
-    <Alert variant="info" role="note">
+    <Alert tone="info" role="note">
       <AlertTitle>{t("experiments.edit.weightsWarning.title")}</AlertTitle>
       <AlertDescription>{t("experiments.edit.weightsWarning.body")}</AlertDescription>
     </Alert>

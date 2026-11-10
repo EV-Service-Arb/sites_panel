@@ -61,7 +61,7 @@ export function PricingEditorForm({ editor, fresher, onTakeFresh, onReload, extr
       )}
       {fresher && changed && state.kind !== "conflict" && <FresherAlert fresher={fresher} onTakeFresh={() => onTakeFresh(fresher, true)} />}
       {errors.general.length > 0 && (
-        <Alert variant="destructive" role="alert">
+        <Alert tone="error" role="alert">
           <AlertDescription className="flex flex-col gap-0.5">
             {errors.general.map((s, i) => (
               <span key={i} className="wrap-anywhere">

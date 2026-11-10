@@ -67,7 +67,7 @@ export function LeadTable({ leads, flash, selected, onOpen }: LeadTableProps) {
                 <span className="flex flex-wrap items-center gap-1.5">
                   {lead.brand} · {lead.location ?? "—"}
                   <ChannelBadge channel={lead.channel} />
-                  {lead.manual && <Badge variant="outline">{t("leads.manual")}</Badge>}
+                  {lead.manual && <Badge tone="neutral">{t("leads.manual")}</Badge>}
                 </span>
               </TableCell>
               <TableCell className={EDGE_CELL}>
