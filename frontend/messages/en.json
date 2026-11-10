@@ -646,5 +646,11 @@
   "state.noSection.title": "No access to this section",
   "state.noSection.body": "Your Service-Arb permissions do not open it. An admin can grant them.",
   "state.notFound.title": "Nothing here",
-  "state.notFound.body": "This address names no Sites screen."
+  "state.notFound.body": "This address names no Sites screen.",
+  "nav.leads.description": "Calls and forms, newest first",
+  "nav.places.description": "Each location's site, phone and hours",
+  "nav.pricing.description": "Prices per trade and city",
+  "nav.invoices.description": "What each closed job billed",
+  "nav.overview.description": "The funnel and speed to lead",
+  "nav.experiments.description": "A/B tests running on the sites"
 }

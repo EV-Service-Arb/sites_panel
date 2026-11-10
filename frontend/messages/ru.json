@@ -646,5 +646,11 @@
   "state.noSection.title": "Нет доступа к этому разделу",
   "state.noSection.body": "Ваши права в Service-Arb его не открывают. Их может выдать администратор.",
   "state.notFound.title": "Здесь ничего нет",
-  "state.notFound.body": "Этот адрес не ведёт ни на один экран раздела «Сайты»."
+  "state.notFound.body": "Этот адрес не ведёт ни на один экран раздела «Сайты».",
+  "nav.leads.description": "Звонки и формы, сначала новые",
+  "nav.places.description": "Сайт, телефон и часы каждой точки",
+  "nav.pricing.description": "Цены по услугам и городам",
+  "nav.invoices.description": "Счета за закрытые заказы",
+  "nav.overview.description": "Воронка и скорость ответа",
+  "nav.experiments.description": "A/B-тесты на сайтах"
 }

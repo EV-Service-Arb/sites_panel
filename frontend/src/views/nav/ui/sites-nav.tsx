@@ -1,4 +1,4 @@
-import { NavBadge, NavDot, NavigationMenuLink, SectionLabel } from "@evinvest/uikit";
+import { NavDot, type NavGroup, NavMenuList } from "@evinvest/uikit";
 import { useEffect } from "react";
 
 import { may, useMe } from "@/entities/session";
@@ -15,28 +15,31 @@ export function SitesNav() {
   const t = useT();
   const me = useMe();
   const { base } = host();
-  const place = placeOf(usePathname(), base);
+  const pathname = usePathname();
+  const place = placeOf(pathname, base);
   const current = place.kind === "route" ? place.route : null;
   const marks = useMarks(me.sub, current, may(me, "sa:sites:work:read"));
 
   useEffect(() => tellHost("sa:title-count", { count: marks.away }), [marks.away]);
   useEffect(() => () => tellHost("sa:title-count", { count: 0 }), []);
 
+  const groups: NavGroup[] = sitesNav(t, me.permissions, marks, base, current).map((section) => ({
+    id: section.id,
+    label: section.label,
+    items: section.items.map((e) => ({
+      id: e.route,
+      href: e.href,
+      label: e.label,
+      icon: e.icon,
+      description: e.description,
+      match: () => e.current,
+      ...(e.badge?.kind === "count" && { badge: e.badge.count }),
+      ...(e.badge?.kind === "dot" && { badge: <NavDot label={e.badge.label} /> }),
+    })),
+  }));
   return (
-    // Wrapping, not a breakpoint: a phone's Sheet is narrower than two columns, the desktop dropdown sizes to them.
-    <nav aria-label={t("nav.sites")} className="flex flex-wrap gap-x-6 gap-y-4 p-2">
-      {sitesNav(t, me.permissions, marks, base, current).map((section) => (
-        <section key={section.id} className="flex min-w-44 flex-col gap-1">
-          <SectionLabel className="px-2">{section.label}</SectionLabel>
-          {section.items.map((item) => (
-            <NavigationMenuLink key={item.route} href={item.href} data-active={item.current} aria-current={item.current ? "page" : undefined} className="flex-row items-center justify-between gap-3">
-              {item.label}
-              {item.badge?.kind === "count" && <NavBadge count={item.badge.count} label={(n) => t("nav.badge", { n })} />}
-              {item.badge?.kind === "dot" && <NavDot label={item.badge.label} />}
-            </NavigationMenuLink>
-          ))}
-        </section>
-      ))}
+    <nav aria-label={t("nav.sites")}>
+      <NavMenuList groups={groups} pathname={pathname} badgeLabel={(n) => t("nav.badge", { n })} />
     </nav>
   );
 }
