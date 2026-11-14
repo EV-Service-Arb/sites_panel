@@ -25,8 +25,17 @@ pub fn parse_event_id(raw: &str) -> Result<EventId, Invalid> {
 macro_rules! opaque_id {
 	($(#[$doc:meta])* $name:ident, $what:literal, $check:path) => {
 		$(#[$doc])*
-		#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+		#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Deserialize, schemars::JsonSchema, serde::Serialize)]
+		#[serde(try_from = "String")]
 		pub struct $name(String);
+
+		impl TryFrom<String> for $name {
+			type Error = Invalid;
+
+			fn try_from(raw: String) -> Result<Self, Invalid> {
+				Self::parse(&raw)
+			}
+		}
 
 		impl $name {
 			pub fn parse(raw: &str) -> Result<Self, Invalid> {

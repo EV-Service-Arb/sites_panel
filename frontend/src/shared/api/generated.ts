@@ -12,4 +12,8 @@ export type Me = {
 /**
  * The concierge user id: what a user's own marks are kept under.
  */
-sub: string, permissions: Array<Permission>, };
+sub: string, 
+/**
+ * The caller's `sa:sites:*` permissions.
+ */
+permissions: Array<Permission>, };

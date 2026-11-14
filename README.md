@@ -1,6 +1,8 @@
 # sites_panel
 ![Minimum Supported Rust Version](https://img.shields.io/badge/nightly-1.100+-ab6000.svg)
 ![Lines Of Code](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/valeratrades/b48e6f02c61942200e7d1e3eeabf9bcb/raw/sites_panel-loc.json)
+![Build time](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/valeratrades/b48e6f02c61942200e7d1e3eeabf9bcb/raw/sites_panel-build.json)
+![Test time](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/valeratrades/b48e6f02c61942200e7d1e3eeabf9bcb/raw/sites_panel-test.json)
 <br>
 [<img alt="ci errors" src="https://img.shields.io/github/actions/workflow/status/EV-Service-Arb/sites_panel/errors.yml?branch=main&style=for-the-badge&style=flat-square&label=errors&labelColor=420d09" height="20">](https://github.com/EV-Service-Arb/sites_panel/actions?query=branch%3Amain) <!--NB: Won't find it if repo is private-->
 [<img alt="ci warnings" src="https://img.shields.io/github/actions/workflow/status/EV-Service-Arb/sites_panel/warnings.yml?branch=main&style=for-the-badge&style=flat-square&label=warnings&labelColor=d16002" height="20">](https://github.com/EV-Service-Arb/sites_panel/actions?query=branch%3Amain) <!--NB: Won't find it if repo is private-->
@@ -159,9 +161,11 @@ file in the temp directory (`panel_test_*.db`), removed when it ends. Nothing to
 
 <br>
 
-<sup>
-	This repository follows <a href="https://github.com/valeratrades/.github/tree/master/best_practices">my best practices</a> and <a href="https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TIGER_STYLE.md">Tiger Style</a> (except "proper capitalization for acronyms": (VsrState, not VSRState) and formatting). For project's architecture, see <a href="./docs/ARCHITECTURE.md">ARCHITECTURE.md</a>.
-</sup>
+<sup>Links for devs:</sup>
+- <sup><a href="./docs/ARCHITECTURE.md">architecture</a></sup>
+- <sup><a href="https://github.com/EV-Main/.github/blob/main/code/STYLE.md">style</a></sup>
+- <sup><a href="https://github.com/EV-Main/.github/tree/main/code/conventions">conventions</a></sup>
+- <sup><a href="https://github.com/EV-Main/.github/blob/main/code/conventions/git">contributing</a></sup>
 
 #### License
 

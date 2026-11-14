@@ -13,34 +13,21 @@ use crate::{
 	ids::{BrandId, EventId, JobId, LeadId, LocationId},
 };
 
-/// The personal stages, in funnel order. `Lost` is off to the side: any stage can end
-/// there, and any later progress takes the lead out of it again.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub enum Stage {
-	Created,
-	Contacted,
-	Quoted,
-	Won,
-	Completed,
-	Paid,
-	Lost,
+vocabulary! {
+	/// The personal stages, in funnel order. `Lost` is off to the side: any stage can end
+	/// there, and any later progress takes the lead out of it again.
+	pub enum Stage, "stage is not one of created, contacted, quoted, won, completed, paid, lost" {
+		Created => "created",
+		Contacted => "contacted",
+		Quoted => "quoted",
+		Won => "won",
+		Completed => "completed",
+		Paid => "paid",
+		Lost => "lost",
+	}
 }
 
 impl Stage {
-	pub const ALL: [Self; 7] = [Self::Created, Self::Contacted, Self::Quoted, Self::Won, Self::Completed, Self::Paid, Self::Lost];
-
-	pub fn as_str(self) -> &'static str {
-		match self {
-			Self::Created => "created",
-			Self::Contacted => "contacted",
-			Self::Quoted => "quoted",
-			Self::Won => "won",
-			Self::Completed => "completed",
-			Self::Paid => "paid",
-			Self::Lost => "lost",
-		}
-	}
-
 	/// The stage a fact moves a lead to; `None` for facts that are about the lead without
 	/// moving it (calls).
 	pub fn of(fact: &Fact) -> Option<Self> {
@@ -69,17 +56,6 @@ impl Stage {
 			| Fact::BookingCleared
 			| Fact::BookingAttached { .. } => None,
 		}
-	}
-}
-
-impl std::str::FromStr for Stage {
-	type Err = crate::Invalid;
-
-	fn from_str(s: &str) -> Result<Self, crate::Invalid> {
-		Self::ALL
-			.into_iter()
-			.find(|stage| stage.as_str() == s)
-			.ok_or_else(|| crate::Invalid::new("stage is not one of created, contacted, quoted, won, completed, paid, lost"))
 	}
 }
 

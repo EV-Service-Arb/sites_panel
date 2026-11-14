@@ -61,7 +61,7 @@
         rs = v_flakes.rs {
           inherit pkgs rust;
           build.workspace = {
-            "./crates/panel_server" = [ "git_version" "log_directives" ];
+            "./crates/panel_server" = [ "git_version" "log_directives" "api_docs" ];
           };
         };
         github = v_flakes.github {

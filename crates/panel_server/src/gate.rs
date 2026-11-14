@@ -16,7 +16,7 @@ use sa_auth::{Keys, PermissionSet, Principal, Service};
 use serde_json::json;
 use uuid::Uuid;
 
-use crate::http::Section;
+use crate::http::Gate;
 
 /// The signed-in user of an `/api/v1` request, as the conductor vouched for them; put in the
 /// request's extensions by `user`.
@@ -49,24 +49,26 @@ fn asked_path(req: &Request) -> String {
 	req.extensions().get::<OriginalUri>().expect("the router records the URI it was asked").path().to_owned()
 }
 
-/// The conductor's public keys, and the section a route sits under (`None`: any signed-in user).
+/// The conductor's public keys, and who a route lets in.
 #[derive(Clone)]
 pub(crate) struct UserGate {
 	pub keys: Arc<Keys>,
-	pub section: Option<Section>,
+	pub gate: Gate,
 }
 
-/// `/api/v1`: a user's assertion, then the route's section (`403` without it).
+/// `/api/v1`: a user's assertion, then the route's permissions (`403` without them); the
+/// conductor's own where the route admits it.
 pub(crate) async fn user(State(gate): State<UserGate>, mut req: Request, next: Next) -> Response {
-	let principal = verify(&gate.keys, req.headers(), req.method(), &asked_path(&req), None);
-	let Some(Principal::User(user)) = principal else {
-		return unauthenticated();
+	let user = match verify(&gate.keys, req.headers(), req.method(), &asked_path(&req), None) {
+		Some(Principal::User(user)) => user,
+		Some(Principal::Conductor) if gate.gate.admits_conductor() => return next.run(req).await,
+		_ => return unauthenticated(),
 	};
 	let Ok(user_id) = Uuid::parse_str(&user.sub) else {
 		tracing::warn!(sub = user.sub, "an assertion's sub is not a user id");
 		return unauthenticated();
 	};
-	if gate.section.is_some_and(|s| !s.may(&user.permissions)) {
+	if !gate.gate.admits(&user.permissions) {
 		return crate::api::ApiError::Forbidden.into_response();
 	}
 	req.extensions_mut().insert(Caller {

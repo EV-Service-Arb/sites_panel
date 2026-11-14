@@ -235,7 +235,7 @@ async fn an_invoice_is_issued_once_per_key_and_read_back() {
 	let b = user(&app, &conductor, "sa:admin");
 
 	let (status, e) = issue(&b, None, terms()).await;
-	assert_eq!((status, e["error"].as_str()), (StatusCode::BAD_REQUEST, Some("an invoice needs an Idempotency-Key")));
+	assert_eq!((status, e["error"].as_str()), (StatusCode::BAD_REQUEST, Some("Idempotency-Key is required")));
 	for bad in [
 		json!({"amount": "-1", "expires_in_days": 7}),
 		json!({"amount": "1", "expires_in_days": 31}),

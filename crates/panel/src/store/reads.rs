@@ -136,7 +136,7 @@ impl TryFrom<Row> for LeadRow {
 			quoted_cents: r.quoted_cents,
 			pricing_valid_from: r.pricing_valid_from,
 			estimate_inputs: r.estimate_inputs.map(|j| j.0),
-			stage: r.stage.parse().wrap_err_with(|| format!("stored stage of lead {}/{}", r.brand_id, r.lead_id))?,
+			stage: Stage::parse(&r.stage).wrap_err_with(|| format!("stored stage of lead {}/{}", r.brand_id, r.lead_id))?,
 			created_at: t(r.created_at)?,
 			contacted_at: t(r.contacted_at)?,
 			quoted_at: t(r.quoted_at)?,
@@ -582,7 +582,7 @@ pub async fn stage_counts(conn: &mut SqliteConnection, brand: Option<&BrandId>, 
 	let mut overdue = 0;
 	let mut stages = Vec::with_capacity(rows.len());
 	for (stage, n, late) in rows {
-		stages.push((stage.parse().wrap_err_with(|| format!("stored stage {stage}"))?, count(n)?));
+		stages.push((Stage::parse(&stage).wrap_err_with(|| format!("stored stage {stage}"))?, count(n)?));
 		overdue += count(late)?;
 	}
 	Ok((stages, overdue))

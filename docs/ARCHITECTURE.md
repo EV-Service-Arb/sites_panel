@@ -79,9 +79,10 @@ crates/panel/                        the engine
                                      per change, each with its `down`
 crates/panel_server/                 the `sites_panel` binary: CLI and HTTP, thin over `Panel`
   src/http.rs                        the router: what each path takes, its bounds; the /api/v1
-                                     route table and the section each sits under
+                                     route table (`ev_lib::api::Route`) and each route's `Gate`
   src/gate.rs                        the conductor's assertion, verified, per kind of route
-  src/api.rs                         the operator API: JSON over the engine's `operator` module
+  src/api.rs                         the operator API: JSON over the engine's `operator` module;
+                                     the extractors every route shares; the OpenAPI document
   src/conductor.rs                   /api/conductor/*: the change feed, the notes, the receipts;
                                      the fan-out's schedule
   src/places.rs                      a place's settings: the editor's routes, and the sites'
@@ -184,7 +185,7 @@ principal:
 User{sub, email, name, permissions}   /api/v1/*        permissions: the caller's sa:sites:* only;
                                                         sub a UUID, the Actor of what they write
 Source{key_id, kind, brands, digest}  /api/ingest/v1/* the body's SHA-256; the KeyGrant
-Conductor                             /api/conductor/*
+Conductor                             /api/conductor/*, GET /api/v1/openapi.json
 ```
 
 Anything else on those routes — none, another key, another service, request or body, an
@@ -193,9 +194,9 @@ expired one, another principal — is `401 {"error": "unauthenticated"}`, its re
 under a section — Work (`sa:sites:work:read`), Analysis (`sa:sites:analysis:read`) — or none
 (`/me`); outside it, `403`. Actions ask their own permission on top (`sa:sites:work:leads:edit`,
 `sa:sites:work:pii:see`, `sa:sites:work:places:edit`, `sa:sites:work:pricing:edit`,
-`sa:sites:work:invoices:create`, `sa:sites:analysis:experiments:edit`). How fresh a permission
-is, CSRF, and the session are the conductor's. `http::api_routes` is the table the router is
-built from and the tests walk.
+`sa:sites:work:invoices:create`, `sa:sites:analysis:experiments:edit`), checked by the gate
+with the section's (`http::Gate`). How fresh a permission is, CSRF, and the session are the
+conductor's. `http::api_routes` is the table the router and the document are built from.
 
 ## The operator API, `/api/v1`
 
@@ -210,54 +211,47 @@ UUIDv7, its time field hash — and so is a new lead's id: a retry finds the fir
 the journal and is answered `200` with the same body, journaling nothing. Without the key,
 every request is a new event (`201`).
 
+What each operation takes and answers, and why it refuses, is its handler's: its signature is
+the schema and its `///` the description of `GET /openapi.json`, the OpenAPI document built at
+boot from `http::api_routes` (`ev_lib::api`), each operation's `x-permission` the permission that
+opens it. The conductor pulls it under its own assertion (`ETag`, 304 to `If-None-Match`). An id
+in a path that is not one names nothing: 404. The operations, held to the table by
+`tests/operations.rs`:
+
 ```text
-GET    /me                                        {sub, permissions}: the assertion's
-GET    /leads?stage&brand&gmb&overdue&suspect&flow&channel&message_ref&created_from&created_to&cursor&limit
-                                                  {leads: [Lead], next_cursor}; newest created
-                                                  first, limit ≤ 200 (default 50); created_*
-                                                  UTC days, both included; suspect=only |
-                                                  exclude (absent: every lead); flow=quote |
-                                                  estimate | fixed, anything else 400 (absent:
-                                                  every lead; a lead that said no flow is under
-                                                  none of the three); channel=form | phone_inbound
-                                                  | callback | whatsapp | telegram; message_ref=
-                                                  a ref as pasted (Réf. aq 7k3f: label, case,
-                                                  spaces; O→0, I/L→1 in the code), the leads
-                                                  carrying it; gmb: see below
-GET    /leads/counts?brand&gmb                    {stages: {created: n, …, lost: n} (every
-                                                  stage, 0 included), overdue, total}
-POST   /leads                                     {brand, location, need, phone?, channel?} → 201
-                                                  {brand, lead_id: "p-<uuidv7>", event_id};
-                                                  channel phone_inbound (default) | whatsapp |
-                                                  telegram, anything else 400
-GET    /leads/{brand}/{lead}                      {lead: Lead, events: [Event]}
-POST   /leads/{brand}/{lead}/stage                {stage: contacted, channel?} | {stage: quoted,
-                                                  amount?, currency?} | {stage: won, job_id?} |
-                                                  {stage: lost, reason, note?} | {stage: completed}
-                                                  → 201 {event_id}
-POST   /leads/{brand}/{lead}/messaged             {channel: whatsapp|telegram} → 201 {event_id}:
-                                                  the customer wrote (lead.messaged); idempotent
-POST   /leads/{brand}/{lead}/no_answer            → 201 {event_id}: call.attempted + call.logged
-                                                  {no_answer} (a note's button)
-POST   /leads/{brand}/{lead}/calls/attempt        → 201 {attempt_id}
+GET    /me
+GET    /openapi.json
+GET    /leads
+POST   /leads
+GET    /leads/counts
+GET    /leads/{brand}/{lead}
+POST   /leads/{brand}/{lead}/{stage,messaged,no_answer,payments,booking}
+POST   /leads/{brand}/{lead}/calls/attempt
 POST   /leads/{brand}/{lead}/calls/{attempt}/outcome
-                                                  {outcome: answered|no_answer|wrong_number|later}
-POST   /leads/{brand}/{lead}/payments             {billed, commission, currency}
-GET    /funnel?from&to&brand&gmb&by               days, UTC, default the last 30, ≤ 366
-                                                  {from, to, brand, min_sample, posthog_url,
-                                                   stages: [{stage,
-                                                   reached, of_previous, of_leads}], lost, manual,
-                                                   payments: [Paid]}
-                                                  by=location: {from, to, brand, min_sample,
-                                                   by, locations: [{brand, location, stages, lost,
-                                                   manual, payments}]}, one per brand's location
-                                                   (location null for the leads naming none);
-                                                   an empty window has no rows
-GET    /experiments?brand                         see [Experiments](#experiments)
-GET    /places?gmb                                {places: [{brand, location, last_lead_at,
-                                                  has_settings, withdrawn}]}: every location a
-                                                  lead names, and every place registered
-                                                  (below)
+POST   /leads/{brand}/{lead}/booking/status
+GET    /bookings/unmatched
+POST   /bookings/{id}/attach
+GET    /funnel
+GET    /places
+POST   /places
+GET    /places/{brand}/{slug}/settings
+PUT    /places/{brand}/{slug}/settings
+GET    /places/{brand}/{slug}/settings/history
+POST   /places/{brand}/{slug}/settings/revert/{id}
+POST   /places/{brand}/{slug}/{withdraw,restore}
+PUT    /places/{brand}/{slug}/gmb
+GET    /gmbs
+GET    /pricing
+GET    /pricing/{brand}
+PUT    /pricing/{brand}
+DELETE /pricing/{brand}
+POST   /pricing/{brand}/preview
+GET    /pricing/{brand}/changes
+GET    /experiments
+PUT    /experiments/{brand}/{key}
+GET    /invoices
+POST   /invoices
+GET    /invoices/{id}
 ```
 
 `gmb` is the conductor's selection of GMBs (`3,7`; empty selects none; absent narrows nothing):
@@ -494,34 +488,9 @@ GET  /api/internal/brands/{brand}/locations/{slug}?locale   no assertion; ≤ 32
        404 {"error": "not_found"}: only a place an admin withdrew
 ```
 
-Under `/api/v1` (Work); writes need `sa:sites:work:places:edit`; without it, a read (`can_edit`
-false, `403` on a write):
-
-```text
-GET  /places/{brand}/{slug}/settings          {brand, slug, withdrawn, settings, updated_at,
-                                              updated_by, can_edit}; updated_at null: never set
-PUT  /places/{brand}/{slug}/settings          {settings, expected_updated_at} → 200 as GET; a
-                                              full replace; 409 {"error": "conflict"} when
-                                              expected_updated_at is not the current one;
-                                              422 {"error": "invalid", "fields": {key: why}},
-                                              a key the field or its path in a list:
-                                              hours[0].opens, hours[1].days, serviceArea[2]
-GET  /places/{brand}/{slug}/settings/history  {changes: [{id, at, by, kind, before, after,
-                                              reverts}]}, newest first; kind register | set |
-                                              revert | withdraw | restore
-POST /places/{brand}/{slug}/settings/revert/{id}  the `before` of that change made current,
-                                              journaled as a revert → 200 as GET; 404; body
-                                              {expected_updated_at} optional, 409 as a PUT
-POST /places/{brand}/{slug}/withdraw|restore  → 200 as GET; the settings are kept
-POST /places                                  {brand, slug} → 201 as GET; 409 {"error":
-                                              "exists"} once registered (by hand or an edit)
-PUT  /places/{brand}/{slug}/gmb               {gmb_id: n | null} → 200 as GET (with gmb_id); 404
-                                              unknown place; 409 {"error": "gmb_taken"}
-GET  /gmbs                                    {"<gmb_id>": {brand, location, leads_7d, overdue}}
-                                              for every place with a gmb_id: its leads created in the
-                                              last 7 days, and all those past CONTACT_SLA uncontacted
-                                              (Work read)
-```
+Under `/api/v1` (Work, writes `sa:sites:work:places:edit`): a place's settings read, replaced
+whole (`expected_updated_at` checked: optimistic concurrency), its history, a revert, withdraw
+and restore, a hand registration, its GMB link, and `GET /gmbs`.
 
 - **A place says which GMB it is the landing of** (`places.gmb_id`, the conductor's `gmbs.id`,
   held as opaque; unique among places, nullable). Not journaled in `place_changes` (that holds
@@ -573,27 +542,9 @@ GET    /api/internal/brands/{brand}/pricing?locale   no assertion; with the loca
        locales no longer pass, and on any failure of the store (logged) — never a 404 or 5xx
 ```
 
-Under `/api/v1` (Work); saving and removing need `sa:sites:work:pricing:edit`; reading and the
-preview are the section's:
-
-```text
-GET    /pricing                       {items: [Item]}: every brand the panel knows (a lead's,
-                                      a place's, a landing's experiments') or has
-                                      pricing or locales for
-GET    /pricing/{brand}               Item; a brand never set: model, updated_at, updated_by null
-PUT    /pricing/{brand}     edit      {model, expected_updated_at: RFC 3339 | null} → 200 Item;
-                                      409 {error: "stale", current: Item}; 422 {error, code, path}
-DELETE /pricing/{brand}     edit      {expected_updated_at} (required) → 200 Item, model null;
-                                      409 as PUT
-POST   /pricing/{brand}/preview       {model, need, inputs: {input: option}} → 200 {cents: n |
-                                      null} (null: "no price"); 422 as PUT: the draft
-                                      is held to the brand's locales, as the site would
-GET    /pricing/{brand}/changes       {changes: [{id, at, by, kind: set | remove, valid_from,
-                                      needs, model}]}: the last 50, newest first; `model` the
-                                      one the change left; a removal's three null
-
-Item: {brand_id, locales, model | null, updated_at | null, updated_by | null}
-```
+Under `/api/v1` (Work, saving and removing `sa:sites:work:pricing:edit`): every brand's
+pricing, one brand's, its changes, a save or a removal (`expected_updated_at` checked: 409
+`stale` with the current one), and the preview of a draft.
 
 - **A change is one write transaction**, as a place's: the current model and the brand's
   locales read under the write lock, `expected_updated_at` compared, the model checked and
@@ -633,18 +584,11 @@ enabled a boolean. So `effective` is what the landings run even after a declarat
 variants under an admin's weights. `weights_changed_at` is the last time the effective weights
 changed, by a declaration or an admin.
 
+`GET /api/v1/experiments` (Analysis) lists them, declared, overridden and in effect; `PUT
+/api/v1/experiments/{brand}/{key}` (`sa:sites:analysis:experiments:edit`) sets or puts back an
+override field.
+
 ```text
-GET /api/v1/experiments?brand            Analysis; one brand's, or every brand's without it
-     {experiments: [{brand, key, variants,
-       declared: {weights, enabled, holdout, summary, declared_at},
-       override: null | {weights, enabled, holdout (each null: follows the declaration),
-                         changed_by (the admin's email, else their id: by), changed_at},
-       effective: {weights, enabled, holdout}, weights_changed_at, retired, posthog_url}]}
-PUT /api/v1/experiments/{brand}/{key}    sa:sites:analysis:experiments:edit
-     {enabled?: bool | null, weights?: [n] | null, holdout?: n | null}: absent left, null put
-     back → 200 the item; 400 {error} invalid (weights against the declared variants); 404 an
-     unknown or retired experiment, or a brand or key that cannot be one; a change that changes
-     nothing journals nothing
 GET /api/internal/brands/{brand}/experiments   no assertion, with the places' and pricing's reads
      ≤ 32 at once (shed: no overrides), 2.5 s (then none)
      200 {experiments: {key: {enabled?, weights?, holdout?}}}: the valid override fields of the
@@ -701,16 +645,12 @@ banking's scope `sa` (`scope.v1.InvoiceService`, protos vendored in `contracts/p
 and opens its pay page on evinvest.ltd for the customer. Banking is the authority; the
 `invoices` table mirrors what it last said (`panel::invoices`, `panel_server::scope_ledger`).
 
+`POST /api/v1/invoices` (`sa:sites:work:invoices:create`, Idempotency-Key required) stores the
+row `creating` with the terms, then asks banking (OpenAccount `sa:invoices` once, CreateInvoice
+under a key derived from the row, subject_ref sa_invoice:<row id>); `GET /api/v1/invoices`
+reads the rows; `GET /api/v1/invoices/{id}` asks banking (GetInvoice) unless final.
+
 ```text
-POST /api/v1/invoices      sa:sites:work:invoices:create, Idempotency-Key required
-                           → the row is stored `creating` with the terms, then banking is asked
-                           (OpenAccount `sa:invoices` once, CreateInvoice under a key derived from
-                           the row, subject_ref sa_invoice:<row id>) → 201; a retry → 200, the
-                           same row; the key with other terms → 409. A refusal drops the row;
-                           a lost answer keeps it for the retry.
-GET  /api/v1/invoices      the rows, newest first, ≤ 500, no call to banking
-GET  /api/v1/invoices/{id} GetInvoice → stored; a `creating` row is asked for again; a final
-                           one (paid, cancelled, expired) is answered as stored
 confirm (15 s)             MoneyEvents.Pull after the stored cursor: INVOICE_PAID marks the
                            invoice paid once (the event id is stored on it), CANCELLED and
                            EXPIRED end it; the cursor moves in the same transaction
@@ -831,24 +771,9 @@ PKCE, state), waits on `127.0.0.1:<port>` for the redirect, prints
 `GOOGLE_CALENDAR_REFRESH_TOKEN_<BRAND>=…` once, for add-secrets. `sites_panel booking google-sync
 <brand> [--full]`: one pull now.
 
-**API** (`/api/v1`, Work; writes need `sa:sites:work:leads:edit`):
-
-```text
-POST /leads/{brand}/{lead}/booking         {action: "set", start_at, end_at?} | {action: "clear"}
-                                           → 201 {event_id} (200 on an Idempotency-Key retry);
-                                           400 bad instant; 404; 409 not from where it stands
-POST /leads/{brand}/{lead}/booking/status  {status: done | no_show | canceled} → 201; 409 unless booked
-GET  /bookings/unmatched?brand&limit       {bookings: [Booking]}, the next slot first, ≤ 200
-POST /bookings/{id}/attach                 {lead} → 201 {event_id}; 404 no booking / no such lead
-                                           of its brand; 409 attached to it by hand already
-GET  /leads?booking=<status>               the leads whose booking stands there (none included)
-
-Lead.booking: {status, provider, start_at, end_at, external_ref, match, preferred_date,
-               preferred_part}
-Booking:      {id, brand, provider, external_ref, status: booked | canceled, start_at, end_at,
-               booked_at, last_event_at, lead_id: null, match: null,
-               contact?: {name?, email?, phone?} (for a caller who sees PII)}
-```
+**API** (`/api/v1`, Work, writes `sa:sites:work:leads:edit`): a lead's slot set or cleared by
+hand and its end, the providers' unmatched bookings and a hand attach; `GET /leads?booking=`
+filters by where the booking stands; `Lead.booking` is the lead's booking folded.
 
 ## Invariants
 

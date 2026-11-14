@@ -18,7 +18,7 @@
 /// ts-rs alike), `ALL` in order, and `parse`, which refuses any other word with `$refused`.
 macro_rules! vocabulary {
 	($(#[$meta:meta])* pub enum $ty:ident, $refused:literal { $($(#[$vmeta:meta])* $variant:ident => $wire:literal),+ $(,)? }) => {
-		#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Serialize, ts_rs::TS)]
+		#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Deserialize, schemars::JsonSchema, serde::Serialize, ts_rs::TS)]
 		$(#[$meta])*
 		pub enum $ty {
 			$($(#[$vmeta])* #[serde(rename = $wire)] $variant,)+

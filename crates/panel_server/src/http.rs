@@ -31,16 +31,16 @@ use axum::{
 	body::to_bytes,
 	error_handling::HandleErrorLayer,
 	extract::{Path, Request, State},
-	handler::Handler,
-	http::{HeaderValue, Method, StatusCode, header},
+	http::{HeaderValue, StatusCode, header},
 	middleware::{self, Next},
 	response::{IntoResponse, Response},
-	routing::{MethodFilter, MethodRouter, get, on, post},
+	routing::{get, post},
 };
+use ev_lib::api::{Guard, Route};
 use panel::{IngestError, Outcome, Panel, booking::PushSources};
 use panel_contracts::v1::{EventResult, IngestResponse};
 use panel_core::notify::Locale;
-use sa_auth::{Analysis, Keys, PermissionSet, Work};
+use sa_auth::{Analysis, Keys, Permission, PermissionSet, Work};
 use serde_json::{Value, json};
 use tower::{BoxError, ServiceBuilder, limit::GlobalConcurrencyLimitLayer};
 use tower_http::{
@@ -49,7 +49,8 @@ use tower_http::{
 };
 
 use crate::{
-	api, booking, conductor, experiments,
+	api::{self, Catalog},
+	booking, conductor, experiments,
 	gate::{self, UserGate},
 	invoices, places, pricing,
 };
@@ -64,38 +65,73 @@ pub enum Section {
 }
 
 impl Section {
-	pub fn may(self, permissions: &PermissionSet) -> bool {
+	fn permission(self) -> &'static str {
 		match self {
-			Self::Work => permissions.may(Work::Read),
-			Self::Analysis => permissions.may(Analysis::Read),
+			Self::Work => Work::Read.as_str(),
+			Self::Analysis => Analysis::Read.as_str(),
 		}
 	}
 }
 
-/// One `/api/v1` route served on the engine's state, and who passes its gate.
-pub struct ApiRoute {
-	pub method: Method,
-	/// Under `/api/v1`.
-	pub path: &'static str,
+/// Who passes an `/api/v1` route's gate.
+#[derive(Clone, Copy, Debug)]
+pub struct Gate {
 	/// `None`: every signed-in user.
-	pub section: Option<Section>,
-	handler: MethodRouter<Panel>,
+	section: Option<Section>,
+	/// An action's own permission, on top of its section's.
+	action: Option<&'static str>,
+	/// The conductor's own assertion passes too.
+	conductor: bool,
 }
 
-impl ApiRoute {
-	pub(crate) fn new<H: Handler<T, Panel>, T: 'static>(method: Method, path: &'static str, section: Option<Section>, handler: H) -> Self {
-		let filter = MethodFilter::try_from(method.clone()).expect("the routes name standard methods");
+impl Gate {
+	pub(crate) const USER: Self = Self {
+		section: None,
+		action: None,
+		conductor: false,
+	};
+
+	pub(crate) const fn section(section: Section) -> Self {
 		Self {
-			method,
-			path,
-			section,
-			handler: on(filter, handler),
+			section: Some(section),
+			..Self::USER
 		}
 	}
+
+	pub(crate) fn may(self, action: impl Permission) -> Self {
+		Self {
+			action: Some(action.as_str()),
+			..self
+		}
+	}
+
+	pub(crate) const fn or_conductor(self) -> Self {
+		Self { conductor: true, ..self }
+	}
+
+	pub(crate) fn admits_conductor(&self) -> bool {
+		self.conductor
+	}
+
+	pub(crate) fn admits(&self, permissions: &PermissionSet) -> bool {
+		[self.section.map(Section::permission), self.action]
+			.into_iter()
+			.flatten()
+			.all(|p| permissions.iter().any(|held| held == p))
+	}
 }
+
+impl Guard for Gate {
+	fn permission(&self) -> Option<String> {
+		self.action.or(self.section.map(Section::permission)).map(str::to_owned)
+	}
+}
+
+/// One `/api/v1` operation, served on the engine's state.
+pub(crate) type ApiRoute = Route<Panel, Gate>;
 
 /// Every `/api/v1` route on the engine's state.
-pub fn api_routes() -> Vec<ApiRoute> {
+pub(crate) fn api_routes() -> Vec<ApiRoute> {
 	[api::routes(), booking::routes(), places::routes(), pricing::routes(), experiments::routes(), invoices::routes()]
 		.into_iter()
 		.flatten()
@@ -155,13 +191,10 @@ pub const PROVIDED_PATHS: [&str; 1] = [INTERNAL];
 pub fn router(sites: Sites, limits: Limits) -> Router {
 	let keys = Arc::new(sites.keys);
 	let v1 = api_routes().into_iter().fold(Router::new(), |routes, r| {
-		let gate = UserGate {
-			keys: keys.clone(),
-			section: r.section,
-		};
-		routes.merge(Router::new().route(r.path, r.handler).route_layer(middleware::from_fn_with_state(gate, gate::user)))
+		let gate = UserGate { keys: keys.clone(), gate: r.guard };
+		routes.merge(Router::new().route(r.path, r.handler()).route_layer(middleware::from_fn_with_state(gate, gate::user)))
 	});
-	let v1 = bounded(v1.with_state(sites.panel.clone()), limits.api_concurrent, limits.api_timeout);
+	let v1 = bounded(v1.with_state(sites.panel.clone()).layer(Extension(Catalog::new())), limits.api_concurrent, limits.api_timeout);
 	let internal_reads = conductor::InternalReads::new();
 	let reads = bounded(
 		conductor::reads(sites.panel.clone(), sites.locale, internal_reads.clone()),

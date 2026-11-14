@@ -3,35 +3,34 @@
 //! signature, checked by its adapter, is what lets one in.
 //!
 //! ```text
-//! POST /api/v1/leads/{brand}/{lead}/booking          {action: "set", start_at, end_at?} | {action: "clear"}
-//!                                                    → 201 {event_id}; 409 not from where it stands
-//! POST /api/v1/leads/{brand}/{lead}/booking/status   {status: done | no_show | canceled} → 201; 409
-//! GET  /api/v1/bookings/unmatched?brand&limit         {bookings: [Booking]}, the next slot first
-//! POST /api/v1/bookings/{id}/attach                   {lead} → 201 {event_id}; 404; 409
-//! POST /api/hooks/booking/{provider}/{brand}          a push provider's webhook → 200 {written, …};
-//!                                                    404 for a provider not registered (none is, yet)
+//! POST /api/hooks/booking/{provider}/{brand}   a push provider's webhook → 200 {written, …};
+//!                                              404 for a provider not registered (none is, yet)
 //! ```
 
 use std::{sync::Arc, time::Duration};
 
 use axum::{
 	Extension, Json, Router,
-	body::{Body, to_bytes},
+	body::{Body as Raw, to_bytes},
 	error_handling::HandleErrorLayer,
-	extract::{Path, Query, State, rejection::JsonRejection},
+	extract::{Path, State},
 	http::{HeaderMap, Method, StatusCode},
 	response::{IntoResponse, Response},
 	routing::post,
 };
+use ev_lib::api::{Created, JsonSchema, Upserted};
 use jiff::Timestamp;
 use panel::{
 	Panel,
 	booking::{BookingView, Provider, PushError, PushRequest, PushSources, SlotAction},
 	operator::Actor,
 };
-use panel_core::ids::{BrandId, LeadId};
+use panel_core::{
+	booking::BookingMatch,
+	ids::{BrandId, LeadId},
+};
 use sa_auth::Leads;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::Semaphore;
 use tower::{BoxError, ServiceBuilder, limit::GlobalConcurrencyLimitLayer};
@@ -39,20 +38,21 @@ use tower_http::timeout::TimeoutLayer;
 use uuid::Uuid;
 
 use crate::{
-	api::{ApiError, ApiResult, body},
+	api::{ApiResult, Body, IdempotencyKey, Ids, Journaled, LeadPath, Params, recorded},
 	gate::Caller,
-	http::{ApiRoute, Section},
+	http::{ApiRoute, Gate, Section},
 };
 
 /// The operator's booking routes.
 pub(crate) fn routes() -> Vec<ApiRoute> {
 	use Method as M;
-	let work = Some(Section::Work);
+	let work = Gate::section(Section::Work);
+	let edit = work.may(Leads::Edit);
 	vec![
-		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/booking", work, slot),
-		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/booking/status", work, close),
-		ApiRoute::new(M::GET, "/bookings/unmatched", work, unmatched),
-		ApiRoute::new(M::POST, "/bookings/{id}/attach", work, attach),
+		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/booking", edit, book_lead),
+		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/booking/status", edit, close_booking),
+		ApiRoute::new(M::GET, "/bookings/unmatched", work, unmatched_bookings),
+		ApiRoute::new(M::POST, "/bookings/{id}/attach", edit, attach_booking),
 	]
 }
 
@@ -86,7 +86,7 @@ fn not_found() -> Response {
 	(StatusCode::NOT_FOUND, Json(json!({ "error": "not_found" }))).into_response()
 }
 
-async fn hook(State(hooks): State<Hooks>, Path((provider, brand)): Path<(String, String)>, headers: HeaderMap, body: Body) -> Response {
+async fn hook(State(hooks): State<Hooks>, Path((provider, brand)): Path<(String, String)>, headers: HeaderMap, body: Raw) -> Response {
 	// A provider that is not one, or not registered, and a brand that cannot be one, answer
 	// alike: nothing here to post to.
 	let (Ok(provider), Ok(brand)) = (Provider::parse(&provider), BrandId::parse(&brand)) else {
@@ -133,114 +133,148 @@ async fn hook(State(hooks): State<Hooks>, Path((provider, brand)): Path<(String,
 	}
 }
 
-fn ids(brand: &str, lead: &str) -> ApiResult<(BrandId, LeadId)> {
-	Ok((BrandId::parse(brand)?, LeadId::parse(lead)?))
-}
-
-fn created(event: Uuid, replayed: bool) -> Response {
-	let status = if replayed { StatusCode::OK } else { StatusCode::CREATED };
-	(status, Json(json!({ "event_id": event.to_string() }))).into_response()
-}
-
-#[derive(Deserialize)]
+/// An operator's slot for a lead.
+#[derive(Deserialize, JsonSchema)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+#[schemars(rename = "BookingSlot")]
 enum SlotBody {
+	/// Booked for this slot, RFC 3339 instants.
 	Set { start_at: String, end_at: Option<String> },
+	/// No slot any more.
 	Clear,
 }
 
-async fn slot(
+/// Sets or clears a lead's booked slot by hand (`booking.set`, `booking.cleared`).
+///
+/// 400 for an instant that is not one; 409 when the booking is not where the action starts from.
+async fn book_lead(
 	State(panel): State<Panel>,
 	Extension(caller): Extension<Caller>,
-	Path((brand, lead)): Path<(String, String)>,
-	headers: HeaderMap,
-	b: Result<Json<SlotBody>, JsonRejection>,
-) -> ApiResult<Response> {
-	if !caller.permissions.may(Leads::Edit) {
-		return Err(ApiError::Forbidden);
-	}
-	let key = crate::api::idempotency_key(&headers)?;
-	let (brand, lead) = ids(&brand, &lead)?;
-	let action = match body(b)? {
+	Ids(LeadPath { brand, lead }): Ids<LeadPath>,
+	IdempotencyKey(key): IdempotencyKey,
+	Body(b): Body<SlotBody>,
+) -> ApiResult<Upserted<Journaled>> {
+	let action = match b {
 		SlotBody::Set { start_at, end_at } => SlotAction::Set { start_at, end_at },
 		SlotBody::Clear => SlotAction::Clear,
 	};
 	let done = panel.book_once(Actor(caller.user_id), &brand, &lead, action, Timestamp::now(), key.as_deref()).await?;
-	Ok(created(done.value.raw(), done.replayed))
+	Ok(recorded(done, |e| Journaled { event_id: e.raw() }))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(rename = "BookingEnd")]
 struct CloseBody {
+	/// done | no_show | canceled
 	status: String,
 }
 
-async fn close(
+/// How a lead's booking ended (`booking.status_changed`).
+///
+/// 409 unless the lead is booked.
+async fn close_booking(
 	State(panel): State<Panel>,
 	Extension(caller): Extension<Caller>,
-	Path((brand, lead)): Path<(String, String)>,
-	headers: HeaderMap,
-	b: Result<Json<CloseBody>, JsonRejection>,
-) -> ApiResult<Response> {
-	if !caller.permissions.may(Leads::Edit) {
-		return Err(ApiError::Forbidden);
-	}
-	let key = crate::api::idempotency_key(&headers)?;
-	let (brand, lead) = ids(&brand, &lead)?;
-	let status = body(b)?.status;
-	let done = panel.close_booking_once(Actor(caller.user_id), &brand, &lead, &status, Timestamp::now(), key.as_deref()).await?;
-	Ok(created(done.value.raw(), done.replayed))
+	Ids(LeadPath { brand, lead }): Ids<LeadPath>,
+	IdempotencyKey(key): IdempotencyKey,
+	Body(b): Body<CloseBody>,
+) -> ApiResult<Upserted<Journaled>> {
+	let done = panel
+		.close_booking_once(Actor(caller.user_id), &brand, &lead, &b.status, Timestamp::now(), key.as_deref())
+		.await?;
+	Ok(recorded(done, |e| Journaled { event_id: e.raw() }))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct UnmatchedQuery {
-	brand: Option<String>,
+	brand: Option<BrandId>,
+	/// 100 when absent.
 	limit: Option<u32>,
 }
 
 /// A provider's booking as the front end reads it.
-pub(crate) fn booking_body(v: BookingView) -> Value {
-	let r = v.row;
-	let mut b = json!({
-		"id": r.id.to_string(),
-		"brand": r.brand_id.as_str(),
-		"provider": r.provider.as_str(),
-		"external_ref": r.external_ref,
-		"status": if r.booked { "booked" } else { "canceled" },
-		"start_at": r.start_at.to_string(),
-		"end_at": r.end_at.map(|t| t.to_string()),
-		"booked_at": r.booked_at.map(|t| t.to_string()),
-		"last_event_at": r.last_event_at.to_string(),
-		"lead_id": r.lead.as_ref().map(|(l, _)| l.as_str()),
-		"match": r.lead.as_ref().map(|(_, m)| m.as_str()),
-	});
-	if let Some(contact) = v.contact {
-		b["contact"] = contact;
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "ProviderBooking")]
+struct ProviderBookingDto {
+	id: Uuid,
+	brand: BrandId,
+	provider: Provider,
+	external_ref: String,
+	/// booked | canceled
+	status: &'static str,
+	start_at: Timestamp,
+	end_at: Option<Timestamp>,
+	booked_at: Option<Timestamp>,
+	last_event_at: Timestamp,
+	/// The lead it joined; null while unmatched.
+	lead_id: Option<LeadId>,
+	/// How it joined the lead.
+	r#match: Option<BookingMatch>,
+	/// The attendee, for a caller who sees PII.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	contact: Option<Value>,
+}
+
+impl From<BookingView> for ProviderBookingDto {
+	fn from(v: BookingView) -> Self {
+		let r = v.row;
+		let (lead_id, r#match) = r.lead.unzip();
+		Self {
+			id: r.id,
+			brand: r.brand_id,
+			provider: r.provider,
+			external_ref: r.external_ref,
+			status: if r.booked { "booked" } else { "canceled" },
+			start_at: r.start_at,
+			end_at: r.end_at,
+			booked_at: r.booked_at,
+			last_event_at: r.last_event_at,
+			lead_id,
+			r#match,
+			contact: v.contact,
+		}
 	}
-	b
 }
 
-async fn unmatched(State(panel): State<Panel>, Extension(caller): Extension<Caller>, q: Result<Query<UnmatchedQuery>, axum::extract::rejection::QueryRejection>) -> ApiResult<Json<Value>> {
-	let Query(q) = q.map_err(|e| ApiError::BadRequest(e.body_text()))?;
-	let brand = q.brand.as_deref().map(BrandId::parse).transpose()?;
-	let pii = crate::api::pii(&caller);
-	let rows = panel.unmatched_bookings(brand.as_ref(), pii, q.limit.unwrap_or(100)).await?;
-	Ok(Json(json!({ "bookings": rows.into_iter().map(booking_body).collect::<Vec<_>>() })))
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "ProviderBookings")]
+struct BookingsDto {
+	bookings: Vec<ProviderBookingDto>,
 }
 
-#[derive(Deserialize)]
+/// The providers' bookings no lead was found for, the next slot first; at most 200.
+async fn unmatched_bookings(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Params(q): Params<UnmatchedQuery>) -> ApiResult<Json<BookingsDto>> {
+	let rows = panel.unmatched_bookings(q.brand.as_ref(), crate::api::pii(&caller), q.limit.unwrap_or(100)).await?;
+	Ok(Json(BookingsDto {
+		bookings: rows.into_iter().map(ProviderBookingDto::from).collect(),
+	}))
+}
+
+/// `{id}` of a provider's booking.
+#[derive(Deserialize, JsonSchema)]
+struct BookingPath {
+	id: Uuid,
+}
+
+#[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(rename = "BookingAttach")]
 struct AttachBody {
-	lead: String,
+	lead: LeadId,
 }
 
-async fn attach(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Path(id): Path<String>, b: Result<Json<AttachBody>, JsonRejection>) -> ApiResult<Response> {
-	if !caller.permissions.may(Leads::Edit) {
-		return Err(ApiError::Forbidden);
-	}
-	let id = Uuid::parse_str(&id).map_err(|_| ApiError::NotFound)?;
-	let lead = LeadId::parse(&body(b)?.lead)?;
-	let event = panel.attach_booking(Actor(caller.user_id), id, &lead, Timestamp::now()).await?;
-	Ok(created(event.raw(), false))
+/// Joins a provider's booking to a lead of its brand by hand (`booking.attached`).
+///
+/// 404 for a booking not known, or no such lead of its brand; 409 when it was joined by hand
+/// already.
+async fn attach_booking(
+	State(panel): State<Panel>,
+	Extension(caller): Extension<Caller>,
+	Ids(BookingPath { id }): Ids<BookingPath>,
+	Body(b): Body<AttachBody>,
+) -> ApiResult<Created<Journaled>> {
+	let event = panel.attach_booking(Actor(caller.user_id), id, &b.lead, Timestamp::now()).await?;
+	Ok(Created(Journaled { event_id: event.raw() }))
 }

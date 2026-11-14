@@ -47,7 +47,7 @@ async fn an_operator_reads_and_previews_but_changes_nothing() {
 	let put = json!({"model": fixture("valid/cleaning.json"), "expected_updated_at": null});
 	assert_eq!(b.put(ITEM, put).await.0, StatusCode::FORBIDDEN);
 	assert_eq!(b.delete(ITEM, Some(json!({"expected_updated_at": null}))).await.0, StatusCode::FORBIDDEN);
-	assert_eq!(b.get("/api/v1/pricing/Vifnet").await.0, StatusCode::BAD_REQUEST, "not a brand id");
+	assert_eq!(b.get("/api/v1/pricing/Vifnet").await.0, StatusCode::NOT_FOUND, "not a brand id: names nothing");
 
 	let nobody = Client { who: As::Nobody, ..b };
 	assert_eq!(nobody.get(ITEM).await, (StatusCode::UNAUTHORIZED, json!({"error": "unauthenticated"})));

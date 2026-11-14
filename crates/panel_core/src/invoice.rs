@@ -29,44 +29,25 @@ pub const MAX_EXPIRES_IN_DAYS: u32 = 30;
 pub const MAX_INTEGER_DIGITS: usize = 9;
 pub const MAX_FRACTION_DIGITS: usize = 6;
 
-/// Where an invoice stands, as the panel stores it.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum InvoiceState {
-	/// The panel has the row, banking has not answered yet (or the answer was lost): a retry
-	/// with the same idempotency key sends the stored terms again.
-	Creating,
-	/// Payable on banking's pay page.
-	Open,
-	/// The payer paid and the ledger has not posted it yet. Not a payment: it ends `paid`, or
-	/// falls back to `open` if the ledger refuses it. Never fulfil on it.
-	Processing,
-	/// The ledger took the payment (`INVOICE_STATE_PAID`, `KIND_INVOICE_PAID`). Final.
-	Paid,
-	Cancelled,
-	Expired,
+vocabulary! {
+	/// Where an invoice stands, as the panel stores it.
+	pub enum InvoiceState, "invoice state is not one of creating, open, processing, paid, cancelled, expired" {
+		/// The panel has the row, banking has not answered yet (or the answer was lost): a retry
+		/// with the same idempotency key sends the stored terms again.
+		Creating => "creating",
+		/// Payable on banking's pay page.
+		Open => "open",
+		/// The payer paid and the ledger has not posted it yet. Not a payment: it ends `paid`, or
+		/// falls back to `open` if the ledger refuses it. Never fulfil on it.
+		Processing => "processing",
+		/// The ledger took the payment (`INVOICE_STATE_PAID`, `KIND_INVOICE_PAID`). Final.
+		Paid => "paid",
+		Cancelled => "cancelled",
+		Expired => "expired",
+	}
 }
 
 impl InvoiceState {
-	pub const ALL: [Self; 6] = [Self::Creating, Self::Open, Self::Processing, Self::Paid, Self::Cancelled, Self::Expired];
-
-	pub fn as_str(self) -> &'static str {
-		match self {
-			Self::Creating => "creating",
-			Self::Open => "open",
-			Self::Processing => "processing",
-			Self::Paid => "paid",
-			Self::Cancelled => "cancelled",
-			Self::Expired => "expired",
-		}
-	}
-
-	pub fn parse(raw: &str) -> Result<Self, Invalid> {
-		Self::ALL
-			.into_iter()
-			.find(|s| s.as_str() == raw)
-			.ok_or_else(|| Invalid::new("invoice state is not one of creating, open, processing, paid, cancelled, expired"))
-	}
-
 	/// Nothing banking says later moves an invoice out of these.
 	pub fn is_final(self) -> bool {
 		match self {

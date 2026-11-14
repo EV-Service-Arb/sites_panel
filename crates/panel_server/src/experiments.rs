@@ -2,26 +2,18 @@
 //! behind the conductor's assertion, and the sites' read under `/api/internal`, which has none.
 //!
 //! ```text
-//! GET /api/v1/experiments?brand                    {experiments: [Item]}: one brand's, or every brand's
-//! PUT /api/v1/experiments/{brand}/{key}   admin    {enabled?, weights?, holdout?} → 200 Item; a field
-//!                                                  absent is left, null put back to the declaration;
-//!                                                  400 {error} invalid; 404 unknown or retired
 //! GET /api/internal/brands/{brand}/experiments     {experiments: {key: {enabled?, weights?, holdout?}}}:
 //!                                                  the overrides a landing takes — never a 404 or a 5xx
 //! ```
-//!
-//! Item: `{brand, key, variants, declared: {weights, enabled, holdout, summary, declared_at},
-//! override: null | {weights, enabled, holdout, changed_by (the admin's email, else their id),
-//! changed_at}, effective: {weights,
-//! enabled, holdout}, weights_changed_at, retired, posthog_url}`.
 
 use std::{sync::Arc, time::Duration};
 
 use axum::{
 	Extension, Json,
-	extract::{Path, Query, State},
+	extract::{Path, State},
 	http::Method,
 };
+use ev_lib::api::JsonSchema;
 use jiff::Timestamp;
 use panel::{
 	Panel,
@@ -33,14 +25,13 @@ use panel_core::{
 	ids::BrandId,
 };
 use sa_auth::Experiments;
-use serde::Deserialize;
-use serde_json::{Map, Value, json};
+use serde::{Deserialize, Serialize};
 
 use crate::{
-	api::ApiError,
+	api::{ApiError, ApiResult, Body, Ids, Params, present},
 	conductor::{InternalEndpoint, InternalReads},
 	gate::Caller,
-	http::{ApiRoute, Section},
+	http::{ApiRoute, Gate, Section},
 	places::editor,
 };
 
@@ -48,102 +39,183 @@ use crate::{
 const LIVE_WITHIN: Duration = Duration::from_millis(2500);
 
 pub(crate) fn routes() -> Vec<ApiRoute> {
-	let analysis = Some(Section::Analysis);
+	let analysis = Gate::section(Section::Analysis);
 	vec![
-		ApiRoute::new(Method::GET, "/experiments", analysis, list),
-		ApiRoute::new(Method::PUT, "/experiments/{brand}/{key}", analysis, configure),
+		ApiRoute::new(Method::GET, "/experiments", analysis, list_experiments),
+		ApiRoute::new(Method::PUT, "/experiments/{brand}/{key}", analysis.may(Experiments::Edit), configure_experiment),
 	]
 }
 
-fn ts(t: Option<Timestamp>) -> Value {
-	json!(t.map(|t| t.to_string()))
+/// The weights, the switch and the holdout of an experiment.
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "ExperimentSplit")]
+struct SplitDto {
+	/// One per variant.
+	weights: Vec<f64>,
+	enabled: bool,
+	/// The share of visitors kept out of it, in [0, 1).
+	holdout: Option<f64>,
 }
 
-fn item(v: &ExperimentView) -> Value {
-	let s = &v.state;
-	let effective = s.effective();
-	json!({
-		"brand": v.brand.as_str(),
-		"key": s.declared.key,
-		"variants": s.declared.variants,
-		"declared": {
-			"weights": s.declared.weights,
-			"enabled": s.declared.enabled,
-			"holdout": s.declared.holdout,
-			"summary": s.declared.summary,
-			"declared_at": s.declared_at.to_string(),
-		},
-		"override": s.over.as_ref().map(|o| json!({
-			"weights": o.weights,
-			"enabled": o.enabled,
-			"holdout": o.holdout,
-			"changed_by": o.changed_by,
-			"changed_at": o.changed_at.to_string(),
-		})),
-		"effective": {"weights": effective.weights, "enabled": effective.enabled, "holdout": effective.holdout},
-		"weights_changed_at": ts(s.weights_changed_at),
-		"retired": s.retired,
-		"posthog_url": v.posthog_url,
-	})
+/// As the landing's latest declaration said it.
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "ExperimentDeclared")]
+struct DeclaredDto {
+	#[serde(flatten)]
+	split: SplitDto,
+	/// The hypothesis, in a line.
+	summary: Option<String>,
+	declared_at: Timestamp,
 }
 
-#[derive(Deserialize)]
+/// What an admin set over the declaration; a field null is the declaration's.
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "ExperimentOverride")]
+struct OverrideDto {
+	weights: Option<Vec<f64>>,
+	enabled: Option<bool>,
+	holdout: Option<f64>,
+	/// The admin's email, else their id.
+	changed_by: String,
+	changed_at: Timestamp,
+}
+
+/// One experiment of a brand: declared by its landing, overridden by an admin.
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "Experiment")]
+struct ExperimentDto {
+	brand: BrandId,
+	key: String,
+	/// The first is the control.
+	variants: Vec<String>,
+	declared: DeclaredDto,
+	/// Null when nothing is set, or everything was put back.
+	r#override: Option<OverrideDto>,
+	/// What the landing runs: the declaration with the override laid over it.
+	effective: SplitDto,
+	weights_changed_at: Option<Timestamp>,
+	/// Its landing no longer declares it.
+	retired: bool,
+	/// Its funnel in PostHog; null without a project configured.
+	posthog_url: Option<String>,
+}
+
+impl From<ExperimentView> for ExperimentDto {
+	fn from(v: ExperimentView) -> Self {
+		let s = v.state;
+		let effective = s.effective();
+		Self {
+			brand: v.brand,
+			declared: DeclaredDto {
+				split: SplitDto {
+					weights: s.declared.weights,
+					enabled: s.declared.enabled,
+					holdout: s.declared.holdout,
+				},
+				summary: s.declared.summary,
+				declared_at: s.declared_at,
+			},
+			key: s.declared.key,
+			variants: s.declared.variants,
+			r#override: s.over.map(|o| OverrideDto {
+				weights: o.weights,
+				enabled: o.enabled,
+				holdout: o.holdout,
+				changed_by: o.changed_by,
+				changed_at: o.changed_at,
+			}),
+			effective: SplitDto {
+				weights: effective.weights,
+				enabled: effective.enabled,
+				holdout: effective.holdout,
+			},
+			weights_changed_at: s.weights_changed_at,
+			retired: s.retired,
+			posthog_url: v.posthog_url,
+		}
+	}
+}
+
+#[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ListQuery {
-	brand: Option<String>,
+	/// Absent: every brand's.
+	brand: Option<BrandId>,
 }
 
-async fn list(State(panel): State<Panel>, q: Result<Query<ListQuery>, axum::extract::rejection::QueryRejection>) -> Result<Json<Value>, ApiError> {
-	let Query(q) = q.map_err(|e| ApiError::BadRequest(e.body_text()))?;
-	let brand = q.brand.as_deref().map(BrandId::parse).transpose()?;
-	let items: Vec<Value> = panel.experiments(brand.as_ref()).await?.iter().map(item).collect();
-	Ok(Json(json!({ "experiments": items })))
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "Experiments")]
+struct ExperimentsDto {
+	experiments: Vec<ExperimentDto>,
 }
 
-/// The body of a change: each field absent (left), null (put back) or a value (set).
-fn patch(key: &str, body: &Value) -> Result<Patch, Invalid> {
-	let Value::Object(fields) = body else {
-		return Err(Invalid::new("the body is {\"enabled\"?, \"weights\"?, \"holdout\"?}"));
-	};
-	if let Some(other) = fields.keys().find(|k| !["enabled", "weights", "holdout"].contains(&k.as_str())) {
-		return Err(Invalid::new(format!("unknown field {other:?}: the body is {{\"enabled\"?, \"weights\"?, \"holdout\"?}}")));
-	}
-	let mut reset = Vec::new();
-	let mut field = |name: &str, fields: &Map<String, Value>| match fields.get(name) {
-		Some(Value::Null) => {
-			reset.push(name.to_owned());
-			None
-		}
-		other => other.cloned(),
-	};
-	let enabled = field("enabled", fields);
-	let weights = field("weights", fields);
-	let holdout = field("holdout", fields);
-	let enabled = enabled.map(|v| v.as_bool().ok_or_else(|| Invalid::new("enabled is true, false or null"))).transpose()?;
-	let weights = match weights {
-		None => Vec::new(),
-		Some(Value::Array(ws)) => ws.iter().map(|w| w.as_f64().ok_or_else(|| Invalid::new("weights are numbers"))).collect::<Result<_, _>>()?,
-		Some(_) => return Err(Invalid::new("weights are an array of numbers, or null")),
-	};
-	if fields.get("weights").is_some_and(|w| w.as_array().is_some_and(Vec::is_empty)) {
+/// A brand's experiments, or every brand's: declared, overridden, and in effect.
+async fn list_experiments(State(panel): State<Panel>, Params(q): Params<ListQuery>) -> ApiResult<Json<ExperimentsDto>> {
+	Ok(Json(ExperimentsDto {
+		experiments: panel.experiments(q.brand.as_ref()).await?.into_iter().map(ExperimentDto::from).collect(),
+	}))
+}
+
+/// `{brand}/{key}`.
+#[derive(Deserialize, JsonSchema)]
+struct ExperimentPath {
+	brand: BrandId,
+	/// `[a-z0-9_]{1,64}`.
+	key: String,
+}
+
+/// A change: each field absent (left), null (put back to the declaration) or a value (set).
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(rename = "ExperimentChange")]
+struct ConfigureBody {
+	#[serde(default, deserialize_with = "present")]
+	#[schemars(with = "Option<bool>")]
+	enabled: Option<Option<bool>>,
+	/// One per variant, each ≥ 0, their sum > 0.
+	#[serde(default, deserialize_with = "present")]
+	#[schemars(with = "Option<Vec<f64>>")]
+	weights: Option<Option<Vec<f64>>>,
+	/// In [0, 1).
+	#[serde(default, deserialize_with = "present")]
+	#[schemars(with = "Option<f64>")]
+	holdout: Option<Option<f64>>,
+}
+
+fn patch(key: &str, b: ConfigureBody) -> Result<Patch, Invalid> {
+	if b.weights.as_ref().is_some_and(|w| w.as_ref().is_some_and(Vec::is_empty)) {
 		return Err(Invalid::new("weights are one per variant"));
 	}
-	let holdout = holdout.map(|v| v.as_f64().ok_or_else(|| Invalid::new("holdout is a number in [0, 1), or null"))).transpose()?;
-	Patch::parse(key, enabled, weights, holdout, &reset).map_err(|e| Invalid::new(e.0.trim_start_matches("properties.").to_owned()))
+	let reset: Vec<String> = [
+		("enabled", matches!(b.enabled, Some(None))),
+		("weights", matches!(b.weights, Some(None))),
+		("holdout", matches!(b.holdout, Some(None))),
+	]
+	.into_iter()
+	.filter(|(_, reset)| *reset)
+	.map(|(name, _)| name.to_owned())
+	.collect();
+	Patch::parse(key, b.enabled.flatten(), b.weights.flatten().unwrap_or_default(), b.holdout.flatten(), &reset).map_err(|e| Invalid::new(e.0.trim_start_matches("properties.").to_owned()))
 }
 
-async fn configure(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Path((brand, key)): Path<(String, String)>, body: axum::body::Bytes) -> Result<Json<Value>, ApiError> {
-	if !caller.permissions.may(Experiments::Edit) {
-		return Err(ApiError::Forbidden);
-	}
-	let brand = BrandId::parse(&brand).map_err(|_| ApiError::NotFound)?;
+/// Overrides how a landing runs one of its experiments: switched on or off, its weights, its
+/// holdout (`experiment.configured`).
+///
+/// 400 for a change the declaration cannot take (weights against its variants); 404 for an
+/// experiment unknown or retired, or a key that cannot be one. A change that changes nothing
+/// journals nothing.
+async fn configure_experiment(
+	State(panel): State<Panel>,
+	Extension(caller): Extension<Caller>,
+	Ids(ExperimentPath { brand, key }): Ids<ExperimentPath>,
+	Body(b): Body<ConfigureBody>,
+) -> ApiResult<Json<ExperimentDto>> {
 	if !is_key(&key) {
 		return Err(ApiError::NotFound);
 	}
-	let body: Value = serde_json::from_slice(&body).map_err(|_| ApiError::BadRequest("the body is not JSON".into()))?;
-	let patch = patch(&key, &body)?;
+	let patch = patch(&key, b)?;
 	match panel.configure_experiment(&editor(&caller), &brand, patch, Timestamp::now()).await {
-		Ok(v) => Ok(Json(item(&v))),
+		Ok(v) => Ok(Json(v.into())),
 		Err(ExperimentError::NotFound) => Err(ApiError::NotFound),
 		Err(ExperimentError::Invalid(e)) => Err(ApiError::BadRequest(e.0)),
 		Err(ExperimentError::Internal(e)) => Err(ApiError::Internal(e)),
@@ -175,24 +247,30 @@ pub(crate) async fn live(State(panel): State<Panel>, Extension(reads): Extension
 #[cfg(test)]
 mod tests {
 	use panel_core::experiment::Field;
+	use serde_json::{Value, json};
 
 	use super::*;
 
+	fn body(v: Value) -> Result<Patch, String> {
+		let b: ConfigureBody = serde_json::from_value(v).map_err(|e| format!("the body: {e}"))?;
+		patch("hero", b).map_err(|e| e.0)
+	}
+
 	#[test]
 	fn absent_leaves_null_puts_back() {
-		let p = patch("hero", &json!({"enabled": false, "weights": null, "holdout": 0})).unwrap();
+		let p = body(json!({"enabled": false, "weights": null, "holdout": 0})).unwrap();
 		assert_eq!((p.enabled, p.weights, p.holdout), (Field::Set(false), Field::Reset, Field::Set(0.0)));
-		assert!(patch("hero", &json!({})).unwrap().is_empty());
+		assert!(body(json!({})).unwrap().is_empty());
 		for (bad, want) in [
 			(json!({"variants": ["a"]}), "unknown field"),
-			(json!({"enabled": "no"}), "enabled"),
-			(json!({"weights": [1, "x"]}), "weights"),
+			(json!({"enabled": "no"}), "invalid type"),
+			(json!({"weights": [1, "x"]}), "invalid type"),
 			(json!({"weights": []}), "weights"),
 			(json!({"holdout": 1}), "holdout is not in [0, 1)"),
-			(json!([]), "the body"),
+			(json!(7), "the body"),
 		] {
-			let e = patch("hero", &bad).unwrap_err();
-			assert!(e.0.contains(want), "{bad}: {e}");
+			let e = body(bad.clone()).unwrap_err();
+			assert!(e.contains(want), "{bad}: {e}");
 		}
 	}
 }

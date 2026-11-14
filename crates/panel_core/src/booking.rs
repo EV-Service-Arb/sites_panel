@@ -233,14 +233,14 @@ pub fn check_url(provider: PageProvider, raw: &str) -> Result<(), Code> {
 }
 
 /// A provider's booking page.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, TS, schemars::JsonSchema)]
 pub struct BookingPage {
 	pub url: String,
 }
 
 /// A place's `booking` setting: the providers it has a page on, and the one it offers by
 /// default — `manual` or one of them. `manual` is always there, so never configured.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, TS, schemars::JsonSchema)]
 pub struct BookingConfig {
 	pub default: Provider,
 	pub providers: BTreeMap<PageProvider, BookingPage>,

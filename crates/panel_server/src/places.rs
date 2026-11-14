@@ -2,35 +2,25 @@
 //! behind the conductor's assertion, and the sites' read under `/api/internal`, which has none.
 //!
 //! ```text
-//! GET  /api/v1/places/{brand}/{slug}/settings                 {brand, slug, withdrawn, settings,
-//!                                                              updated_at, updated_by, can_edit}
-//! PUT  /api/v1/places/{brand}/{slug}/settings        admin    {settings, expected_updated_at}
-//!                                                              → 200 as GET; 409 stale; 422 fields
-//! GET  /api/v1/places/{brand}/{slug}/settings/history         {changes: [{id, at, by, kind, before, after}]}
-//! POST /api/v1/places/{brand}/{slug}/settings/revert/{id}  admin  [{expected_updated_at}]
-//!                                                              → 200 as GET; 404; 409 stale
-//! POST /api/v1/places/{brand}/{slug}/withdraw | /restore   admin  → 200 as GET
-//! PUT  /api/v1/places/{brand}/{slug}/gmb          admin    {gmb_id: n | null}
-//!                                                              → 200 as GET; 404; 409 {"error": "gmb_taken"}
-//! GET  /api/v1/gmbs                                            {"<gmb_id>": {brand, location, leads_7d, overdue}}
-//! POST /api/v1/places                                admin    {brand, slug} → 201 as GET;
-//!                                                              409 {"error": "exists"}
 //! GET  /api/internal/brands/{brand}/locations/{slug}?locale    PlaceLive, `{}` when none or
 //!                                                              unknown; 404 only when withdrawn
 //!                                                              (a brand's pricing beside it:
 //!                                                              `crate::pricing`)
 //! ```
 
-use std::{sync::Arc, time::Duration};
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use axum::{
 	Extension, Json, Router,
-	body::Bytes,
 	error_handling::HandleErrorLayer,
-	extract::{Path, State, rejection::JsonRejection},
+	extract::{Path, State},
 	http::{Method, StatusCode},
 	response::{IntoResponse, Response},
 	routing::get,
+};
+use ev_lib::api::{
+	Created, GenContext, JsonSchema, OperationOutput,
+	openapi::{Operation, Response as Answer, StatusCode as Status},
 };
 use jiff::Timestamp;
 use panel::{
@@ -39,10 +29,10 @@ use panel::{
 };
 use panel_core::{
 	ids::{BrandId, LocationId},
-	place::{Editor, PlaceSettings},
+	place::{Editor, FieldErrors, PlaceLive, PlaceSettings},
 };
 use sa_auth::Places;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::Semaphore;
 use tower::{BoxError, ServiceBuilder, limit::GlobalConcurrencyLimitLayer};
@@ -50,24 +40,25 @@ use tower_http::timeout::TimeoutLayer;
 use uuid::Uuid;
 
 use crate::{
-	api::ApiError,
+	api::{ApiError, ApiResult, Body, ErrorDto, Ids, present},
 	conductor::{InternalEndpoint, InternalReads},
 	gate::Caller,
-	http::{ApiRoute, Section},
+	http::{ApiRoute, Gate, Section},
 };
 
 pub(crate) fn routes() -> Vec<ApiRoute> {
 	use Method as M;
-	let work = Some(Section::Work);
+	let work = Gate::section(Section::Work);
+	let edit = work.may(Places::Edit);
 	vec![
-		ApiRoute::new(M::GET, "/places/{brand}/{slug}/settings", work, settings),
-		ApiRoute::new(M::GET, "/places/{brand}/{slug}/settings/history", work, history),
-		ApiRoute::new(M::POST, "/places", work, register),
-		ApiRoute::new(M::PUT, "/places/{brand}/{slug}/settings", work, set),
-		ApiRoute::new(M::POST, "/places/{brand}/{slug}/settings/revert/{id}", work, revert),
-		ApiRoute::new(M::POST, "/places/{brand}/{slug}/withdraw", work, withdraw),
-		ApiRoute::new(M::POST, "/places/{brand}/{slug}/restore", work, restore),
-		ApiRoute::new(M::PUT, "/places/{brand}/{slug}/gmb", work, link_gmb),
+		ApiRoute::new(M::GET, "/places/{brand}/{slug}/settings", work, place_settings),
+		ApiRoute::new(M::GET, "/places/{brand}/{slug}/settings/history", work, place_history),
+		ApiRoute::new(M::POST, "/places", edit, register_place),
+		ApiRoute::new(M::PUT, "/places/{brand}/{slug}/settings", edit, set_place_settings),
+		ApiRoute::new(M::POST, "/places/{brand}/{slug}/settings/revert/{id}", edit, revert_place_settings),
+		ApiRoute::new(M::POST, "/places/{brand}/{slug}/withdraw", edit, withdraw_place),
+		ApiRoute::new(M::POST, "/places/{brand}/{slug}/restore", edit, restore_place),
+		ApiRoute::new(M::PUT, "/places/{brand}/{slug}/gmb", edit, link_gmb),
 		ApiRoute::new(M::GET, "/gmbs", work, gmbs),
 	]
 }
@@ -106,19 +97,43 @@ const INTERNAL_TIMEOUT: Duration = Duration::from_secs(3);
 /// Why a change to a place failed, in the contract's shapes.
 enum PlaceApiError {
 	Api(ApiError),
+	/// `expected_updated_at` is not what the place stands at.
 	Conflict,
 	GmbTaken,
-	Invalid(panel_core::place::FieldErrors),
+	Exists,
+	Invalid(FieldErrors),
+}
+
+/// Settings refused field by field.
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "PlaceInvalid")]
+struct InvalidDto {
+	/// `invalid`.
+	error: &'static str,
+	/// Why each field was refused, by its path.
+	fields: FieldErrors,
 }
 
 impl IntoResponse for PlaceApiError {
 	fn into_response(self) -> Response {
+		let conflict = |error: &str| (StatusCode::CONFLICT, Json(ErrorDto { error: error.to_owned() })).into_response();
 		match self {
 			Self::Api(e) => e.into_response(),
-			Self::Conflict => (StatusCode::CONFLICT, Json(json!({ "error": "conflict" }))).into_response(),
-			Self::GmbTaken => (StatusCode::CONFLICT, Json(json!({ "error": "gmb_taken" }))).into_response(),
-			Self::Invalid(fields) => (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({ "error": "invalid", "fields": fields }))).into_response(),
+			Self::Conflict => conflict("conflict"),
+			Self::GmbTaken => conflict("gmb_taken"),
+			Self::Exists => conflict("exists"),
+			Self::Invalid(fields) => (StatusCode::UNPROCESSABLE_ENTITY, Json(InvalidDto { error: "invalid", fields })).into_response(),
 		}
+	}
+}
+
+impl OperationOutput for PlaceApiError {
+	type Inner = ErrorDto;
+
+	fn inferred_responses(ctx: &mut GenContext, op: &mut Operation) -> Vec<(Option<Status>, Answer)> {
+		let mut answers = ApiError::inferred_responses(ctx, op);
+		answers.extend(Json::<InvalidDto>::operation_response(ctx, op).map(|r| (Some(Status::Code(422)), r)));
+		answers
 	}
 }
 
@@ -134,25 +149,19 @@ impl From<eyre::Report> for PlaceApiError {
 	}
 }
 
-fn place_error(e: PlaceError) -> PlaceApiError {
-	match e {
-		PlaceError::NotFound => PlaceApiError::Api(ApiError::NotFound),
-		PlaceError::Conflict => PlaceApiError::Conflict,
-		PlaceError::GmbTaken => PlaceApiError::GmbTaken,
-		PlaceError::Invalid(f) => PlaceApiError::Invalid(f),
-		PlaceError::Internal(e) => PlaceApiError::Api(ApiError::Internal(e)),
+impl From<PlaceError> for PlaceApiError {
+	fn from(e: PlaceError) -> Self {
+		match e {
+			PlaceError::NotFound => Self::Api(ApiError::NotFound),
+			PlaceError::Conflict => Self::Conflict,
+			PlaceError::GmbTaken => Self::GmbTaken,
+			PlaceError::Invalid(f) => Self::Invalid(f),
+			PlaceError::Internal(e) => Self::Api(ApiError::Internal(e)),
+		}
 	}
 }
 
 type PlaceResult<T> = Result<T, PlaceApiError>;
-
-fn ids(brand: &str, slug: &str) -> Result<(BrandId, LocationId), ApiError> {
-	Ok((BrandId::parse(brand)?, LocationId::parse(slug)?))
-}
-
-fn admin(caller: &Caller) -> Result<(), ApiError> {
-	if caller.permissions.may(Places::Edit) { Ok(()) } else { Err(ApiError::Forbidden) }
-}
 
 /// Who a history names: the user's email, their id when concierge gave none. One rule for a
 /// place's, a price list's and an experiment's changes.
@@ -161,179 +170,230 @@ pub(crate) fn editor(caller: &Caller) -> Editor {
 	Editor::User { id: caller.user_id, label }
 }
 
-fn body(v: PlaceView, caller: &Caller) -> Value {
-	json!({
-		"brand": v.brand.as_str(),
-		"slug": v.slug.as_str(),
-		"withdrawn": v.withdrawn,
-		"gmb_id": v.gmb_id,
-		"settings": v.settings.as_json(),
-		"updated_at": v.updated_at.map(|t| t.to_string()),
-		"updated_by": v.updated_by,
-		"can_edit": caller.permissions.may(Places::Edit),
-	})
+/// `{brand}/{slug}`.
+#[derive(Deserialize, JsonSchema)]
+struct PlacePath {
+	brand: BrandId,
+	slug: LocationId,
 }
 
-async fn settings(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Path((brand, slug)): Path<(String, String)>) -> PlaceResult<Json<Value>> {
-	let (brand, slug) = ids(&brand, &slug)?;
-	Ok(Json(body(panel.place(&brand, &slug).await?, &caller)))
+/// A place: its live settings, who set them last, and where it stands.
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "Place")]
+struct PlaceDto {
+	brand: BrandId,
+	slug: LocationId,
+	/// Off the sites: they answer it as gone.
+	withdrawn: bool,
+	/// The conductor's GMB this place is the landing of.
+	gmb_id: Option<i64>,
+	/// Only the fields set; `{}` when none (the site serves its baked config).
+	#[schemars(with = "PlaceLive")]
+	settings: Value,
+	/// Null while the settings were never set: what a first edit must expect.
+	updated_at: Option<Timestamp>,
+	updated_by: Option<String>,
+	/// Whether the caller may change it.
+	can_edit: bool,
 }
 
-async fn history(State(panel): State<Panel>, Path((brand, slug)): Path<(String, String)>) -> PlaceResult<Json<Value>> {
-	let (brand, slug) = ids(&brand, &slug)?;
-	let changes: Vec<Value> = panel
+fn place_dto(v: PlaceView, caller: &Caller) -> PlaceDto {
+	PlaceDto {
+		brand: v.brand,
+		slug: v.slug,
+		withdrawn: v.withdrawn,
+		gmb_id: v.gmb_id,
+		settings: v.settings.as_json(),
+		updated_at: v.updated_at,
+		updated_by: v.updated_by,
+		can_edit: caller.permissions.may(Places::Edit),
+	}
+}
+
+/// A place's live settings, as the sites are served them.
+async fn place_settings(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Ids(PlacePath { brand, slug }): Ids<PlacePath>) -> ApiResult<Json<PlaceDto>> {
+	Ok(Json(place_dto(panel.place(&brand, &slug).await?, &caller)))
+}
+
+/// One change of a place: its settings before and after.
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "PlaceChange")]
+struct ChangeDto {
+	id: Uuid,
+	at: Timestamp,
+	/// The user's email, else their id; `cli` from the pod.
+	by: String,
+	/// register | set | revert | withdraw | restore
+	kind: &'static str,
+	#[schemars(with = "PlaceLive")]
+	before: Value,
+	#[schemars(with = "PlaceLive")]
+	after: Value,
+	/// The change a revert went back before.
+	reverts: Option<Uuid>,
+}
+
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "PlaceHistory")]
+struct HistoryDto {
+	changes: Vec<ChangeDto>,
+}
+
+/// A place's changes, the latest first: its settings before and after each.
+async fn place_history(State(panel): State<Panel>, Ids(PlacePath { brand, slug }): Ids<PlacePath>) -> ApiResult<Json<HistoryDto>> {
+	let changes = panel
 		.place_history(&brand, &slug)
 		.await?
 		.into_iter()
-		.map(|c| {
-			json!({
-				"id": c.id.to_string(),
-				"at": c.at.to_string(),
-				"by": c.by,
-				"kind": c.kind.as_str(),
-				"before": c.before.as_json(),
-				"after": c.after.as_json(),
-				"reverts": c.reverts.map(|r| r.to_string()),
-			})
+		.map(|c| ChangeDto {
+			id: c.id,
+			at: c.at,
+			by: c.by,
+			kind: c.kind.as_str(),
+			before: c.before.as_json(),
+			after: c.after.as_json(),
+			reverts: c.reverts,
 		})
 		.collect();
-	Ok(Json(json!({ "changes": changes })))
+	Ok(Json(HistoryDto { changes }))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(rename = "SetPlaceSettings")]
 struct SetBody {
+	/// The whole of the settings, not a patch: a field left out is cleared.
+	#[schemars(with = "PlaceLive")]
 	settings: Value,
 	/// The `updated_at` the editor read; null (or absent) for settings never set.
 	#[serde(default)]
-	expected_updated_at: Option<String>,
+	expected_updated_at: Option<Timestamp>,
 }
 
-fn json_body<T: serde::de::DeserializeOwned>(b: Result<Json<T>, JsonRejection>) -> Result<T, ApiError> {
-	b.map(|Json(v)| v).map_err(|e| ApiError::BadRequest(e.body_text()))
-}
-
-async fn set(
+/// Replaces a place's live settings, whole; the sites take them on their next read.
+///
+/// 409 `conflict` when `expected_updated_at` is not what the place stands at; 422 with every
+/// refused field, keyed by the field or its path in a list (`hours[0].opens`, `serviceArea[2]`).
+async fn set_place_settings(
 	State(panel): State<Panel>,
 	Extension(caller): Extension<Caller>,
-	Path((brand, slug)): Path<(String, String)>,
-	b: Result<Json<SetBody>, JsonRejection>,
-) -> PlaceResult<Json<Value>> {
-	admin(&caller)?;
-	let (brand, slug) = ids(&brand, &slug)?;
-	let b = json_body(b)?;
-	let expected = expected_at(b.expected_updated_at.as_deref())?;
+	Ids(PlacePath { brand, slug }): Ids<PlacePath>,
+	Body(b): Body<SetBody>,
+) -> PlaceResult<Json<PlaceDto>> {
 	let settings = PlaceSettings::parse(&b.settings).map_err(PlaceApiError::Invalid)?;
 	let v = panel
-		.set_place(&editor(&caller), &brand, &slug, settings, Expected::At(expected), Timestamp::now())
-		.await
-		.map_err(place_error)?;
-	Ok(Json(body(v, &caller)))
+		.set_place(&editor(&caller), &brand, &slug, settings, Expected::At(b.expected_updated_at), Timestamp::now())
+		.await?;
+	Ok(Json(place_dto(v, &caller)))
 }
 
-/// `expected_updated_at` as the editor sent it: null for settings never set.
-fn expected_at(raw: Option<&str>) -> Result<Option<Timestamp>, ApiError> {
-	raw.map(|raw| {
-		raw.parse::<Timestamp>()
-			.map_err(|_| ApiError::BadRequest("expected_updated_at is not an RFC 3339 instant".into()))
-	})
-	.transpose()
+/// `{brand}/{slug}/settings/revert/{id}`.
+#[derive(Deserialize, JsonSchema)]
+struct RevertPath {
+	brand: BrandId,
+	slug: LocationId,
+	/// The change to go back before.
+	id: Uuid,
 }
 
-/// A revert's body, optional: `{"expected_updated_at": "…" | null}` checks it as a PUT does;
-/// no body, `null` or `{}` reverts over whatever is there.
-fn revert_expected(raw: &[u8]) -> Result<Expected, ApiError> {
-	if raw.iter().all(u8::is_ascii_whitespace) {
-		return Ok(Expected::Any);
-	}
-	let v: Value = serde_json::from_slice(raw).map_err(|e| ApiError::BadRequest(format!("the body is not JSON: {e}")))?;
-	match v {
-		Value::Null => Ok(Expected::Any),
-		Value::Object(m) => {
-			if let Some(k) = m.keys().find(|k| *k != "expected_updated_at") {
-				return Err(ApiError::BadRequest(format!("unknown field `{k}`, expected `expected_updated_at`")));
-			}
-			match m.get("expected_updated_at") {
-				None => Ok(Expected::Any),
-				Some(Value::Null) => Ok(Expected::At(None)),
-				Some(Value::String(t)) => Ok(Expected::At(expected_at(Some(t))?)),
-				Some(_) => Err(ApiError::BadRequest("expected_updated_at is a string or null".into())),
-			}
-		}
-		_ => Err(ApiError::BadRequest("the body is {\"expected_updated_at\": …}".into())),
-	}
-}
-
-async fn revert(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Path((brand, slug, id)): Path<(String, String, String)>, raw: Bytes) -> PlaceResult<Json<Value>> {
-	admin(&caller)?;
-	let (brand, slug) = ids(&brand, &slug)?;
-	let id = Uuid::parse_str(&id).map_err(|_| ApiError::NotFound)?;
-	let expected = revert_expected(&raw)?;
-	let v = panel.revert_place(&editor(&caller), &brand, &slug, id, expected, Timestamp::now()).await.map_err(place_error)?;
-	Ok(Json(body(v, &caller)))
-}
-
-async fn withdrawal(panel: &Panel, caller: &Caller, brand: &str, slug: &str, withdrawn: bool) -> PlaceResult<Json<Value>> {
-	admin(caller)?;
-	let (brand, slug) = ids(brand, slug)?;
-	let v = panel.withdraw_place(&editor(caller), &brand, &slug, withdrawn, Timestamp::now()).await.map_err(place_error)?;
-	Ok(Json(body(v, caller)))
-}
-
-async fn withdraw(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Path((brand, slug)): Path<(String, String)>) -> PlaceResult<Json<Value>> {
-	withdrawal(&panel, &caller, &brand, &slug, true).await
-}
-
-async fn restore(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Path((brand, slug)): Path<(String, String)>) -> PlaceResult<Json<Value>> {
-	withdrawal(&panel, &caller, &brand, &slug, false).await
-}
-
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(rename = "RevertPlaceSettings")]
+struct RevertBody {
+	/// Checked as a PUT checks it: null for settings never set. Absent: over whatever is there.
+	#[serde(default, deserialize_with = "present")]
+	#[schemars(with = "Option<Timestamp>")]
+	expected_updated_at: Option<Option<Timestamp>>,
+}
+
+/// Puts back the settings a change found (its `before`), journaled as a revert.
+///
+/// The body is optional: none, `null` or `{}` reverts over whatever is there. 404 for a change
+/// not of this place; 409 `conflict` as for a PUT.
+async fn revert_place_settings(
+	State(panel): State<Panel>,
+	Extension(caller): Extension<Caller>,
+	Ids(RevertPath { brand, slug, id }): Ids<RevertPath>,
+	b: Option<Body<RevertBody>>,
+) -> PlaceResult<Json<PlaceDto>> {
+	let expected = match b.and_then(|Body(b)| b.expected_updated_at) {
+		None => Expected::Any,
+		Some(at) => Expected::At(at),
+	};
+	let v = panel.revert_place(&editor(&caller), &brand, &slug, id, expected, Timestamp::now()).await?;
+	Ok(Json(place_dto(v, &caller)))
+}
+
+/// Takes a place off the sites: they answer it as gone. Its settings are kept.
+async fn withdraw_place(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Ids(PlacePath { brand, slug }): Ids<PlacePath>) -> PlaceResult<Json<PlaceDto>> {
+	let v = panel.withdraw_place(&editor(&caller), &brand, &slug, true, Timestamp::now()).await?;
+	Ok(Json(place_dto(v, &caller)))
+}
+
+/// Puts a withdrawn place back on the sites.
+async fn restore_place(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Ids(PlacePath { brand, slug }): Ids<PlacePath>) -> PlaceResult<Json<PlaceDto>> {
+	let v = panel.withdraw_place(&editor(&caller), &brand, &slug, false, Timestamp::now()).await?;
+	Ok(Json(place_dto(v, &caller)))
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(rename = "GmbLink")]
 struct GmbBody {
-	/// Required: `null` unlinks, an absent field is refused.
+	/// Required: `null` unlinks.
 	#[serde(deserialize_with = "Option::deserialize")]
+	#[schemars(required)]
 	gmb_id: Option<i64>,
 }
 
-async fn link_gmb(
-	State(panel): State<Panel>,
-	Extension(caller): Extension<Caller>,
-	Path((brand, slug)): Path<(String, String)>,
-	b: Result<Json<GmbBody>, JsonRejection>,
-) -> PlaceResult<Json<Value>> {
-	admin(&caller)?;
-	let (brand, slug) = ids(&brand, &slug)?;
-	let b = json_body(b)?;
-	let v = panel.link_gmb(&brand, &slug, b.gmb_id, Timestamp::now()).await.map_err(place_error)?;
-	Ok(Json(body(v, &caller)))
+/// Links a place to the conductor's GMB it is the landing of, or unlinks it.
+///
+/// 404 for a place not known; 409 `gmb_taken` when another place has that GMB.
+async fn link_gmb(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Ids(PlacePath { brand, slug }): Ids<PlacePath>, Body(b): Body<GmbBody>) -> PlaceResult<Json<PlaceDto>> {
+	let v = panel.link_gmb(&brand, &slug, b.gmb_id, Timestamp::now()).await?;
+	Ok(Json(place_dto(v, &caller)))
 }
 
-async fn gmbs(State(panel): State<Panel>) -> PlaceResult<Json<Value>> {
-	let rows = panel.gmbs(Timestamp::now()).await?;
-	let by_id: serde_json::Map<String, Value> = rows
-		.into_iter()
-		.map(|(id, brand, location, leads_7d, overdue)| (id.to_string(), json!({ "brand": brand, "location": location, "leads_7d": leads_7d, "overdue": overdue })))
-		.collect();
-	Ok(Json(Value::Object(by_id)))
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RegisterBody {
+/// A GMB's place and how its leads stand.
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "GmbPlace")]
+struct GmbPlaceDto {
 	brand: String,
-	slug: String,
+	location: String,
+	/// Leads created in the last 7 days.
+	leads_7d: u32,
+	/// Leads overdue for their first contact.
+	overdue: u32,
 }
 
-async fn register(State(panel): State<Panel>, Extension(caller): Extension<Caller>, b: Result<Json<RegisterBody>, JsonRejection>) -> PlaceResult<Response> {
-	admin(&caller)?;
-	let b = json_body(b)?;
-	let (brand, slug) = ids(&b.brand, &b.slug)?;
-	let (v, added) = panel.register_place(&editor(&caller), &brand, &slug, Timestamp::now()).await?;
+/// The places linked to a GMB, by the GMB's id, with their leads of the last 7 days and those
+/// overdue for a first contact.
+async fn gmbs(State(panel): State<Panel>) -> ApiResult<Json<BTreeMap<i64, GmbPlaceDto>>> {
+	let rows = panel.gmbs(Timestamp::now()).await?;
+	Ok(Json(
+		rows.into_iter()
+			.map(|(id, brand, location, leads_7d, overdue)| (id, GmbPlaceDto { brand, location, leads_7d, overdue }))
+			.collect(),
+	))
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(rename = "RegisterPlace")]
+struct RegisterBody {
+	brand: BrandId,
+	slug: LocationId,
+}
+
+/// Registers a place by hand, before it has a lead.
+///
+/// 409 `exists` for a place the panel knows.
+async fn register_place(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Body(b): Body<RegisterBody>) -> PlaceResult<Created<PlaceDto>> {
+	let (v, added) = panel.register_place(&editor(&caller), &b.brand, &b.slug, Timestamp::now()).await?;
 	if !added {
-		return Ok((StatusCode::CONFLICT, Json(json!({ "error": "exists" }))).into_response());
+		return Err(PlaceApiError::Exists);
 	}
-	Ok((StatusCode::CREATED, Json(body(v, &caller))).into_response())
+	Ok(Created(place_dto(v, &caller)))
 }
 
 /// What a site gets. `locale` is accepted and not needed: a landmark is stored with every

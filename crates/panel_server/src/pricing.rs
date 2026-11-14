@@ -2,32 +2,20 @@
 //! the conductor's assertion, and the sites' read under `/api/internal`, which has none.
 //!
 //! ```text
-//! GET    /api/v1/pricing                            {items: [Item]}: every brand the panel knows
-//! GET    /api/v1/pricing/{brand}                    Item
-//! PUT    /api/v1/pricing/{brand}           admin    {model, expected_updated_at} → 200 Item;
-//!                                                   409 {error: "stale", current: Item};
-//!                                                   422 {error, path}
-//! DELETE /api/v1/pricing/{brand}           admin    {expected_updated_at} → 200 Item; 409 as PUT
-//! POST   /api/v1/pricing/{brand}/preview            {model, need, inputs} → 200 {cents | null};
-//!                                                   422 as PUT
-//! GET    /api/v1/pricing/{brand}/changes            {changes: [{id, at, by, kind, valid_from, needs,
-//!                                                   model | null}]}
 //! GET    /api/internal/brands/{brand}/pricing       the model, or {} — never a 404 or a 5xx
-//!
-//! Item: {brand_id, locales, model | null, updated_at | null, updated_by | null}
 //! ```
-//!
-//! `path` is relative to the model, `code` one of `PRICING_CODES`: `needs.standard.inputs[2]`,
-//! `inputs[0].options[1].labels.en` (`""` when the model is not an object at all).
 
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use axum::{
 	Extension, Json,
-	body::Bytes,
-	extract::{Path, State, rejection::JsonRejection},
+	extract::{Path, State},
 	http::{Method, StatusCode},
 	response::{IntoResponse, Response},
+};
+use ev_lib::api::{
+	GenContext, JsonSchema, OperationOutput,
+	openapi::{Operation, Response as Answer, StatusCode as Status},
 };
 use jiff::Timestamp;
 use panel::{
@@ -35,16 +23,20 @@ use panel::{
 	place::Expected,
 	pricing::{PricingError, PricingView},
 };
-use panel_core::{ids::BrandId, pricing::Problem};
+use panel_core::{
+	ids::BrandId,
+	pricing::{Code, PricingModel, Problem},
+};
 use sa_auth::Pricing;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use uuid::Uuid;
 
 use crate::{
-	api::ApiError,
+	api::{ApiError, ApiResult, Body, ErrorDto, Ids},
 	conductor::{InternalEndpoint, InternalReads},
 	gate::Caller,
-	http::{ApiRoute, Section},
+	http::{ApiRoute, Gate, Section},
 	places::editor,
 };
 
@@ -53,14 +45,15 @@ const LIVE_WITHIN: Duration = Duration::from_millis(2500);
 
 pub(crate) fn routes() -> Vec<ApiRoute> {
 	use Method as M;
-	let work = Some(Section::Work);
+	let work = Gate::section(Section::Work);
+	let edit = work.may(Pricing::Edit);
 	vec![
-		ApiRoute::new(M::GET, "/pricing", work, list),
-		ApiRoute::new(M::GET, "/pricing/{brand}", work, item),
-		ApiRoute::new(M::GET, "/pricing/{brand}/changes", work, changes),
-		ApiRoute::new(M::POST, "/pricing/{brand}/preview", work, preview),
-		ApiRoute::new(M::PUT, "/pricing/{brand}", work, set),
-		ApiRoute::new(M::DELETE, "/pricing/{brand}", work, remove),
+		ApiRoute::new(M::GET, "/pricing", work, list_pricing),
+		ApiRoute::new(M::GET, "/pricing/{brand}", work, get_pricing),
+		ApiRoute::new(M::GET, "/pricing/{brand}/changes", work, pricing_changes),
+		ApiRoute::new(M::POST, "/pricing/{brand}/preview", work, preview_price),
+		ApiRoute::new(M::PUT, "/pricing/{brand}", edit, set_pricing),
+		ApiRoute::new(M::DELETE, "/pricing/{brand}", edit, remove_pricing),
 	]
 }
 
@@ -71,13 +64,60 @@ enum PricingApiError {
 	Invalid(Problem),
 }
 
+/// `expected_updated_at` is not what the brand's pricing stands at.
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "PricingStale")]
+struct StaleDto {
+	/// `stale`.
+	error: &'static str,
+	current: ItemDto,
+}
+
+/// A model refused: its first problem.
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "PricingInvalid")]
+struct InvalidDto {
+	/// In English, for a log.
+	error: String,
+	code: Code,
+	/// Relative to the model: `needs.standard.inputs[2]`, `inputs[0].options[1].labels.en`;
+	/// `""` when the model is not an object at all.
+	path: String,
+}
+
 impl IntoResponse for PricingApiError {
 	fn into_response(self) -> Response {
 		match self {
 			Self::Api(e) => e.into_response(),
-			Self::Stale(current) => (StatusCode::CONFLICT, Json(json!({ "error": "stale", "current": item_json(&current) }))).into_response(),
-			Self::Invalid(p) => (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({ "error": p.why, "code": p.code.as_str(), "path": p.path }))).into_response(),
+			Self::Stale(current) => (
+				StatusCode::CONFLICT,
+				Json(StaleDto {
+					error: "stale",
+					current: (*current).into(),
+				}),
+			)
+				.into_response(),
+			Self::Invalid(p) => (
+				StatusCode::UNPROCESSABLE_ENTITY,
+				Json(InvalidDto {
+					error: p.why,
+					code: p.code,
+					path: p.path,
+				}),
+			)
+				.into_response(),
 		}
+	}
+}
+
+impl OperationOutput for PricingApiError {
+	type Inner = ErrorDto;
+
+	fn inferred_responses(ctx: &mut GenContext, op: &mut Operation) -> Vec<(Option<Status>, Answer)> {
+		let mut answers = ApiError::inferred_responses(ctx, op);
+		answers.extend(Json::<StaleDto>::operation_response(ctx, op).map(|r| (Some(Status::Code(409)), r)));
+		answers.extend(Json::<InvalidDto>::operation_response(ctx, op).map(|r| (Some(Status::Code(422)), r)));
+		answers
 	}
 }
 
@@ -108,111 +148,153 @@ impl From<PricingError> for PricingApiError {
 
 type PricingResult<T> = Result<T, PricingApiError>;
 
-fn item_json(v: &PricingView) -> Value {
-	json!({
-		"brand_id": v.brand.as_str(),
-		"locales": v.locales,
-		"model": v.model,
-		"updated_at": v.updated_at.map(|t| t.to_string()),
-		"updated_by": v.updated_by,
-	})
+/// A brand's pricing as saved.
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "Pricing")]
+struct ItemDto {
+	brand_id: BrandId,
+	/// The languages every label must be in; fr and en unless set.
+	locales: Vec<String>,
+	/// Null when never set or removed: the sites keep their baked one.
+	#[schemars(with = "Option<PricingModel>")]
+	model: Option<Value>,
+	/// Null while never set: what a first save must expect. A removal has a time too.
+	updated_at: Option<Timestamp>,
+	updated_by: Option<String>,
 }
 
-fn admin(caller: &Caller) -> Result<(), ApiError> {
-	if caller.permissions.may(Pricing::Edit) { Ok(()) } else { Err(ApiError::Forbidden) }
+impl From<PricingView> for ItemDto {
+	fn from(v: PricingView) -> Self {
+		Self {
+			brand_id: v.brand,
+			locales: v.locales,
+			model: v.model,
+			updated_at: v.updated_at,
+			updated_by: v.updated_by,
+		}
+	}
 }
 
-fn json_body<T: serde::de::DeserializeOwned>(b: Result<Json<T>, JsonRejection>) -> Result<T, ApiError> {
-	b.map(|Json(v)| v).map_err(|e| ApiError::BadRequest(e.body_text()))
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "Pricings")]
+struct ItemsDto {
+	items: Vec<ItemDto>,
 }
 
-/// `expected_updated_at` as the editor sent it: null for pricing never set.
-fn expected_at(raw: Option<&str>) -> Result<Expected, ApiError> {
-	let at = raw
-		.map(|raw| {
-			raw.parse::<Timestamp>()
-				.map_err(|_| ApiError::BadRequest("expected_updated_at is not an RFC 3339 instant".into()))
-		})
-		.transpose()?;
-	Ok(Expected::At(at))
+/// The pricing of every brand the panel knows (a lead's, a place's, a landing's experiments')
+/// or has pricing or locales for.
+async fn list_pricing(State(panel): State<Panel>) -> ApiResult<Json<ItemsDto>> {
+	Ok(Json(ItemsDto {
+		items: panel.all_pricing().await?.into_iter().map(ItemDto::from).collect(),
+	}))
 }
 
-async fn list(State(panel): State<Panel>) -> PricingResult<Json<Value>> {
-	let items: Vec<Value> = panel.all_pricing().await?.iter().map(item_json).collect();
-	Ok(Json(json!({ "items": items })))
+/// `{brand}`.
+#[derive(Deserialize, JsonSchema)]
+struct BrandPath {
+	brand: BrandId,
 }
 
-async fn item(State(panel): State<Panel>, Path(brand): Path<String>) -> PricingResult<Json<Value>> {
-	let brand = BrandId::parse(&brand).map_err(ApiError::from)?;
-	Ok(Json(item_json(&panel.pricing(&brand).await?)))
+/// A brand's pricing; one never set has its model, `updated_at` and `updated_by` null.
+async fn get_pricing(State(panel): State<Panel>, Ids(BrandPath { brand }): Ids<BrandPath>) -> ApiResult<Json<ItemDto>> {
+	Ok(Json(panel.pricing(&brand).await?.into()))
 }
 
-async fn changes(State(panel): State<Panel>, Path(brand): Path<String>) -> PricingResult<Json<Value>> {
-	let brand = BrandId::parse(&brand).map_err(ApiError::from)?;
-	let changes: Vec<Value> = panel
+/// One change of a brand's pricing.
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "PricingChange")]
+struct ChangeDto {
+	id: Uuid,
+	at: Timestamp,
+	by: String,
+	/// set | remove
+	kind: &'static str,
+	/// The saved model's `validFrom`; null for a removal.
+	valid_from: Option<String>,
+	/// How many needs the saved model prices; null for a removal.
+	needs: Option<usize>,
+	/// The model the change left; null for a removal.
+	#[schemars(with = "Option<PricingModel>")]
+	model: Option<Value>,
+}
+
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "PricingChanges")]
+struct ChangesDto {
+	changes: Vec<ChangeDto>,
+}
+
+/// A brand's last 50 pricing changes, the latest first; a removal's model, `valid_from` and
+/// `needs` null.
+async fn pricing_changes(State(panel): State<Panel>, Ids(BrandPath { brand }): Ids<BrandPath>) -> ApiResult<Json<ChangesDto>> {
+	let changes = panel
 		.pricing_history(&brand)
 		.await?
 		.into_iter()
-		.map(|c| {
-			json!({
-				"id": c.id.to_string(),
-				"at": c.at.to_string(),
-				"by": c.by,
-				"kind": c.kind.as_str(),
-				"valid_from": c.valid_from,
-				"needs": c.needs,
-				"model": c.model,
-			})
+		.map(|c| ChangeDto {
+			id: c.id,
+			at: c.at,
+			by: c.by,
+			kind: c.kind.as_str(),
+			valid_from: c.valid_from,
+			needs: c.needs,
+			model: c.model,
 		})
 		.collect();
-	Ok(Json(json!({ "changes": changes })))
+	Ok(Json(ChangesDto { changes }))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(rename = "SetPricing")]
 struct SetBody {
+	#[schemars(with = "PricingModel")]
 	model: Value,
 	/// The `updated_at` the editor read; null (or absent) for pricing never set.
 	#[serde(default)]
-	expected_updated_at: Option<String>,
+	expected_updated_at: Option<Timestamp>,
 }
 
-async fn set(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Path(brand): Path<String>, b: Result<Json<SetBody>, JsonRejection>) -> PricingResult<Json<Value>> {
-	admin(&caller)?;
-	let brand = BrandId::parse(&brand).map_err(ApiError::from)?;
-	let b = json_body(b)?;
-	let expected = expected_at(b.expected_updated_at.as_deref())?;
-	let v = panel.set_pricing(&editor(&caller), &brand, &b.model, expected, Timestamp::now()).await?;
-	Ok(Json(item_json(&v)))
+/// Saves a brand's price list; its sites take it on their next read.
+///
+/// 409 `stale` with the current pricing when `expected_updated_at` is not what it stands at;
+/// 422 with the model's first problem (`code` one of `PRICING_CODES`).
+async fn set_pricing(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Ids(BrandPath { brand }): Ids<BrandPath>, Body(b): Body<SetBody>) -> PricingResult<Json<ItemDto>> {
+	let v = panel
+		.set_pricing(&editor(&caller), &brand, &b.model, Expected::At(b.expected_updated_at), Timestamp::now())
+		.await?;
+	Ok(Json(v.into()))
 }
 
-/// A removal's body: `{"expected_updated_at": "…" | null}`, required — taking a brand's prices
-/// off its sites over a version the editor did not see is not something to do by default.
-fn remove_expected(raw: &[u8]) -> Result<Expected, ApiError> {
-	let shape = || ApiError::BadRequest("the body is {\"expected_updated_at\": \"…\" | null}".into());
-	let v: Value = serde_json::from_slice(raw).map_err(|_| shape())?;
-	let Value::Object(m) = v else { return Err(shape()) };
-	if m.len() != 1 {
-		return Err(shape());
-	}
-	match m.get("expected_updated_at").ok_or_else(shape)? {
-		Value::Null => expected_at(None),
-		Value::String(t) => expected_at(Some(t)),
-		_ => Err(shape()),
-	}
-}
-
-async fn remove(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Path(brand): Path<String>, raw: Bytes) -> PricingResult<Json<Value>> {
-	admin(&caller)?;
-	let brand = BrandId::parse(&brand).map_err(ApiError::from)?;
-	let expected = remove_expected(&raw)?;
-	let v = panel.remove_pricing(&editor(&caller), &brand, expected, Timestamp::now()).await?;
-	Ok(Json(item_json(&v)))
-}
-
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(rename = "RemovePricing")]
+struct RemoveBody {
+	/// Required: taking a brand's prices off its sites over a version the editor did not see is
+	/// not something to do by default. Null for pricing never set.
+	#[serde(deserialize_with = "Option::deserialize")]
+	#[schemars(required)]
+	expected_updated_at: Option<Timestamp>,
+}
+
+/// Takes a brand's price list off its sites: they keep their baked one.
+///
+/// 409 as for a PUT.
+async fn remove_pricing(
+	State(panel): State<Panel>,
+	Extension(caller): Extension<Caller>,
+	Ids(BrandPath { brand }): Ids<BrandPath>,
+	Body(b): Body<RemoveBody>,
+) -> PricingResult<Json<ItemDto>> {
+	let v = panel.remove_pricing(&editor(&caller), &brand, Expected::At(b.expected_updated_at), Timestamp::now()).await?;
+	Ok(Json(v.into()))
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(rename = "PricePreviewRequest")]
 struct PreviewBody {
+	#[schemars(with = "PricingModel")]
 	model: Value,
 	need: String,
 	/// Input id → option id.
@@ -220,11 +302,19 @@ struct PreviewBody {
 	inputs: BTreeMap<String, String>,
 }
 
-async fn preview(State(panel): State<Panel>, Path(brand): Path<String>, b: Result<Json<PreviewBody>, JsonRejection>) -> PricingResult<Json<Value>> {
-	let brand = BrandId::parse(&brand).map_err(ApiError::from)?;
-	let b = json_body(b)?;
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "PricePreview")]
+struct PreviewDto {
+	/// Integer cents EUR TTC; null when the need is a quote.
+	cents: Option<i64>,
+}
+
+/// What a model, saved or not, prices a need at with these answers; `cents` null is no price.
+///
+/// 422 as for a PUT: the draft is held to the brand's locales, as a site would hold it.
+async fn preview_price(State(panel): State<Panel>, Ids(BrandPath { brand }): Ids<BrandPath>, Body(b): Body<PreviewBody>) -> PricingResult<Json<PreviewDto>> {
 	let cents = panel.preview_price(&brand, &b.model, &b.need, &b.inputs).await?;
-	Ok(Json(json!({ "cents": cents })))
+	Ok(Json(PreviewDto { cents }))
 }
 
 /// What a site gets: the model, or `{}` for none — and `{}` too for a brand id that cannot be
@@ -245,27 +335,6 @@ pub(crate) async fn live(State(panel): State<Panel>, Extension(reads): Extension
 		Err(_) => {
 			tracing::warn!(%brand, "serving a brand's pricing to a site took too long: answered {{}}");
 			Json(json!({}))
-		}
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-
-	#[test]
-	fn a_removal_names_what_it_removes() {
-		assert!(matches!(remove_expected(br#"{"expected_updated_at": null}"#), Ok(Expected::At(None))));
-		assert!(matches!(remove_expected(br#"{"expected_updated_at": "2026-10-03T12:00:00Z"}"#), Ok(Expected::At(Some(_)))));
-		for bad in [
-			&b""[..],
-			b"null",
-			b"{}",
-			br#"{"expected_updated_at": 1}"#,
-			br#"{"expected_updated_at": null, "x": 1}"#,
-			br#"{"expected_updated_at": "yesterday"}"#,
-		] {
-			assert!(remove_expected(bad).is_err(), "{}", String::from_utf8_lossy(bad));
 		}
 	}
 }

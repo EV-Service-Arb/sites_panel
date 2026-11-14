@@ -1,38 +1,47 @@
 //! The operator API, `/api/v1`, for the sites' front end through the conductor. JSON in and out;
-//! every request has passed the assertion gate (`gate::user`), so a [`Caller`] is in its extensions. What an action
-//! means is the engine's (`panel::operator`); this only translates and asks the caller's
-//! permissions.
+//! every request has passed the assertion gate (`gate::user`), so a [`Caller`] is in its
+//! extensions. What an action means is the engine's (`panel::operator`); this only translates.
 //!
 //! Timestamps are RFC 3339 strings, money is minor units of its currency.
 
+use std::{borrow::Cow, collections::BTreeMap};
+
 use axum::{
 	Extension, Json,
-	extract::{Path, Query, State, rejection::JsonRejection},
-	http::{HeaderMap, Method, StatusCode},
+	body::Bytes,
+	extract::{FromRequest, FromRequestParts, OptionalFromRequest, Path, Query, Request, State},
+	http::{HeaderMap, HeaderValue, StatusCode, header, request::Parts},
 	response::{IntoResponse, Response},
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use ev_lib::api::{
+	Created, GenContext, JsonSchema, OperationInput, OperationOutput, Upserted,
+	openapi::{HeaderStyle, Operation, Parameter, ParameterData, ParameterSchemaOrContent, ReferenceOr, Response as Answer, SchemaObject, StatusCode as Status},
+	schemars::{Schema, SchemaGenerator, json_schema},
+};
 use jiff::{SignedDuration, Timestamp, civil::Date, tz::TimeZone};
 use panel::{
 	Panel,
-	operator::{ActionError, Actor, CallOutcome, EventView, FunnelBy, FunnelSlice, LeadQuery, LeadView, NewLead, Payment, Pii, StageMove, SuspectFilter},
+	operator::{ActionError, Actor, CallOutcome, Done, EventView, FunnelBy, FunnelSlice, LeadQuery, LeadView, NewLead, Payment, Pii, StageMove, SuspectFilter},
 };
 use panel_core::{
 	Invalid,
+	booking::{BookingMatch, BookingStatus, DayPart, Provider},
 	fact::{LeadChannel, LeadFlow, MessageRef, Messenger},
 	funnel::{MIN_SAMPLE, Share},
 	ids::{BrandId, JobId, LeadId, LocationId},
 	lead::Stage,
 };
 use sa_auth::{Leads, Pii as SeesPii, SourceKind};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use serde_json::{Value, json};
+use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
+use serde_json::Value;
+use sha2::{Digest, Sha256};
 use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::{
 	gate::Caller,
-	http::{ApiRoute, Section},
+	http::{ApiRoute, Gate, Section, api_routes},
 };
 
 /// The longest span the funnel sums over.
@@ -63,37 +72,25 @@ fn currency(v: &str) -> ApiResult<String> {
 	Ok(v.to_owned())
 }
 
-/// The client's idempotency key: 1–128 visible ASCII characters, or none.
-pub(crate) fn idempotency_key(headers: &HeaderMap) -> ApiResult<Option<String>> {
-	let Some(v) = headers.get(IDEMPOTENCY_KEY) else { return Ok(None) };
-	let v = v.to_str().ok().filter(|v| (1..=128).contains(&v.len()) && v.bytes().all(|b| b.is_ascii_graphic()));
-	v.map(|v| Some(v.to_owned()))
-		.ok_or_else(|| ApiError::BadRequest("Idempotency-Key is 1–128 visible ASCII characters".into()))
-}
-
-/// `201` for what was recorded now, `200` for a retry answered with what the first recorded.
-pub(crate) fn recorded(replayed: bool, v: Value) -> Response {
-	let status = if replayed { StatusCode::OK } else { StatusCode::CREATED };
-	(status, Json(v)).into_response()
-}
-
 pub(crate) fn routes() -> Vec<ApiRoute> {
-	use Method as M;
-	let work = Some(Section::Work);
+	use axum::http::Method as M;
+	let work = Gate::section(Section::Work);
+	let edit = work.may(Leads::Edit);
 	vec![
-		ApiRoute::new(M::GET, "/me", None, me),
-		ApiRoute::new(M::GET, "/leads", work, leads),
-		ApiRoute::new(M::POST, "/leads", work, create_lead),
+		ApiRoute::new(M::GET, "/me", Gate::USER, me),
+		ApiRoute::new(M::GET, "/openapi.json", Gate::USER.or_conductor(), openapi),
+		ApiRoute::new(M::GET, "/leads", work, list_leads),
+		ApiRoute::new(M::POST, "/leads", edit, create_lead),
 		ApiRoute::new(M::GET, "/leads/counts", work, lead_counts),
-		ApiRoute::new(M::GET, "/leads/{brand}/{lead}", work, lead),
-		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/stage", work, stage),
-		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/messaged", work, messaged),
-		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/no_answer", work, no_answer),
-		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/calls/attempt", work, attempt_call),
-		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/calls/{attempt}/outcome", work, call_outcome),
-		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/payments", work, payment),
-		ApiRoute::new(M::GET, "/funnel", Some(Section::Analysis), funnel),
-		ApiRoute::new(M::GET, "/places", work, places),
+		ApiRoute::new(M::GET, "/leads/{brand}/{lead}", work, get_lead),
+		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/stage", edit, move_lead),
+		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/messaged", edit, mark_messaged),
+		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/no_answer", edit, no_answer),
+		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/calls/attempt", edit, attempt_call),
+		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/calls/{attempt}/outcome", edit, call_outcome),
+		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/payments", edit, record_payment),
+		ApiRoute::new(M::GET, "/funnel", Gate::section(Section::Analysis), funnel),
+		ApiRoute::new(M::GET, "/places", work, list_places),
 	]
 }
 
@@ -110,6 +107,13 @@ pub enum ApiError {
 	Internal(eyre::Report),
 }
 
+/// What every failed operation answers, its status saying which failure.
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "Error")]
+pub struct ErrorDto {
+	pub error: String,
+}
+
 impl IntoResponse for ApiError {
 	fn into_response(self) -> Response {
 		let (status, msg) = match self {
@@ -123,7 +127,19 @@ impl IntoResponse for ApiError {
 				(StatusCode::INTERNAL_SERVER_ERROR, "internal error".to_owned())
 			}
 		};
-		(status, Json(json!({ "error": msg }))).into_response()
+		(status, Json(ErrorDto { error: msg })).into_response()
+	}
+}
+
+impl OperationOutput for ApiError {
+	type Inner = ErrorDto;
+
+	fn operation_response(ctx: &mut GenContext, op: &mut Operation) -> Option<Answer> {
+		Json::<ErrorDto>::operation_response(ctx, op)
+	}
+
+	fn inferred_responses(ctx: &mut GenContext, op: &mut Operation) -> Vec<(Option<Status>, Answer)> {
+		Self::operation_response(ctx, op).map(|r| (None, r)).into_iter().collect()
 	}
 }
 
@@ -152,13 +168,167 @@ impl From<ActionError> for ApiError {
 
 pub(crate) type ApiResult<T> = Result<T, ApiError>;
 
-/// A JSON body, its rejection turned into our error shape.
-pub(crate) fn body<T: DeserializeOwned>(b: Result<Json<T>, JsonRejection>) -> ApiResult<T> {
-	b.map(|Json(v)| v).map_err(|e| ApiError::BadRequest(e.body_text()))
+/// A JSON body, refused in the shape every failure has. Optional (`Option<Body<T>>`), an empty
+/// body or `null` is none, and the content type is not asked for.
+pub(crate) struct Body<T>(pub T);
+
+impl<T: DeserializeOwned, S: Send + Sync> FromRequest<S> for Body<T> {
+	type Rejection = ApiError;
+
+	async fn from_request(req: Request, state: &S) -> Result<Self, ApiError> {
+		<Json<T> as FromRequest<S>>::from_request(req, state)
+			.await
+			.map(|Json(v)| Self(v))
+			.map_err(|e| ApiError::BadRequest(e.body_text()))
+	}
 }
 
-fn allow(ok: bool) -> ApiResult<()> {
-	if ok { Ok(()) } else { Err(ApiError::Forbidden) }
+impl<T: DeserializeOwned, S: Send + Sync> OptionalFromRequest<S> for Body<T> {
+	type Rejection = ApiError;
+
+	async fn from_request(req: Request, state: &S) -> Result<Option<Self>, ApiError> {
+		let raw = <Bytes as FromRequest<S>>::from_request(req, state).await.map_err(|e| ApiError::BadRequest(e.body_text()))?;
+		if raw.iter().all(u8::is_ascii_whitespace) {
+			return Ok(None);
+		}
+		let v: Option<T> = serde_json::from_slice(&raw).map_err(|e| ApiError::BadRequest(format!("the body: {e}")))?;
+		Ok(v.map(Self))
+	}
+}
+
+impl<T: JsonSchema> OperationInput for Body<T> {
+	fn operation_input(ctx: &mut GenContext, op: &mut Operation) {
+		Json::<T>::operation_input(ctx, op);
+	}
+}
+
+/// A query string, refused in the shape every failure has.
+pub(crate) struct Params<T>(pub T);
+
+impl<T: DeserializeOwned, S: Send + Sync> FromRequestParts<S> for Params<T> {
+	type Rejection = ApiError;
+
+	async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, ApiError> {
+		Query::<T>::from_request_parts(parts, state)
+			.await
+			.map(|Query(v)| Self(v))
+			.map_err(|e| ApiError::BadRequest(e.body_text()))
+	}
+}
+
+impl<T: JsonSchema> OperationInput for Params<T> {
+	fn operation_input(ctx: &mut GenContext, op: &mut Operation) {
+		Query::<T>::operation_input(ctx, op);
+	}
+}
+
+/// The ids in a path, by their names in it; one that is not an id at all names nothing: a 404.
+pub(crate) struct Ids<T>(pub T);
+
+impl<T: DeserializeOwned + Send, S: Send + Sync> FromRequestParts<S> for Ids<T> {
+	type Rejection = ApiError;
+
+	async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, ApiError> {
+		Path::<T>::from_request_parts(parts, state).await.map(|Path(v)| Self(v)).map_err(|_| ApiError::NotFound)
+	}
+}
+
+impl<T: JsonSchema> OperationInput for Ids<T> {
+	fn operation_input(ctx: &mut GenContext, op: &mut Operation) {
+		Path::<T>::operation_input(ctx, op);
+	}
+}
+
+/// With `#[serde(default)]`: a field that is there, `null` included, apart from one left out.
+pub(crate) fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<T>, D::Error> {
+	T::deserialize(d).map(Some)
+}
+
+/// `{brand}/{lead}`.
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct LeadPath {
+	pub brand: BrandId,
+	pub lead: LeadId,
+}
+
+/// The client's `Idempotency-Key`, when it sent one: a write safe to retry.
+pub(crate) struct IdempotencyKey(pub Option<String>);
+
+/// The same, required: where a retry without one would act twice.
+pub(crate) struct RequiredIdempotencyKey(pub String);
+
+fn idempotency_key(parts: &Parts) -> ApiResult<Option<String>> {
+	let Some(v) = parts.headers.get(IDEMPOTENCY_KEY) else { return Ok(None) };
+	let v = v.to_str().ok().filter(|v| (1..=128).contains(&v.len()) && v.bytes().all(|b| b.is_ascii_graphic()));
+	v.map(|v| Some(v.to_owned()))
+		.ok_or_else(|| ApiError::BadRequest("Idempotency-Key is 1–128 visible ASCII characters".into()))
+}
+
+impl<S: Send + Sync> FromRequestParts<S> for IdempotencyKey {
+	type Rejection = ApiError;
+
+	async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, ApiError> {
+		idempotency_key(parts).map(Self)
+	}
+}
+
+impl<S: Send + Sync> FromRequestParts<S> for RequiredIdempotencyKey {
+	type Rejection = ApiError;
+
+	async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, ApiError> {
+		idempotency_key(parts)?.map(Self).ok_or_else(|| ApiError::BadRequest("Idempotency-Key is required".into()))
+	}
+}
+
+fn idempotency_header(ctx: &mut GenContext, op: &mut Operation, required: bool) {
+	op.parameters.push(ReferenceOr::Item(Parameter::Header {
+		parameter_data: ParameterData {
+			name: "Idempotency-Key".into(),
+			description: Some(
+				"1–128 visible ASCII characters. The action's event id derives from (user, action, subject, key): a retry finds the first attempt and is answered 200 with \
+				 its body, journaling nothing."
+					.into(),
+			),
+			required,
+			format: ParameterSchemaOrContent::Schema(SchemaObject {
+				json_schema: ctx.schema.subschema_for::<String>(),
+				example: None,
+				external_docs: None,
+			}),
+			extensions: Default::default(),
+			deprecated: None,
+			example: None,
+			examples: Default::default(),
+			explode: None,
+		},
+		style: HeaderStyle::Simple,
+	}));
+}
+
+impl OperationInput for IdempotencyKey {
+	fn operation_input(ctx: &mut GenContext, op: &mut Operation) {
+		idempotency_header(ctx, op, false);
+	}
+}
+
+impl OperationInput for RequiredIdempotencyKey {
+	fn operation_input(ctx: &mut GenContext, op: &mut Operation) {
+		idempotency_header(ctx, op, true);
+	}
+}
+
+/// `201` for what was recorded now, `200` for a retry answered with what the first recorded.
+pub(crate) fn recorded<T, U>(done: Done<T>, answer: impl FnOnce(T) -> U) -> Upserted<U> {
+	match done.replayed {
+		true => Upserted::Existed(answer(done.value)),
+		false => Upserted::Created(answer(done.value)),
+	}
+}
+
+/// The event a write journaled.
+#[derive(JsonSchema, Serialize)]
+pub(crate) struct Journaled {
+	pub event_id: Uuid,
 }
 
 /// The point where the caller's permissions decide whether PII is shown.
@@ -166,35 +336,9 @@ pub(crate) fn pii(caller: &Caller) -> Pii {
 	if caller.permissions.may(SeesPii::See) { Pii::Reveal } else { Pii::Withhold }
 }
 
-fn ids(brand: &str, lead: &str) -> ApiResult<(BrandId, LeadId)> {
-	Ok((BrandId::parse(brand)?, LeadId::parse(lead)?))
-}
-
-fn ts(t: Option<Timestamp>) -> Option<String> {
-	t.map(|t| t.to_string())
-}
-
-/// A UTC day, `2026-09-30`.
-fn day(raw: &str, what: &str) -> ApiResult<Date> {
-	raw.parse::<Date>().map_err(|_| ApiError::BadRequest(format!("{what} is not a date like 2026-09-30")))
-}
-
-/// `from` and `to`, UTC days, both included — `to` not before `from`.
-fn days(from: Option<&str>, to: Option<&str>, names: [&str; 2]) -> ApiResult<(Option<Date>, Option<Date>)> {
-	let from = from.map(|d| day(d, names[0])).transpose()?;
-	let to = to.map(|d| day(d, names[1])).transpose()?;
-	if let (Some(f), Some(t)) = (from, to)
-		&& f > t
-	{
-		return Err(ApiError::BadRequest(format!("{} is after {}", names[0], names[1])));
-	}
-	Ok((from, to))
-}
-
 /// `from` and `to` of a report, UTC days, both included: by default the last 30 days, at
 /// most [`MAX_FUNNEL_DAYS`].
-pub(crate) fn window(from: Option<&str>, to: Option<&str>) -> ApiResult<(Date, Date)> {
-	let (from, to) = days(from, to, ["from", "to"])?;
+fn window(from: Option<Date>, to: Option<Date>) -> ApiResult<(Date, Date)> {
 	let to = to.unwrap_or_else(|| Timestamp::now().to_zoned(TimeZone::UTC).date());
 	let from = match from {
 		Some(d) => d,
@@ -217,14 +361,16 @@ fn day_start(d: Date) -> ApiResult<Timestamp> {
 // ── /me ─────────────────────────────────────────────────────────────────────────────────
 
 /// `GET /me`.
-#[derive(Serialize, TS)]
+#[derive(JsonSchema, Serialize, TS)]
 pub struct Me {
 	/// The concierge user id: what a user's own marks are kept under.
 	sub: Uuid,
+	/// The caller's `sa:sites:*` permissions.
 	#[ts(type = "Array<Permission>")]
 	permissions: Vec<String>,
 }
 
+/// The caller, as the conductor vouched for them: their user id and `sa:sites:*` permissions.
 async fn me(Extension(caller): Extension<Caller>) -> Json<Me> {
 	Json(Me {
 		sub: caller.user_id,
@@ -232,34 +378,112 @@ async fn me(Extension(caller): Extension<Caller>) -> Json<Me> {
 	})
 }
 
+/// The `/api/v1` document as built at boot, and its ETag.
+#[derive(Clone)]
+pub(crate) struct Catalog {
+	json: Bytes,
+	etag: HeaderValue,
+}
+
+impl Catalog {
+	pub(crate) fn new() -> Self {
+		let doc = ev_lib::api::document("Service-Arb sites", env!("CARGO_PKG_VERSION"), "/api/v1", &api_routes(), ev_lib::api_docs!());
+		let json = serde_json::to_vec(&doc).expect("a document serializes");
+		let digest: String = Sha256::digest(&json).iter().take(8).map(|b| format!("{b:02x}")).collect();
+		Self {
+			json: json.into(),
+			etag: HeaderValue::from_str(&format!("\"{digest}\"")).expect("hex in quotes"),
+		}
+	}
+}
+
+/// The document, or the word that the caller's copy is it.
+pub(crate) enum Served {
+	Document(Catalog),
+	Unchanged(Catalog),
+}
+
+/// An OpenAPI 3.1 document.
+struct OpenApiDocument;
+
+impl JsonSchema for OpenApiDocument {
+	fn schema_name() -> Cow<'static, str> {
+		"OpenApi".into()
+	}
+
+	fn json_schema(_: &mut SchemaGenerator) -> Schema {
+		json_schema!({ "type": "object", "description": "An OpenAPI 3.1 document." })
+	}
+}
+
+impl IntoResponse for Served {
+	fn into_response(self) -> Response {
+		match self {
+			Self::Document(c) => ([(header::CONTENT_TYPE, HeaderValue::from_static("application/json")), (header::ETAG, c.etag)], c.json).into_response(),
+			Self::Unchanged(c) => (StatusCode::NOT_MODIFIED, [(header::ETAG, c.etag)]).into_response(),
+		}
+	}
+}
+
+impl OperationOutput for Served {
+	type Inner = ();
+
+	fn inferred_responses(ctx: &mut GenContext, op: &mut Operation) -> Vec<(Option<Status>, Answer)> {
+		let unchanged = Answer {
+			description: "The copy `If-None-Match` named is the document.".into(),
+			..Answer::default()
+		};
+		Json::<OpenApiDocument>::operation_response(ctx, op)
+			.map(|r| (Some(Status::Code(200)), r))
+			.into_iter()
+			.chain([(Some(Status::Code(304)), unchanged)])
+			.collect()
+	}
+}
+
+/// The OpenAPI document of every `/api/v1` operation, each with the permission that opens it
+/// (`x-permission`).
+///
+/// The whole of it, whoever asks; built at boot. It carries an ETag, and an `If-None-Match`
+/// naming it is answered 304. The conductor pulls it under its own assertion.
+async fn openapi(Extension(catalog): Extension<Catalog>, headers: HeaderMap) -> Served {
+	match headers.get(header::IF_NONE_MATCH) == Some(&catalog.etag) {
+		true => Served::Unchanged(catalog),
+		false => Served::Document(catalog),
+	}
+}
+
 // ── leads ───────────────────────────────────────────────────────────────────────────────
 
-#[derive(Serialize)]
+/// A lead: the projection's row, its wait for a first contact, and what the customer left.
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "Lead")]
 struct LeadDto {
 	brand: String,
 	lead_id: String,
 	location: Option<String>,
 	job_id: Option<String>,
-	stage: &'static str,
+	stage: Stage,
 	/// form | phone_inbound | callback | whatsapp | telegram; null for a lead seen before its
 	/// creation.
 	channel: Option<String>,
 	/// The ref the customer carries into a messenger (`AQ-7K3F`), when the landing made one.
 	message_ref: Option<String>,
-	/// When the customer first wrote on a messenger, and on which (whatsapp | telegram); null
-	/// while they have not.
-	messaged_at: Option<String>,
-	messaged_channel: Option<&'static str>,
+	/// When the customer first wrote on a messenger, and on which; null while they have not.
+	messaged_at: Option<Timestamp>,
+	messaged_channel: Option<Messenger>,
 	/// `rate_limited` | `too_fast` when the landing's antispam doubted it; null otherwise.
 	suspect: Option<String>,
+	/// Typed in by hand (an event of kind `panel`).
 	manual: bool,
-	created_at: Option<String>,
-	contacted_at: Option<String>,
-	quoted_at: Option<String>,
-	won_at: Option<String>,
-	completed_at: Option<String>,
-	paid_at: Option<String>,
-	lost_at: Option<String>,
+	/// When each stage was first reached.
+	created_at: Option<Timestamp>,
+	contacted_at: Option<Timestamp>,
+	quoted_at: Option<Timestamp>,
+	won_at: Option<Timestamp>,
+	completed_at: Option<Timestamp>,
+	paid_at: Option<Timestamp>,
+	lost_at: Option<Timestamp>,
 	lost_reason: Option<String>,
 	/// `quote` | `estimate` | `fixed`: the landing's flow; null when it said none.
 	flow: Option<String>,
@@ -270,36 +494,38 @@ struct LeadDto {
 	/// An estimate's inputs, input id → value id.
 	estimate_inputs: Option<Value>,
 	/// Its booking; `status: none` when it has none.
-	booking: BookingDto,
-	last_event_at: String,
+	booking: LeadBookingDto,
+	last_event_at: Timestamp,
 	/// Set while it waits for its first contact.
 	sla: Option<SlaDto>,
-	/// What the customer left (name, phone, need, …), for a caller who sees it; absent
-	/// otherwise or when there is none.
+	/// What the customer left (name, phone, need, …), for a caller holding
+	/// `sa:sites:work:pii:see`; absent otherwise or when there is none.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pii: Option<Value>,
 }
 
-#[derive(Serialize)]
-struct BookingDto {
-	/// none | requested | booked | canceled | done | no_show
-	status: &'static str,
-	/// manual | link | google_calendar | cal_com
-	provider: Option<&'static str>,
-	start_at: Option<String>,
-	end_at: Option<String>,
+/// A lead's booking, folded from its facts.
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "LeadBooking")]
+struct LeadBookingDto {
+	status: BookingStatus,
+	provider: Option<Provider>,
+	start_at: Option<Timestamp>,
+	end_at: Option<Timestamp>,
 	/// The provider's booking, when the slot is one.
 	external_ref: Option<String>,
-	/// ref | contact | manual: how the slot joined the lead.
-	r#match: Option<&'static str>,
-	/// The visitor's wish (`YYYY-MM-DD`; morning | afternoon | evening).
-	preferred_date: Option<String>,
-	preferred_part: Option<&'static str>,
+	/// How the slot joined the lead.
+	r#match: Option<BookingMatch>,
+	/// The visitor's wish.
+	preferred_date: Option<Date>,
+	preferred_part: Option<DayPart>,
 }
 
-#[derive(Serialize)]
+/// A lead's wait for its first contact: overdue after 30 minutes.
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "Sla")]
 struct SlaDto {
-	waiting_since: String,
+	waiting_since: Timestamp,
 	waiting_seconds: i64,
 	overdue: bool,
 }
@@ -308,7 +534,7 @@ fn lead_dto(v: LeadView, now: Timestamp) -> LeadDto {
 	let r = v.row;
 	LeadDto {
 		sla: v.waiting.map(|w| SlaDto {
-			waiting_since: w.since.to_string(),
+			waiting_since: w.since,
 			waiting_seconds: now.duration_since(w.since).as_secs(),
 			overdue: w.overdue,
 		}),
@@ -317,61 +543,76 @@ fn lead_dto(v: LeadView, now: Timestamp) -> LeadDto {
 		lead_id: r.lead_id,
 		location: r.location_id,
 		job_id: r.job_id,
-		stage: r.stage.as_str(),
+		stage: r.stage,
 		channel: r.channel,
 		message_ref: r.message_ref,
-		messaged_at: ts(r.messaged.map(|(at, _)| at)),
-		messaged_channel: r.messaged.map(|(_, m)| m.as_str()),
+		messaged_at: r.messaged.map(|(at, _)| at),
+		messaged_channel: r.messaged.map(|(_, m)| m),
 		suspect: r.suspect,
 		manual: r.manual,
-		created_at: ts(r.created_at),
-		contacted_at: ts(r.contacted_at),
-		quoted_at: ts(r.quoted_at),
-		won_at: ts(r.won_at),
-		completed_at: ts(r.completed_at),
-		paid_at: ts(r.paid_at),
-		lost_at: ts(r.lost_at),
+		created_at: r.created_at,
+		contacted_at: r.contacted_at,
+		quoted_at: r.quoted_at,
+		won_at: r.won_at,
+		completed_at: r.completed_at,
+		paid_at: r.paid_at,
+		lost_at: r.lost_at,
 		lost_reason: r.lost_reason,
 		flow: r.flow,
 		quoted_cents: r.quoted_cents,
 		pricing_valid_from: r.pricing_valid_from,
 		estimate_inputs: r.estimate_inputs,
-		booking: BookingDto {
-			status: r.booking.status.as_str(),
-			provider: r.booking.provider.map(|p| p.as_str()),
-			start_at: ts(r.booking.start_at),
-			end_at: ts(r.booking.end_at),
+		booking: LeadBookingDto {
+			status: r.booking.status,
+			provider: r.booking.provider,
+			start_at: r.booking.start_at,
+			end_at: r.booking.end_at,
 			external_ref: r.booking.external_ref,
-			r#match: r.booking.matched.map(|m| m.as_str()),
-			preferred_date: r.booking.preferred_date.map(|d| d.to_string()),
-			preferred_part: r.booking.preferred_part.map(|p| p.as_str()),
+			r#match: r.booking.matched,
+			preferred_date: r.booking.preferred_date,
+			preferred_part: r.booking.preferred_part,
 		},
-		last_event_at: r.last_event_at.to_string(),
+		last_event_at: r.last_event_at,
 	}
 }
 
-#[derive(Deserialize)]
+/// Which of the suspect leads to list.
+#[derive(Clone, Copy, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(rename = "SuspectFilter")]
+enum Suspect {
+	/// Only those the landing's antispam doubted.
+	Only,
+	/// None of them.
+	Exclude,
+}
+
+#[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct LeadsQuery {
-	stage: Option<String>,
-	brand: Option<String>,
+	stage: Option<Stage>,
+	brand: Option<BrandId>,
+	/// The conductor's selection of GMBs, ids split by commas (`3,7`): only the leads of places
+	/// linked to one of them. Empty selects none; absent narrows nothing.
 	gmb: Option<String>,
+	/// Only the leads overdue for their first contact.
 	overdue: Option<bool>,
-	/// UTC days, both included.
-	created_from: Option<String>,
-	created_to: Option<String>,
-	/// `only` | `exclude`; absent lists every lead.
-	suspect: Option<String>,
-	/// `quote` | `estimate` | `fixed`; absent lists every lead.
-	flow: Option<String>,
-	/// A booking status (`none`, `requested`, `booked`, …); absent lists every lead.
-	booking: Option<String>,
-	/// A lead channel (`form`, `whatsapp`, …); absent lists every lead.
-	channel: Option<String>,
-	/// A messenger ref as the customer quotes it or an operator pastes it (`Réf. aq 7k3f`; see
-	/// `MessageRef::from_typed`): the leads carrying it.
+	/// Created on or after this UTC day.
+	created_from: Option<Date>,
+	/// Created on or before this UTC day.
+	created_to: Option<Date>,
+	/// Absent: every lead.
+	suspect: Option<Suspect>,
+	/// Absent: every lead; a lead that said no flow is under none of the three.
+	flow: Option<LeadFlow>,
+	booking: Option<BookingStatus>,
+	channel: Option<LeadChannel>,
+	/// A messenger ref as the customer quotes it or an operator pastes it (`Réf. aq 7k3f`:
+	/// label, case, spaces; O→0, I/L→1 in the code): the leads carrying it.
 	message_ref: Option<String>,
+	/// `next_cursor` of the page before.
 	cursor: Option<String>,
+	/// At most 200; 50 when absent.
 	limit: Option<u32>,
 }
 
@@ -401,38 +642,39 @@ fn cursor_decode(raw: &str) -> ApiResult<(Timestamp, String, String)> {
 	Ok((at.parse().map_err(|_| bad())?, brand.to_owned(), lead.to_owned()))
 }
 
-async fn leads(State(panel): State<Panel>, Extension(caller): Extension<Caller>, q: Result<Query<LeadsQuery>, axum::extract::rejection::QueryRejection>) -> ApiResult<Json<Value>> {
-	let Query(q) = q.map_err(|e| ApiError::BadRequest(e.body_text()))?;
-	let (created_from, created_to) = days(q.created_from.as_deref(), q.created_to.as_deref(), ["created_from", "created_to"])?;
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "LeadPage")]
+struct LeadPageDto {
+	leads: Vec<LeadDto>,
+	/// Asks for the next page; null on the last.
+	next_cursor: Option<String>,
+}
+
+/// The leads, newest created first, a page at a time.
+///
+/// Each filter narrows; `created_*` are UTC days, both included.
+async fn list_leads(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Params(q): Params<LeadsQuery>) -> ApiResult<Json<LeadPageDto>> {
+	if let (Some(f), Some(t)) = (q.created_from, q.created_to)
+		&& f > t
+	{
+		return Err(ApiError::BadRequest("created_from is after created_to".into()));
+	}
 	let next_day = |d: Date| d.tomorrow().map_err(|e| ApiError::Internal(e.into())).and_then(day_start);
 	let query = LeadQuery {
-		stage: q.stage.as_deref().map(str::parse::<Stage>).transpose()?,
-		brand: q.brand.as_deref().map(BrandId::parse).transpose()?,
+		stage: q.stage,
+		brand: q.brand,
 		gmbs: gmbs(q.gmb.as_deref())?,
 		overdue: q.overdue.unwrap_or(false),
-		created_from: created_from.map(day_start).transpose()?,
-		created_before: created_to.map(next_day).transpose()?,
-		suspect: match q.suspect.as_deref() {
+		created_from: q.created_from.map(day_start).transpose()?,
+		created_before: q.created_to.map(next_day).transpose()?,
+		suspect: match q.suspect {
 			None => SuspectFilter::All,
-			Some("only") => SuspectFilter::Only,
-			Some("exclude") => SuspectFilter::Exclude,
-			Some(_) => return Err(ApiError::BadRequest("suspect is not one of only, exclude".into())),
+			Some(Suspect::Only) => SuspectFilter::Only,
+			Some(Suspect::Exclude) => SuspectFilter::Exclude,
 		},
-		flow: q
-			.flow
-			.as_deref()
-			.map(|f| LeadFlow::parse(f).map_err(|_| ApiError::BadRequest("flow is not one of quote, estimate, fixed".into())))
-			.transpose()?,
-		booking: q
-			.booking
-			.as_deref()
-			.map(|b| panel_core::booking::BookingStatus::parse(b).map_err(|e| ApiError::BadRequest(e.0)))
-			.transpose()?,
-		channel: q
-			.channel
-			.as_deref()
-			.map(|c| LeadChannel::parse(c).map_err(|_| ApiError::BadRequest("channel is not one of form, phone_inbound, callback, whatsapp, telegram".into())))
-			.transpose()?,
+		flow: q.flow,
+		booking: q.booking,
+		channel: q.channel,
 		message_ref: q
 			.message_ref
 			.as_deref()
@@ -443,25 +685,32 @@ async fn leads(State(panel): State<Panel>, Extension(caller): Extension<Caller>,
 	};
 	let now = Timestamp::now();
 	let page = panel.leads(&query, pii(&caller), now).await?;
-	let next = page.next.as_ref().map(cursor_encode);
-	let leads: Vec<LeadDto> = page.leads.into_iter().map(|v| lead_dto(v, now)).collect();
-	Ok(Json(json!({ "leads": leads, "next_cursor": next })))
+	Ok(Json(LeadPageDto {
+		next_cursor: page.next.as_ref().map(cursor_encode),
+		leads: page.leads.into_iter().map(|v| lead_dto(v, now)).collect(),
+	}))
 }
 
-#[derive(Serialize)]
+/// One event of a lead, as its card shows it.
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "LeadEvent")]
 struct EventDto {
-	id: String,
+	id: Uuid,
 	r#type: String,
 	type_version: i32,
-	occurred_at: String,
-	received_at: String,
+	occurred_at: Timestamp,
+	received_at: Timestamp,
 	source_kind: String,
 	source_id: String,
+	/// Typed in by hand (kind `panel`).
 	manual: bool,
 	job_id: Option<String>,
+	/// accepted | unregistered | …: how the registry judged it.
 	status: String,
 	status_reason: Option<String>,
+	/// The event's properties, as its type has them.
 	properties: Value,
+	/// What the customer left, for a caller who sees it.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pii: Option<Value>,
 }
@@ -470,11 +719,11 @@ fn event_dto(e: EventView) -> EventDto {
 	let r = e.row;
 	EventDto {
 		manual: r.source_kind == SourceKind::Panel.as_str(),
-		id: r.id.to_string(),
+		id: r.id,
 		r#type: r.r#type,
 		type_version: r.type_version,
-		occurred_at: r.occurred_at.to_string(),
-		received_at: r.received_at.to_string(),
+		occurred_at: r.occurred_at,
+		received_at: r.received_at,
 		source_kind: r.source_kind,
 		source_id: r.source_id,
 		job_id: r.job_id,
@@ -485,77 +734,104 @@ fn event_dto(e: EventView) -> EventDto {
 	}
 }
 
-async fn lead(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Path((brand, lead)): Path<(String, String)>) -> ApiResult<Json<Value>> {
-	let (brand, lead) = ids(&brand, &lead)?;
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "LeadCard")]
+struct LeadCardDto {
+	lead: LeadDto,
+	events: Vec<EventDto>,
+}
+
+/// A lead's card: the lead and every event about it.
+async fn get_lead(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Ids(LeadPath { brand, lead }): Ids<LeadPath>) -> ApiResult<Json<LeadCardDto>> {
 	let now = Timestamp::now();
 	let (view, events) = panel.lead_card(&brand, &lead, pii(&caller), now).await?.ok_or(ApiError::NotFound)?;
-	let events: Vec<EventDto> = events.into_iter().map(event_dto).collect();
-	Ok(Json(json!({ "lead": lead_dto(view, now), "events": events })))
+	Ok(Json(LeadCardDto {
+		lead: lead_dto(view, now),
+		events: events.into_iter().map(event_dto).collect(),
+	}))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(rename = "LeadCreation")]
 struct CreateLead {
-	brand: String,
-	location: String,
+	brand: BrandId,
+	location: LocationId,
 	need: String,
 	phone: Option<String>,
-	/// phone_inbound (the default) | whatsapp | telegram: a customer who wrote on a messenger
-	/// without the landing.
-	channel: Option<String>,
+	/// phone_inbound (the default) | whatsapp | telegram: a customer who called, or wrote on a
+	/// messenger without the landing.
+	channel: Option<LeadChannel>,
 }
 
-async fn create_lead(State(panel): State<Panel>, Extension(caller): Extension<Caller>, headers: HeaderMap, b: Result<Json<CreateLead>, JsonRejection>) -> ApiResult<Response> {
-	allow(caller.permissions.may(Leads::Edit))?;
-	let key = idempotency_key(&headers)?;
-	let b = body(b)?;
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "NewLead")]
+struct NewLeadDto {
+	brand: BrandId,
+	/// `p-<uuidv7>`.
+	lead_id: LeadId,
+	event_id: Uuid,
+}
+
+/// Creates a lead by hand (`lead.created`, kind `panel`).
+async fn create_lead(State(panel): State<Panel>, Extension(caller): Extension<Caller>, IdempotencyKey(key): IdempotencyKey, Body(b): Body<CreateLead>) -> ApiResult<Upserted<NewLeadDto>> {
 	let new = NewLead {
-		brand: BrandId::parse(&b.brand)?,
-		location: LocationId::parse(&b.location)?,
+		brand: b.brand,
+		location: b.location,
 		need: b.need,
 		phone: b.phone,
-		channel: match b.channel.as_deref() {
+		channel: match b.channel {
 			None => LeadChannel::PhoneInbound,
-			Some(c) => LeadChannel::parse(c)
-				.ok()
-				.filter(|c| LeadChannel::MANUAL.contains(c))
-				.ok_or_else(|| ApiError::BadRequest("channel is one of phone_inbound, whatsapp, telegram".into()))?,
+			Some(c) if LeadChannel::MANUAL.contains(&c) => c,
+			Some(_) => return Err(ApiError::BadRequest("channel is one of phone_inbound, whatsapp, telegram".into())),
 		},
 	};
 	let brand = new.brand.clone();
 	let done = panel.create_lead_once(Actor(caller.user_id), new, Timestamp::now(), key.as_deref()).await?;
-	let (lead, event) = done.value;
-	Ok(recorded(
-		done.replayed,
-		json!({ "brand": brand.as_str(), "lead_id": lead.as_str(), "event_id": event.raw().to_string() }),
-	))
+	Ok(recorded(done, |(lead_id, event)| NewLeadDto {
+		brand,
+		lead_id,
+		event_id: event.raw(),
+	}))
 }
 
-fn created(v: Value) -> Response {
-	(StatusCode::CREATED, Json(v)).into_response()
-}
-
-#[derive(Deserialize)]
+/// Where a lead moves, and what the move says.
+#[derive(Deserialize, JsonSchema)]
 #[serde(tag = "stage", rename_all = "snake_case", deny_unknown_fields)]
+#[schemars(rename = "StageMove")]
 enum StageBody {
-	Contacted { channel: Option<String> },
-	Quoted { amount: Option<i64>, currency: Option<String> },
-	Won { job_id: Option<String> },
-	Lost { reason: String, note: Option<String> },
+	Contacted {
+		channel: Option<String>,
+	},
+	Quoted {
+		/// Minor units, |amount| ≤ 10^10.
+		amount: Option<i64>,
+		/// EUR | USD | GBP | AUD.
+		currency: Option<String>,
+	},
+	Won {
+		job_id: Option<String>,
+	},
+	Lost {
+		reason: String,
+		note: Option<String>,
+	},
 	Completed,
 }
 
-async fn stage(
+/// Moves a lead to a stage (`lead.contacted`, `lead.quoted`, `job.won`, `lead.lost`,
+/// `job.completed`).
+///
+/// Stages move forward; `lost` from anywhere, and later progress reopens a lost lead. 409 when
+/// the move is not from where the lead stands.
+async fn move_lead(
 	State(panel): State<Panel>,
 	Extension(caller): Extension<Caller>,
-	Path((brand, lead)): Path<(String, String)>,
-	headers: HeaderMap,
-	b: Result<Json<StageBody>, JsonRejection>,
-) -> ApiResult<Response> {
-	allow(caller.permissions.may(Leads::Edit))?;
-	let key = idempotency_key(&headers)?;
-	let (brand, lead) = ids(&brand, &lead)?;
-	let to = match body(b)? {
+	Ids(LeadPath { brand, lead }): Ids<LeadPath>,
+	IdempotencyKey(key): IdempotencyKey,
+	Body(b): Body<StageBody>,
+) -> ApiResult<Upserted<Journaled>> {
+	let to = match b {
 		StageBody::Contacted { channel } => StageMove::Contacted { channel },
 		StageBody::Quoted { amount: a, currency: c } => StageMove::Quoted {
 			amount: a.map(|a| amount("amount", a)).transpose()?,
@@ -568,114 +844,142 @@ async fn stage(
 		StageBody::Completed => StageMove::Completed,
 	};
 	let done = panel.move_lead_once(Actor(caller.user_id), &brand, &lead, to, Timestamp::now(), key.as_deref()).await?;
-	Ok(recorded(done.replayed, json!({ "event_id": done.value.raw().to_string() })))
+	Ok(recorded(done, |e| Journaled { event_id: e.raw() }))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(rename = "Messaged")]
 struct MessagedBody {
-	/// whatsapp | telegram
-	channel: String,
+	channel: Messenger,
 }
 
-/// A call nobody answered (`call.attempted` + `call.logged{no_answer}`): the Telegram button's
-/// action, so its Idempotency-Key is required — a press repeated records nothing twice.
-async fn no_answer(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Path((brand, lead)): Path<(String, String)>, headers: HeaderMap) -> ApiResult<Response> {
-	allow(caller.permissions.may(Leads::Edit))?;
-	let key = idempotency_key(&headers)?.ok_or_else(|| ApiError::BadRequest("Idempotency-Key is required".into()))?;
-	let (brand, lead) = ids(&brand, &lead)?;
-	let done = panel.no_answer_once(Actor(caller.user_id), &brand, &lead, Timestamp::now(), &key).await?;
-	Ok(recorded(done.replayed, json!({ "event_id": done.value.raw().to_string() })))
-}
-
-/// The customer wrote on a messenger, as the operator saw it (`lead.messaged` from the panel).
-async fn messaged(
+/// The customer wrote on a messenger, as the operator saw it (`lead.messaged`).
+async fn mark_messaged(
 	State(panel): State<Panel>,
 	Extension(caller): Extension<Caller>,
-	Path((brand, lead)): Path<(String, String)>,
-	headers: HeaderMap,
-	b: Result<Json<MessagedBody>, JsonRejection>,
-) -> ApiResult<Response> {
-	allow(caller.permissions.may(Leads::Edit))?;
-	let key = idempotency_key(&headers)?;
-	let (brand, lead) = ids(&brand, &lead)?;
-	let channel = Messenger::parse(&body(b)?.channel).map_err(|_| ApiError::BadRequest("channel is one of whatsapp, telegram".into()))?;
-	let done = panel.mark_messaged_once(Actor(caller.user_id), &brand, &lead, channel, Timestamp::now(), key.as_deref()).await?;
-	Ok(recorded(done.replayed, json!({ "event_id": done.value.raw().to_string() })))
+	Ids(LeadPath { brand, lead }): Ids<LeadPath>,
+	IdempotencyKey(key): IdempotencyKey,
+	Body(b): Body<MessagedBody>,
+) -> ApiResult<Upserted<Journaled>> {
+	let done = panel
+		.mark_messaged_once(Actor(caller.user_id), &brand, &lead, b.channel, Timestamp::now(), key.as_deref())
+		.await?;
+	Ok(recorded(done, |e| Journaled { event_id: e.raw() }))
 }
 
-async fn attempt_call(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Path((brand, lead)): Path<(String, String)>) -> ApiResult<Response> {
-	allow(caller.permissions.may(Leads::Edit))?;
-	let (brand, lead) = ids(&brand, &lead)?;
+/// A call nobody answered (`call.attempted` + `call.logged{no_answer}`).
+///
+/// A note's button: its Idempotency-Key is required, so a press repeated records nothing twice.
+async fn no_answer(
+	State(panel): State<Panel>,
+	Extension(caller): Extension<Caller>,
+	Ids(LeadPath { brand, lead }): Ids<LeadPath>,
+	RequiredIdempotencyKey(key): RequiredIdempotencyKey,
+) -> ApiResult<Upserted<Journaled>> {
+	let done = panel.no_answer_once(Actor(caller.user_id), &brand, &lead, Timestamp::now(), &key).await?;
+	Ok(recorded(done, |e| Journaled { event_id: e.raw() }))
+}
+
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "CallAttempt")]
+struct AttemptDto {
+	attempt_id: Uuid,
+}
+
+/// Starts a call to the customer (`call.attempted`); its outcome is logged against the attempt.
+async fn attempt_call(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Ids(LeadPath { brand, lead }): Ids<LeadPath>) -> ApiResult<Created<AttemptDto>> {
 	let attempt = panel.attempt_call(Actor(caller.user_id), &brand, &lead, Timestamp::now()).await?;
-	Ok(created(json!({ "attempt_id": attempt.raw().to_string() })))
+	Ok(Created(AttemptDto { attempt_id: attempt.raw() }))
 }
 
-#[derive(Deserialize)]
+/// `{brand}/{lead}/calls/{attempt}`.
+#[derive(Deserialize, JsonSchema)]
+struct AttemptPath {
+	brand: BrandId,
+	lead: LeadId,
+	attempt: Uuid,
+}
+
+#[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(rename = "CallOutcome")]
 struct OutcomeBody {
+	/// answered | no_answer | wrong_number | later
 	outcome: String,
 }
 
+/// How an attempted call went (`call.logged`).
 async fn call_outcome(
 	State(panel): State<Panel>,
 	Extension(caller): Extension<Caller>,
-	Path((brand, lead, attempt)): Path<(String, String, String)>,
-	b: Result<Json<OutcomeBody>, JsonRejection>,
-) -> ApiResult<Response> {
-	allow(caller.permissions.may(Leads::Edit))?;
-	let (brand, lead) = ids(&brand, &lead)?;
-	let attempt = Uuid::parse_str(&attempt).map_err(|_| ApiError::NotFound)?;
-	let call = CallOutcome { attempt, outcome: body(b)?.outcome };
+	Ids(AttemptPath { brand, lead, attempt }): Ids<AttemptPath>,
+	Body(b): Body<OutcomeBody>,
+) -> ApiResult<Created<Journaled>> {
+	let call = CallOutcome { attempt, outcome: b.outcome };
 	let event = panel.log_call(Actor(caller.user_id), &brand, &lead, call, Timestamp::now()).await?;
-	Ok(created(json!({ "event_id": event.raw().to_string() })))
+	Ok(Created(Journaled { event_id: event.raw() }))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(rename = "Payment")]
 struct PaymentBody {
+	/// Minor units, |amount| ≤ 10^10.
 	billed: i64,
+	/// Minor units, |amount| ≤ 10^10.
 	commission: i64,
+	/// EUR | USD | GBP | AUD.
 	currency: String,
 }
 
-async fn payment(
+/// Records a payment for a lead's job, entered by hand (`payment.received`).
+async fn record_payment(
 	State(panel): State<Panel>,
 	Extension(caller): Extension<Caller>,
-	Path((brand, lead)): Path<(String, String)>,
-	headers: HeaderMap,
-	b: Result<Json<PaymentBody>, JsonRejection>,
-) -> ApiResult<Response> {
-	allow(caller.permissions.may(Leads::Edit))?;
-	let key = idempotency_key(&headers)?;
-	let (brand, lead) = ids(&brand, &lead)?;
-	let b = body(b)?;
+	Ids(LeadPath { brand, lead }): Ids<LeadPath>,
+	IdempotencyKey(key): IdempotencyKey,
+	Body(b): Body<PaymentBody>,
+) -> ApiResult<Upserted<Journaled>> {
 	let p = Payment {
 		billed: amount("billed", b.billed)?,
 		commission: amount("commission", b.commission)?,
 		currency: currency(&b.currency)?,
 	};
 	let done = panel.record_payment_once(Actor(caller.user_id), &brand, &lead, p, Timestamp::now(), key.as_deref()).await?;
-	Ok(recorded(done.replayed, json!({ "event_id": done.value.raw().to_string() })))
+	Ok(recorded(done, |e| Journaled { event_id: e.raw() }))
 }
 
 // ── funnel ──────────────────────────────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
+/// How the funnel is cut.
+#[derive(Clone, Copy, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[schemars(rename = "FunnelBy")]
+enum By {
+	/// One slice per brand's location; `location` null for the leads naming none.
+	Location,
+}
+
+#[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct FunnelQuery {
-	from: Option<String>,
-	to: Option<String>,
-	brand: Option<String>,
-	/// `location`: one slice per location. Absent: the whole funnel.
-	by: Option<String>,
+	/// A UTC day; 29 days before `to` when absent.
+	from: Option<Date>,
+	/// A UTC day, included; today when absent. At most 366 days from `from`.
+	to: Option<Date>,
+	brand: Option<BrandId>,
+	/// Absent: the whole funnel.
+	by: Option<By>,
+	/// The conductor's selection of GMBs, as `GET /leads` takes it.
 	gmb: Option<String>,
 }
 
 /// A share as the front end may show it: `percent` only when `of` is large enough, and
 /// `small_sample` saying so otherwise, so "12 of 17" is all that can be drawn.
-#[derive(Serialize)]
-pub(crate) struct ShareDto {
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "Share")]
+struct ShareDto {
 	n: u64,
 	of: u64,
 	percent: Option<u64>,
@@ -693,16 +997,18 @@ impl From<Share> for ShareDto {
 	}
 }
 
-#[derive(Serialize)]
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "FunnelStep")]
 struct StepDto {
-	stage: &'static str,
+	stage: Stage,
 	reached: u64,
 	of_previous: Option<ShareDto>,
 	of_leads: ShareDto,
 }
 
-/// What a slice's leads were paid in one currency, in its minor units.
-#[derive(Serialize)]
+/// What a slice's leads were paid in one currency, in its minor units; never converted.
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "Paid")]
 struct PaidDto {
 	currency: String,
 	billed: i64,
@@ -711,120 +1017,186 @@ struct PaidDto {
 }
 
 /// A slice's funnel: its steps, the lost and manual shares, and its payments.
-fn slice_body(s: FunnelSlice) -> serde_json::Map<String, Value> {
-	let totals = s.totals;
-	let stages: Vec<StepDto> = totals
-		.steps()
-		.into_iter()
-		.map(|s| StepDto {
-			stage: s.stage.as_str(),
-			reached: s.reached,
-			of_previous: s.of_previous.map(ShareDto::from),
-			of_leads: s.of_leads.into(),
-		})
-		.collect();
-	let payments: Vec<PaidDto> = s
-		.payments
-		.into_iter()
-		.map(|p| PaidDto {
-			currency: p.currency,
-			billed: p.billed,
-			commission: p.commission,
-			count: p.payments,
-		})
-		.collect();
-	let mut body = serde_json::Map::new();
-	body.insert("stages".into(), json!(stages));
-	body.insert("lost".into(), json!(ShareDto::from(Share::new(totals.lost, totals.leads))));
-	body.insert("manual".into(), json!(ShareDto::from(Share::new(totals.manual, totals.leads))));
-	body.insert("payments".into(), json!(payments));
-	body
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "FunnelSlice")]
+struct SliceDto {
+	stages: Vec<StepDto>,
+	lost: ShareDto,
+	manual: ShareDto,
+	payments: Vec<PaidDto>,
 }
 
-async fn funnel(State(panel): State<Panel>, q: Result<Query<FunnelQuery>, axum::extract::rejection::QueryRejection>) -> ApiResult<Json<Value>> {
-	let Query(q) = q.map_err(|e| ApiError::BadRequest(e.body_text()))?;
-	let (from, to) = window(q.from.as_deref(), q.to.as_deref())?;
-	let by = match q.by.as_deref() {
-		None => FunnelBy::All,
-		Some("location") => FunnelBy::Location,
-		Some(_) => return Err(ApiError::BadRequest("by is location, or absent".into())),
-	};
-	let brand = q.brand.as_deref().map(BrandId::parse).transpose()?;
-	let selected = gmbs(q.gmb.as_deref())?;
-	let slices = panel.funnel_slices(from, to, brand.as_ref(), selected.as_deref(), by).await?;
-	let mut body = json!({
-		"from": from.to_string(),
-		"to": to.to_string(),
-		"brand": brand.as_ref().map(BrandId::as_str),
-		"min_sample": MIN_SAMPLE,
-		"posthog_url": panel.posthog_funnel_url(brand.as_ref(), from, to),
-	});
-	match by {
-		FunnelBy::All => {
-			let whole = slices.into_iter().next().ok_or_else(|| ApiError::Internal(eyre::eyre!("the whole funnel came back empty")))?;
-			for (k, v) in slice_body(whole) {
-				body[k] = v;
-			}
-		}
-		FunnelBy::Location => {
-			let locations: Vec<Value> = slices
+impl From<FunnelSlice> for SliceDto {
+	fn from(s: FunnelSlice) -> Self {
+		let totals = s.totals;
+		Self {
+			stages: totals
+				.steps()
 				.into_iter()
-				.map(|s| {
-					let mut row = serde_json::Map::new();
-					row.insert("brand".into(), json!(s.brand));
-					row.insert("location".into(), json!(s.location));
-					row.extend(slice_body(s));
-					Value::Object(row)
+				.map(|s| StepDto {
+					stage: s.stage,
+					reached: s.reached,
+					of_previous: s.of_previous.map(ShareDto::from),
+					of_leads: s.of_leads.into(),
 				})
-				.collect();
-			body["by"] = json!("location");
-			body["locations"] = json!(locations);
+				.collect(),
+			lost: Share::new(totals.lost, totals.leads).into(),
+			manual: Share::new(totals.manual, totals.leads).into(),
+			payments: s
+				.payments
+				.into_iter()
+				.map(|p| PaidDto {
+					currency: p.currency,
+					billed: p.billed,
+					commission: p.commission,
+					count: p.payments,
+				})
+				.collect(),
 		}
 	}
-	Ok(Json(body))
+}
+
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "LocationFunnel")]
+struct LocationSliceDto {
+	brand: Option<String>,
+	location: Option<String>,
+	#[serde(flatten)]
+	slice: SliceDto,
+}
+
+#[derive(JsonSchema, Serialize)]
+#[serde(untagged)]
+enum Slices {
+	Whole(SliceDto),
+	ByLocation { by: By, locations: Vec<LocationSliceDto> },
+}
+
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "Funnel")]
+struct FunnelDto {
+	from: Date,
+	to: Date,
+	brand: Option<BrandId>,
+	/// Under this many, a share has no percent.
+	min_sample: u64,
+	/// The same funnel from the visit on in PostHog; null without a project configured.
+	posthog_url: Option<String>,
+	#[serde(flatten)]
+	slices: Slices,
+}
+
+/// The funnel of the leads created within a window of UTC days: each stage reached, the lost
+/// and manual shares, the payments.
+///
+/// Payments are of those same leads, whenever paid. An empty window has no location rows.
+/// Visits and intents are PostHog's: `posthog_url` opens the funnel there.
+async fn funnel(State(panel): State<Panel>, Params(q): Params<FunnelQuery>) -> ApiResult<Json<FunnelDto>> {
+	let (from, to) = window(q.from, q.to)?;
+	let by = match q.by {
+		None => FunnelBy::All,
+		Some(By::Location) => FunnelBy::Location,
+	};
+	let selected = gmbs(q.gmb.as_deref())?;
+	let slices = panel.funnel_slices(from, to, q.brand.as_ref(), selected.as_deref(), by).await?;
+	let slices = match by {
+		FunnelBy::All => Slices::Whole(
+			slices
+				.into_iter()
+				.next()
+				.ok_or_else(|| ApiError::Internal(eyre::eyre!("the whole funnel came back empty")))?
+				.into(),
+		),
+		FunnelBy::Location => Slices::ByLocation {
+			by: By::Location,
+			locations: slices
+				.into_iter()
+				.map(|s| LocationSliceDto {
+					brand: s.brand.clone(),
+					location: s.location.clone(),
+					slice: s.into(),
+				})
+				.collect(),
+		},
+	};
+	Ok(Json(FunnelDto {
+		from,
+		to,
+		posthog_url: panel.posthog_funnel_url(q.brand.as_ref(), from, to),
+		brand: q.brand,
+		min_sample: MIN_SAMPLE,
+		slices,
+	}))
 }
 
 // ── places, counts ──────────────────────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct PlacesQuery {
+	/// The conductor's selection of GMBs, as `GET /leads` takes it.
 	gmb: Option<String>,
 }
 
-async fn places(State(panel): State<Panel>, q: Result<Query<PlacesQuery>, axum::extract::rejection::QueryRejection>) -> ApiResult<Json<Value>> {
-	let Query(q) = q.map_err(|e| ApiError::BadRequest(e.body_text()))?;
-	let places: Vec<Value> = panel
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "PlaceSummary")]
+struct PlaceRowDto {
+	brand: String,
+	location: String,
+	last_lead_at: Option<Timestamp>,
+	/// Live settings with a field set at least.
+	has_settings: bool,
+	withdrawn: bool,
+}
+
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "Places")]
+struct PlacesDto {
+	places: Vec<PlaceRowDto>,
+}
+
+/// Every place the panel knows: every location a lead names, and every place registered.
+async fn list_places(State(panel): State<Panel>, Params(q): Params<PlacesQuery>) -> ApiResult<Json<PlacesDto>> {
+	let places = panel
 		.places(gmbs(q.gmb.as_deref())?.as_deref())
 		.await?
 		.into_iter()
-		.map(|p| {
-			json!({
-				"brand": p.brand_id,
-				"location": p.location_id,
-				"last_lead_at": ts(p.last_lead_at),
-				"has_settings": p.has_settings,
-				"withdrawn": p.withdrawn,
-			})
+		.map(|p| PlaceRowDto {
+			brand: p.brand_id,
+			location: p.location_id,
+			last_lead_at: p.last_lead_at,
+			has_settings: p.has_settings,
+			withdrawn: p.withdrawn,
 		})
 		.collect();
-	Ok(Json(json!({ "places": places })))
+	Ok(Json(PlacesDto { places }))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct CountsQuery {
-	brand: Option<String>,
+	brand: Option<BrandId>,
+	/// The conductor's selection of GMBs, as `GET /leads` takes it.
 	gmb: Option<String>,
 }
 
-async fn lead_counts(State(panel): State<Panel>, q: Result<Query<CountsQuery>, axum::extract::rejection::QueryRejection>) -> ApiResult<Json<Value>> {
-	let Query(q) = q.map_err(|e| ApiError::BadRequest(e.body_text()))?;
-	let brand = q.brand.as_deref().map(BrandId::parse).transpose()?;
-	let counts = panel.lead_counts(brand.as_ref(), gmbs(q.gmb.as_deref())?.as_deref(), Timestamp::now()).await?;
-	let total: u64 = counts.stages.iter().map(|(_, n)| n).sum();
-	let stages: serde_json::Map<String, Value> = counts.stages.into_iter().map(|(stage, n)| (stage.as_str().to_owned(), json!(n))).collect();
-	Ok(Json(json!({ "stages": stages, "overdue": counts.overdue, "total": total })))
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "LeadCounts")]
+struct CountsDto {
+	/// Every stage, 0 included.
+	stages: BTreeMap<Stage, u64>,
+	overdue: u64,
+	total: u64,
+}
+
+/// How many leads are at each stage, and how many are overdue for their first contact.
+async fn lead_counts(State(panel): State<Panel>, Params(q): Params<CountsQuery>) -> ApiResult<Json<CountsDto>> {
+	let counts = panel.lead_counts(q.brand.as_ref(), gmbs(q.gmb.as_deref())?.as_deref(), Timestamp::now()).await?;
+	Ok(Json(CountsDto {
+		total: counts.stages.iter().map(|(_, n)| n).sum(),
+		stages: counts.stages.into_iter().collect(),
+		overdue: counts.overdue,
+	}))
 }
 
 #[cfg(test)]

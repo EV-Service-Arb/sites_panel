@@ -70,7 +70,7 @@ pub const LIMITS: Limits = Limits {
 };
 
 /// A row of opening hours, in the place's local time (Europe/Paris for every place in v1).
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, TS, schemars::JsonSchema)]
 pub struct OpeningHours {
 	/// One at least, each once, in week order.
 	pub days: Vec<DayOfWeek>,
@@ -81,7 +81,7 @@ pub struct OpeningHours {
 }
 
 /// A storefront's address; its region and country are the site's.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Address {
 	pub street: String,
@@ -91,7 +91,7 @@ pub struct Address {
 }
 
 /// Degrees, on the globe.
-#[derive(Clone, Debug, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, PartialEq, Serialize, TS, schemars::JsonSchema)]
 pub struct Geo {
 	pub lat: f64,
 	pub lng: f64,
@@ -99,7 +99,7 @@ pub struct Geo {
 
 /// Google's rating for the place, with when it was read: the API's terms cap how long a copy
 /// may be shown.
-#[derive(Clone, Debug, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, PartialEq, Serialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Rating {
 	/// 1 to 5.
@@ -112,7 +112,7 @@ pub struct Rating {
 
 /// A place's live settings: only the fields that are set. Empty: the site serves its baked
 /// config.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[ts(optional_fields)]
 pub struct PlaceLive {

@@ -1,47 +1,26 @@
 //! Invoices over HTTP (`panel::invoices`): an operator issues one through banking's ScopeLedger
 //! and opens its pay page for the customer; the payment is confirmed in the background
 //! ([`crate::scope_ledger::run`]).
-//!
-//! ```text
-//! POST /api/v1/invoices          invoices:create  Idempotency-Key required;
-//!                                                 {amount, memo?, expires_in_days} → 201 Invoice,
-//!                                                 200 Invoice on a retry
-//! GET  /api/v1/invoices                           {invoices: [Invoice]}: newest first, from storage
-//! GET  /api/v1/invoices/{id}                      Invoice, as banking has it now
-//!
-//! Invoice: {id, invoice_id | null, amount, currency, memo, state, pay_url | null, created_by,
-//!           created_at, expires_at, paid_at | null, paid_by | null}
-//! ```
-//!
-//! Errors are `{error}`: 400 for what the operator typed or banking found wrong with it; 409 for
-//! a key used for other terms, or banking's reason (`invoice_not_open`, `scope_frozen`, …); 503
-//! `invoices_unavailable` when the panel has no ledger configured, and banking's reason
-//! (`not_granted`) or `ledger_unavailable` when banking cannot do it now.
 
 use std::sync::Arc;
 
-use axum::{
-	Extension, Json,
-	extract::{Path, State, rejection::JsonRejection},
-	http::{HeaderMap, Method},
-	response::Response,
-};
+use axum::{Extension, Json, extract::State, http::Method};
+use ev_lib::api::{JsonSchema, Upserted};
 use jiff::Timestamp;
 use panel::{
 	Panel,
 	invoices::{Invoice, InvoiceError, LedgerError, NewInvoice},
 	operator::Actor,
 };
-use panel_core::invoice::CURRENCY;
+use panel_core::invoice::{CURRENCY, InvoiceState};
 use sa_auth::Invoices;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use uuid::Uuid;
 
 use crate::{
-	api::{ApiError, ApiResult, body, idempotency_key, recorded},
+	api::{ApiError, ApiResult, Body, Ids, RequiredIdempotencyKey, recorded},
 	gate::Caller,
-	http::{ApiRoute, Section},
+	http::{ApiRoute, Gate, Section},
 	scope_ledger::ScopeLedger,
 };
 
@@ -50,11 +29,11 @@ type MaybeLedger = Option<Extension<Arc<ScopeLedger>>>;
 
 pub(crate) fn routes() -> Vec<ApiRoute> {
 	use Method as M;
-	let work = Some(Section::Work);
+	let work = Gate::section(Section::Work);
 	vec![
-		ApiRoute::new(M::GET, "/invoices", work, list),
-		ApiRoute::new(M::GET, "/invoices/{id}", work, item),
-		ApiRoute::new(M::POST, "/invoices", work, create),
+		ApiRoute::new(M::GET, "/invoices", work, list_invoices),
+		ApiRoute::new(M::GET, "/invoices/{id}", work, get_invoice),
+		ApiRoute::new(M::POST, "/invoices", work.may(Invoices::Create), create_invoice),
 	]
 }
 
@@ -93,77 +72,112 @@ impl From<LedgerError> for ApiError {
 	}
 }
 
-#[derive(Serialize)]
+/// An invoice the panel asked banking for.
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "Invoice")]
 struct InvoiceDto {
-	id: String,
+	id: Uuid,
+	/// Banking's; null while `creating`.
 	invoice_id: Option<String>,
+	/// Canonical decimal USDT.
 	amount: String,
+	/// USDT.
 	currency: &'static str,
 	memo: String,
-	/// creating | open | processing | paid | cancelled | expired
-	state: &'static str,
+	state: InvoiceState,
+	/// Banking's page where the payer pays; null while `creating`.
 	pay_url: Option<String>,
-	created_by: String,
-	created_at: String,
-	expires_at: String,
-	paid_at: Option<String>,
+	/// The concierge user who issued it.
+	created_by: Uuid,
+	created_at: Timestamp,
+	expires_at: Timestamp,
+	paid_at: Option<Timestamp>,
 	/// The payer's `auth_subject` at banking.
 	paid_by: Option<String>,
 }
 
-fn dto(i: Invoice) -> InvoiceDto {
-	InvoiceDto {
-		id: i.id.to_string(),
-		invoice_id: i.invoice_id,
-		amount: i.amount,
-		currency: CURRENCY,
-		memo: i.memo,
-		state: i.state.as_str(),
-		pay_url: i.pay_url,
-		created_by: i.created_by.to_string(),
-		created_at: i.created_at.to_string(),
-		expires_at: i.expires_at.to_string(),
-		paid_at: i.paid.as_ref().map(|p| p.at.to_string()),
-		paid_by: i.paid.map(|p| p.by),
+impl From<Invoice> for InvoiceDto {
+	fn from(i: Invoice) -> Self {
+		Self {
+			id: i.id,
+			invoice_id: i.invoice_id,
+			amount: i.amount,
+			currency: CURRENCY,
+			memo: i.memo,
+			state: i.state,
+			pay_url: i.pay_url,
+			created_by: i.created_by,
+			created_at: i.created_at,
+			expires_at: i.expires_at,
+			paid_at: i.paid.as_ref().map(|p| p.at),
+			paid_by: i.paid.map(|p| p.by),
+		}
 	}
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(rename = "NewInvoice")]
 struct CreateBody {
-	/// Decimal USDT as a string: a JSON number would round it.
+	/// Decimal USDT as a string, a JSON number would round it: whole USDT up to 999 999 999, at
+	/// most 6 decimals.
 	amount: String,
+	/// At most 140 characters; banking refuses links.
 	#[serde(default)]
 	memo: String,
+	/// 1 to 30.
 	expires_in_days: u32,
 }
 
-async fn create(State(panel): State<Panel>, Extension(caller): Extension<Caller>, l: MaybeLedger, headers: HeaderMap, b: Result<Json<CreateBody>, JsonRejection>) -> ApiResult<Response> {
-	if !caller.permissions.may(Invoices::Create) {
-		return Err(ApiError::Forbidden);
-	}
+/// Issues an invoice through banking's ScopeLedger, payable on its pay page.
+///
+/// Stored `creating` with its terms, then asked of banking: a refusal drops it, a lost answer
+/// keeps it for the retry, which is answered 200 with the same invoice.
+///
+/// The Idempotency-Key is required: a lost answer retried without one would bill twice. 400 for
+/// what was typed or banking found wrong with it; 409 for a key used for other terms, or
+/// banking's reason (`invoice_not_open`, `scope_frozen`, …); 503 `invoices_unavailable` without
+/// a ledger configured, banking's `not_granted`, or `ledger_unavailable`.
+async fn create_invoice(
+	State(panel): State<Panel>,
+	Extension(caller): Extension<Caller>,
+	l: MaybeLedger,
+	RequiredIdempotencyKey(key): RequiredIdempotencyKey,
+	Body(b): Body<CreateBody>,
+) -> ApiResult<Upserted<InvoiceDto>> {
 	let ledger = ledger(l)?;
-	// Required, not optional as elsewhere: a lost answer retried without one would bill twice.
-	let key = idempotency_key(&headers)?.ok_or_else(|| ApiError::BadRequest("an invoice needs an Idempotency-Key".into()))?;
-	let b = body(b)?;
 	let new = NewInvoice {
 		amount: b.amount,
 		memo: b.memo,
 		expires_in_days: b.expires_in_days,
 	};
 	let done = panel.issue_invoice_once(&*ledger, Actor(caller.user_id), new, &key, Timestamp::now()).await?;
-	Ok(recorded(done.replayed, json!(dto(done.value))))
+	Ok(recorded(done, InvoiceDto::from))
 }
 
-async fn list(State(panel): State<Panel>) -> ApiResult<Json<serde_json::Value>> {
-	let invoices: Vec<InvoiceDto> = panel.invoices().await?.into_iter().map(dto).collect();
-	Ok(Json(json!({ "invoices": invoices })))
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "Invoices")]
+struct InvoicesDto {
+	invoices: Vec<InvoiceDto>,
 }
 
-async fn item(State(panel): State<Panel>, l: MaybeLedger, Path(id): Path<String>) -> ApiResult<Json<InvoiceDto>> {
+/// The last 500 invoices, newest first, as the panel last stored them: banking is not asked.
+async fn list_invoices(State(panel): State<Panel>) -> ApiResult<Json<InvoicesDto>> {
+	Ok(Json(InvoicesDto {
+		invoices: panel.invoices().await?.into_iter().map(InvoiceDto::from).collect(),
+	}))
+}
+
+/// `{id}` of an invoice: the panel's.
+#[derive(Deserialize, JsonSchema)]
+struct InvoicePath {
+	id: Uuid,
+}
+
+/// One invoice, as banking has it now; a final one (paid, cancelled, expired) as stored.
+async fn get_invoice(State(panel): State<Panel>, l: MaybeLedger, Ids(InvoicePath { id }): Ids<InvoicePath>) -> ApiResult<Json<InvoiceDto>> {
 	let ledger = ledger(l)?;
-	let id = Uuid::parse_str(&id).map_err(|_| ApiError::NotFound)?;
-	Ok(Json(dto(panel.refresh_invoice(&*ledger, id).await?)))
+	Ok(Json(panel.refresh_invoice(&*ledger, id).await?.into()))
 }
 
 #[cfg(test)]

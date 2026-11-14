@@ -76,6 +76,16 @@ impl Serialize for Format {
 	}
 }
 
+impl schemars::JsonSchema for Format {
+	fn schema_name() -> std::borrow::Cow<'static, str> {
+		"PricingFormat".into()
+	}
+
+	fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+		schemars::json_schema!({ "const": FORMAT })
+	}
+}
+
 /// `currency`, always [`CURRENCY`].
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct Currency;
@@ -86,8 +96,18 @@ impl Serialize for Currency {
 	}
 }
 
+impl schemars::JsonSchema for Currency {
+	fn schema_name() -> std::borrow::Cow<'static, str> {
+		"PricingCurrency".into()
+	}
+
+	fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+		schemars::json_schema!({ "const": CURRENCY })
+	}
+}
+
 /// Adds `addCents` to the base.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AddOption {
 	pub id: String,
@@ -97,7 +117,7 @@ pub struct AddOption {
 }
 
 /// The subtotal times `multiplyBp`, in basis points: 11 000 is ×1.1.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MultiplyOption {
 	pub id: String,
@@ -107,7 +127,7 @@ pub struct MultiplyOption {
 }
 
 /// `discountBp` taken off the subtotal, in basis points: 1 000 is 10 % off.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DiscountOption {
 	pub id: String,
@@ -119,7 +139,7 @@ pub struct DiscountOption {
 /// An enum the visitor answers: bedrooms, a surface band, a zone, a frequency. Its kind says
 /// what its options do, and when: every `add` first, then every `multiply`, then every
 /// `discount`.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, TS, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum PricingInput {
 	Add { id: String, labels: Labels, options: Vec<AddOption> },
@@ -207,7 +227,7 @@ impl PricingInput {
 }
 
 /// How one need is priced.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, TS, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "lowercase", rename_all_fields = "camelCase")]
 pub enum NeedPricing {
 	/// A base and the inputs the visitor answers, in the order the form asks them.
@@ -225,7 +245,7 @@ pub enum NeedPricing {
 
 /// A checked model, in its wire shape: every value within the limits, which keeps a price
 /// within an `i64` and a double alike. Only [`PricingModel::parse`] makes one.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PricingModel {
 	#[ts(type = "1")]
@@ -251,6 +271,7 @@ pub type PricingInputs = BTreeMap<String, String>;
 
 vocabulary! {
 	/// Why a model, or a part of it, is refused.
+	#[schemars(rename = "PricingCode")]
 	pub enum Code, "not a pricing problem code" {
 		Object => "object",
 		Missing => "missing",
