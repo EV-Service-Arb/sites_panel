@@ -8,6 +8,7 @@
 //!                                  brand_id?, id?, at, permission}; {"type":"ping"} every 25 s
 //! GET /notifications?after&limit   {notes: [Note], next}: the notes after `after`, ≤ limit (≤ 500)
 //! GET /sources/received            {<key_id>: <RFC 3339 of its last event's arrival>}
+//! GET /places                      {places: [{gmb_id, brand, slug}]}: every place with a gmb_id
 //! GET /internal-reads              {since: <boot, RFC 3339>, reads: {<brand>: {locations?, pricing?,
 //!                                  experiments?: <RFC 3339 of the last `/api/internal` read>}}}
 //! ```
@@ -102,11 +103,12 @@ struct Reads {
 	internal: Arc<InternalReads>,
 }
 
-/// `/notifications`, `/sources/received` and `/internal-reads`.
+/// `/notifications`, `/sources/received`, `/places` and `/internal-reads`.
 pub(crate) fn reads(panel: Panel, locale: Locale, internal: Arc<InternalReads>) -> Router {
 	Router::new()
 		.route("/notifications", get(notifications))
 		.route("/sources/received", get(received))
+		.route("/places", get(places))
 		.route("/internal-reads", get(internal_reads))
 		.with_state(Reads { panel, locale, internal })
 }
@@ -237,6 +239,17 @@ async fn notifications(State(r): State<Reads>, q: Result<Query<NotesQuery>, axum
 async fn received(State(r): State<Reads>) -> ApiResult<Json<Value>> {
 	let by_key: serde_json::Map<String, Value> = r.panel.received_by_key().await?.into_iter().map(|(k, at)| (k, at.to_string().into())).collect();
 	Ok(Json(Value::Object(by_key)))
+}
+
+async fn places(State(r): State<Reads>) -> ApiResult<Json<Value>> {
+	let places: Vec<Value> = r
+		.panel
+		.gmbs(Timestamp::now())
+		.await?
+		.into_iter()
+		.map(|(gmb_id, brand, slug, ..)| json!({"gmb_id": gmb_id, "brand": brand, "slug": slug}))
+		.collect();
+	Ok(Json(json!({ "places": places })))
 }
 
 async fn internal_reads(State(r): State<Reads>) -> Json<Value> {
