@@ -260,7 +260,7 @@ async fn the_conductor_reads_which_place_each_gmb_is_the_landing_of() {
 	let conductor = Conductor::new("k1");
 	let app = app(panel(&db).await, &conductor);
 	let admin = As::user(panel::testing::admin());
-	for (slug, gmb) in [("royat", Some(7)), ("vichy", None)] {
+	for (slug, gmb) in [("royat", Some(7)), ("vichy", None), ("thiers", Some(8))] {
 		let (status, body) = send(&app, &conductor, &admin, Method::POST, "/api/v1/places", Some(json!({"brand": "aquafix", "slug": slug})), &[]).await;
 		assert_eq!(status, StatusCode::CREATED, "{body}");
 		if let Some(gmb) = gmb {
@@ -277,9 +277,15 @@ async fn the_conductor_reads_which_place_each_gmb_is_the_landing_of() {
 			assert_eq!(status, StatusCode::OK, "{body}");
 		}
 	}
+	let (status, body) = send(&app, &conductor, &admin, Method::POST, "/api/v1/places/aquafix/thiers/withdraw", None, &[]).await;
+	assert_eq!(status, StatusCode::OK, "{body}");
 
 	let (status, body) = send(&app, &conductor, &As::Conductor, Method::GET, "/api/conductor/places", None, &[]).await;
-	assert_eq!((status, body), (StatusCode::OK, json!({"places": [{"gmb_id": 7, "brand": "aquafix", "slug": "royat"}]})));
+	assert_eq!(
+		(status, body),
+		(StatusCode::OK, json!({"places": [{"gmb_id": 7, "brand": "aquafix", "slug": "royat"}]})),
+		"without a gmb_id, or withdrawn: not listed"
+	);
 	let (status, _) = send(&app, &conductor, &As::Nobody, Method::GET, "/api/conductor/places", None, &[]).await;
 	assert_eq!(status, StatusCode::UNAUTHORIZED);
 }

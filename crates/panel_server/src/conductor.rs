@@ -8,7 +8,7 @@
 //!                                  brand_id?, id?, at, permission}; {"type":"ping"} every 25 s
 //! GET /notifications?after&limit   {notes: [Note], next}: the notes after `after`, ≤ limit (≤ 500)
 //! GET /sources/received            {<key_id>: <RFC 3339 of its last event's arrival>}
-//! GET /places                      {places: [{gmb_id, brand, slug}]}: every place with a gmb_id
+//! GET /places                      {places: [{gmb_id, brand, slug}]}: every live place with a gmb_id
 //! GET /internal-reads              {since: <boot, RFC 3339>, reads: {<brand>: {locations?, pricing?,
 //!                                  experiments?: <RFC 3339 of the last `/api/internal` read>}}}
 //! ```
@@ -247,6 +247,7 @@ async fn places(State(r): State<Reads>) -> ApiResult<Json<Value>> {
 		.gmbs(Timestamp::now())
 		.await?
 		.into_iter()
+		.filter(|&(.., withdrawn)| !withdrawn)
 		.map(|(gmb_id, brand, slug, ..)| json!({"gmb_id": gmb_id, "brand": brand, "slug": slug}))
 		.collect();
 	Ok(Json(json!({ "places": places })))

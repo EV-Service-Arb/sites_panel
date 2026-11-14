@@ -140,13 +140,13 @@ pub async fn set_gmb(conn: &mut SqliteConnection, brand: &BrandId, slug: &Locati
 	Ok(true)
 }
 
-/// Per linked place: `(gmb_id, brand, slug, leads created since `since`, leads waiting for their first contact since before `waiting_since_before`)`.
-pub async fn gmbs(conn: &mut SqliteConnection, since: Timestamp, waiting_since_before: Timestamp) -> eyre::Result<Vec<(i64, String, String, u32, u32)>> {
-	let rows: Vec<(i64, String, String, i64, i64)> = sqlx::query_as(concat!(
+/// Per linked place: `(gmb_id, brand, slug, leads created since `since`, leads waiting for their first contact since before `waiting_since_before`, withdrawn)`.
+pub async fn gmbs(conn: &mut SqliteConnection, since: Timestamp, waiting_since_before: Timestamp) -> eyre::Result<Vec<(i64, String, String, u32, u32, bool)>> {
+	let rows: Vec<(i64, String, String, i64, i64, bool)> = sqlx::query_as(concat!(
 		"SELECT p.gmb_id, p.brand_id, p.location_id, count(l.lead_id) FILTER (WHERE l.created_at >= $1), count(l.lead_id) FILTER (WHERE ",
 		reads::overdue!(),
-		"$2) FROM places p LEFT JOIN leads l ON l.brand_id = p.brand_id AND l.location_id = p.location_id \
-		 WHERE p.gmb_id IS NOT NULL GROUP BY p.gmb_id, p.brand_id, p.location_id ORDER BY p.gmb_id"
+		"$2), p.withdrawn FROM places p LEFT JOIN leads l ON l.brand_id = p.brand_id AND l.location_id = p.location_id \
+		 WHERE p.gmb_id IS NOT NULL GROUP BY p.gmb_id, p.brand_id, p.location_id, p.withdrawn ORDER BY p.gmb_id"
 	))
 	.bind(to_db(since))
 	.bind(to_db(waiting_since_before))
@@ -154,7 +154,7 @@ pub async fn gmbs(conn: &mut SqliteConnection, since: Timestamp, waiting_since_b
 	.await
 	.wrap_err("listing the GMBs' places")?;
 	rows.into_iter()
-		.map(|(id, brand, slug, recent, overdue)| Ok((id, brand, slug, u32::try_from(recent)?, u32::try_from(overdue)?)))
+		.map(|(id, brand, slug, recent, overdue, withdrawn)| Ok((id, brand, slug, u32::try_from(recent)?, u32::try_from(overdue)?, withdrawn)))
 		.collect()
 }
 

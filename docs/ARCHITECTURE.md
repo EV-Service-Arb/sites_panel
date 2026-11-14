@@ -475,8 +475,8 @@ names last had an event received (`max(events.received_at)`); the conductor's "s
 
 ### Which place a GMB is the landing of
 
-`GET /api/conductor/places` → `{places: [{gmb_id, brand, slug}]}`: every place with a `gmb_id`,
-withdrawn ones included; the conductor's review kit mints a GMB's QR (`<brand>/avis/<slug>`) from it.
+`GET /api/conductor/places` → `{places: [{gmb_id, brand, slug}]}`: every place with a `gmb_id`
+but the withdrawn; the conductor's review kit mints a GMB's QR (`<brand>/avis/<slug>`) from it.
 
 ## Place settings
 

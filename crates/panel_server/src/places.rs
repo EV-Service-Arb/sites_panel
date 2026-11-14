@@ -313,7 +313,7 @@ async fn gmbs(State(panel): State<Panel>) -> PlaceResult<Json<Value>> {
 	let rows = panel.gmbs(Timestamp::now()).await?;
 	let by_id: serde_json::Map<String, Value> = rows
 		.into_iter()
-		.map(|(id, brand, location, leads_7d, overdue)| (id.to_string(), json!({ "brand": brand, "location": location, "leads_7d": leads_7d, "overdue": overdue })))
+		.map(|(id, brand, location, leads_7d, overdue, ..)| (id.to_string(), json!({ "brand": brand, "location": location, "leads_7d": leads_7d, "overdue": overdue })))
 		.collect();
 	Ok(Json(Value::Object(by_id)))
 }
