@@ -6,13 +6,13 @@
 export const WALLET_ORIGIN = "https://evinvest.ltd";
 
 /**
- * Where banking publishes the bundle (`/api/wallet/mfe/wallet.js`, as its registry.json says).
+ * Where banking publishes the bundle (`/mfe/banking/wallet.js`, as its registry.json says).
  * Not served by sites or the conductor on purpose: the elements talk to the origin they were loaded
  * from (balances, history, action pages). Cross-origin means the conductor's CSP must name this
  * directory in `script-src` and the origin in `connect-src`; without it the browser refuses the
  * script and the pay buttons show "unavailable".
  */
-export const WALLET_SCRIPT = `${WALLET_ORIGIN}/api/wallet/mfe/wallet.js`;
+export const WALLET_SCRIPT = `${WALLET_ORIGIN}/mfe/banking/wallet.js`;
 
 /**
  * The bytes of `WALLET_SCRIPT` this bundle runs (banking WALLET-INPAGE-SPEC control (g): the
