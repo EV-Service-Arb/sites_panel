@@ -23,11 +23,9 @@ use panel::{
 	place::Expected,
 	pricing::{PricingError, PricingView},
 };
-use panel_core::{
-	ids::BrandId,
-	pricing::{Code, PricingModel, Problem},
-};
+use panel_core::pricing::{Code, PricingModel, Problem};
 use sa_auth::Pricing;
+use sa_core::ids::BrandId;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;

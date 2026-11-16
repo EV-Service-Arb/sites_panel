@@ -38,13 +38,13 @@ use std::{collections::BTreeSet, sync::Arc};
 use eyre::WrapErr;
 use jiff::Timestamp;
 use panel_core::{
-	Invalid,
 	event::{Envelope, KeyGrant},
 	fact::{Fact, MessageRef},
-	ids::{BrandId, LeadId, LocationId},
+	ids::{LeadId, LocationId},
 	lead::Recorded,
 };
 use sa_auth::SourceKind;
+use sa_core::{Invalid, ids::BrandId};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;

@@ -36,6 +36,7 @@ panel_core.workspace = true
 reqwest.workspace = true
 sa_alerts.workspace = true
 sa_auth.workspace = true
+sa_core.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true

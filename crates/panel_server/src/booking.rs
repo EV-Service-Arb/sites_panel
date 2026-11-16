@@ -25,11 +25,9 @@ use panel::{
 	booking::{BookingView, Provider, PushError, PushRequest, PushSources, SlotAction},
 	operator::Actor,
 };
-use panel_core::{
-	booking::BookingMatch,
-	ids::{BrandId, LeadId},
-};
+use panel_core::{booking::BookingMatch, ids::LeadId};
 use sa_auth::Leads;
+use sa_core::ids::BrandId;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::Semaphore;

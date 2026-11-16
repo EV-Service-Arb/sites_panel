@@ -19,12 +19,9 @@ use panel::{
 	Panel,
 	experiment::{ExperimentError, ExperimentView, LiveExperiments},
 };
-use panel_core::{
-	Invalid,
-	experiment::{Patch, is_key},
-	ids::BrandId,
-};
+use panel_core::experiment::{ExperimentKey, Patch, Variant};
 use sa_auth::Experiments;
+use sa_core::{Invalid, ids::BrandId};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -85,9 +82,9 @@ struct OverrideDto {
 #[schemars(rename = "Experiment")]
 struct ExperimentDto {
 	brand: BrandId,
-	key: String,
+	key: ExperimentKey,
 	/// The first is the control.
-	variants: Vec<String>,
+	variants: Vec<Variant>,
 	declared: DeclaredDto,
 	/// Null when nothing is set, or everything was put back.
 	r#override: Option<OverrideDto>,
@@ -160,8 +157,7 @@ async fn list_experiments(State(panel): State<Panel>, Params(q): Params<ListQuer
 #[derive(Deserialize, JsonSchema)]
 struct ExperimentPath {
 	brand: BrandId,
-	/// `[a-z0-9_]{1,64}`.
-	key: String,
+	key: ExperimentKey,
 }
 
 /// A change: each field absent (left), null (put back to the declaration) or a value (set).
@@ -210,10 +206,7 @@ async fn configure_experiment(
 	Ids(ExperimentPath { brand, key }): Ids<ExperimentPath>,
 	Body(b): Body<ConfigureBody>,
 ) -> ApiResult<Json<ExperimentDto>> {
-	if !is_key(&key) {
-		return Err(ApiError::NotFound);
-	}
-	let patch = patch(&key, b)?;
+	let patch = patch(key.as_str(), b)?;
 	match panel.configure_experiment(&editor(&caller), &brand, patch, Timestamp::now()).await {
 		Ok(v) => Ok(Json(v.into())),
 		Err(ExperimentError::NotFound) => Err(ApiError::NotFound),

@@ -11,8 +11,9 @@ use axum::{
 	middleware::Next,
 	response::{IntoResponse, Response},
 };
-use panel_core::{event::KeyGrant, ids::BrandId};
+use panel_core::event::KeyGrant;
 use sa_auth::{Keys, PermissionSet, Principal, Service};
+use sa_core::ids::BrandId;
 use serde_json::json;
 use uuid::Uuid;
 

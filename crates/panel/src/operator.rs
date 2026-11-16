@@ -11,12 +11,12 @@ use eyre::WrapErr;
 use jiff::{Timestamp, civil::Date};
 use panel_contracts::SCHEMA;
 use panel_core::{
-	Invalid,
 	fact::{LeadChannel, LeadFlow, MessageRef, Messenger, bounded},
 	funnel::{self, Totals},
-	ids::{BrandId, EventId, JobId, LeadId, LocationId},
+	ids::{EventId, JobId, LeadId, LocationId},
 	lead::Stage,
 };
+use sa_core::{Invalid, ids::BrandId};
 use serde_json::{Map, Value, json};
 use uuid::Uuid;
 

@@ -7,10 +7,11 @@ use panel::{
 	testing::{TestDb, batch, event, grant, panel},
 };
 use panel_core::{
-	ids::{BrandId, LocationId},
+	ids::LocationId,
 	place::{ChangeKind, Editor, PlaceSettings},
 };
 use sa_auth::SourceKind;
+use sa_core::ids::BrandId;
 use serde_json::{Map, Value, json};
 use uuid::Uuid;
 

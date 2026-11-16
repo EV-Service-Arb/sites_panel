@@ -11,9 +11,10 @@ use jiff::Timestamp;
 use panel_core::{
 	booking::{self, BookingItem, BookingMatch, ExternalBooking, ExternalItem, Provider},
 	fact::Fact,
-	ids::{BrandId, EventId, LeadId},
+	ids::{EventId, LeadId},
 	lead::Recorded,
 };
+use sa_core::ids::BrandId;
 use sqlx::SqliteConnection;
 use uuid::Uuid;
 

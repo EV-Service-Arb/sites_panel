@@ -11,9 +11,10 @@ use eyre::WrapErr;
 use panel_core::{
 	booking::{self, BookingItem, BookingState},
 	fact::Fact,
-	ids::{BrandId, EventId, JobId, LeadId, LocationId},
+	ids::{EventId, JobId, LeadId, LocationId},
 	lead::{self, LeadState, Recorded},
 };
+use sa_core::ids::BrandId;
 use sqlx::{SqliteConnection, types::Json};
 
 use super::{

@@ -7,9 +7,10 @@ use panel_core::{
 	booking::{BookingMatch, BookingState, BookingStatus, DayPart, Provider},
 	fact::{LeadChannel, LeadFlow, MessageRef, Messenger},
 	funnel::Totals,
-	ids::{BrandId, LeadId},
+	ids::LeadId,
 	lead::Stage,
 };
+use sa_core::ids::BrandId;
 use serde_json::Value;
 use sqlx::{SqliteConnection, types::Json};
 use uuid::Uuid;

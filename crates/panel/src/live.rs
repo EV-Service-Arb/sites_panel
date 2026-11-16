@@ -25,8 +25,9 @@
 //! publishes on its own bus, which nobody listens to: the feed does not see it.
 
 use jiff::Timestamp;
-use panel_core::{fact::Fact, ids::BrandId, lead::Recorded};
+use panel_core::{fact::Fact, lead::Recorded};
 use sa_auth::{Analysis, Work};
+use sa_core::ids::BrandId;
 use tokio::sync::broadcast;
 
 /// How many messages a subscriber may fall behind before it is told to read everything
@@ -109,7 +110,7 @@ impl Change {
 			| Fact::BookingCleared
 			| Fact::BookingAttached { .. } => (Topic::Lead, lead()),
 			Fact::ExperimentsDeclared(_) => (Topic::Experiments, None),
-			Fact::ExperimentConfigured { patch, .. } => (Topic::Experiments, Some(patch.key.clone())),
+			Fact::ExperimentConfigured { patch, .. } => (Topic::Experiments, Some(patch.key.to_string())),
 			Fact::RetiredCount => return None,
 		};
 		Some(Self {

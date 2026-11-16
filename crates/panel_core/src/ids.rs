@@ -1,13 +1,12 @@
-//! Identities. Events are keyed by the UUIDv7 their source issues; everything else a
-//! source names (brand, location, lead, job) is an opaque string the panel only checks
-//! the shape of.
+//! Identities. Events are keyed by the UUIDv7 their source issues; a brand is `sa_core`'s
+//! `BrandId`; everything else a source names (location, lead, job) is an opaque string the
+//! panel only checks the shape of.
 
 use std::fmt;
 
 use ev_lib::architecture::Id;
+use sa_core::Invalid;
 use uuid::Uuid;
-
-use crate::Invalid;
 
 pub struct EventTag;
 /// The event's idempotency key, a UUIDv7 issued by the source.
@@ -56,12 +55,6 @@ macro_rules! opaque_id {
 }
 
 opaque_id!(
-	/// A brand: aquafix, vifnet, … Lowercase slug, 1–64 of `[a-z0-9_-]`, starting alphanumeric.
-	BrandId,
-	"subject.brand_id",
-	is_slug
-);
-opaque_id!(
 	/// A location: a GBP listing plus its landing subdomain.
 	LocationId,
 	"subject.location_id",
@@ -79,13 +72,6 @@ opaque_id!(
 	"subject.job_id",
 	is_opaque
 );
-
-/// 1–64 of `[a-z0-9_-]`, starting alphanumeric.
-pub fn is_slug(s: &str) -> bool {
-	(1..=64).contains(&s.len())
-		&& s.starts_with(|c: char| c.is_ascii_lowercase() || c.is_ascii_digit())
-		&& s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
-}
 
 /// 1–128 of `[A-Za-z0-9._:-]`, starting alphanumeric: what a source's own ids look like.
 /// No `@`, `+` or spaces, so an email or a formatted phone number is not taken for an id; and
@@ -111,11 +97,7 @@ mod tests {
 	}
 
 	#[test]
-	fn slugs_and_opaque_ids() {
-		assert!(BrandId::parse("aquafix").is_ok());
-		for bad in ["", "Aquafix", "-x", "a b", &"a".repeat(65)] {
-			assert!(BrandId::parse(bad).is_err(), "{bad:?}");
-		}
+	fn opaque_ids() {
 		for good in ["01J9Z:lead-42.x_1", "123456", "L-33600000000"] {
 			assert!(LeadId::parse(good).is_ok(), "{good:?}");
 		}

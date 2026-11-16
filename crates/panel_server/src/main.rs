@@ -19,7 +19,7 @@ use panel::{
 	store::Store,
 };
 use panel_core::{
-	ids::{BrandId, LocationId},
+	ids::LocationId,
 	place::{self, Editor},
 };
 use panel_server::{
@@ -27,6 +27,7 @@ use panel_server::{
 	conductor, google_calendar, http,
 	scope_ledger::{self, ScopeLedger},
 };
+use sa_core::ids::BrandId;
 
 use crate::settings::Settings;
 
@@ -452,7 +453,7 @@ struct Peers {
 
 /// The HTTP server and the work beside it, all in this one future: the work stops when the
 /// server has.
-async fn serve(panel: Panel, keys: sa_auth::Keys, locale: panel_core::notify::Locale, peers: Peers, mfe: Option<std::path::PathBuf>, bind: SocketAddr) -> eyre::Result<()> {
+async fn serve(panel: Panel, keys: sa_auth::Keys, locale: sa_core::notify::Locale, peers: Peers, mfe: Option<std::path::PathBuf>, bind: SocketAddr) -> eyre::Result<()> {
 	let (stop, stopped) = tokio::sync::watch::channel(false);
 	let bus = panel.bus().clone();
 	let capture_work = async {

@@ -2,7 +2,7 @@
 //! PostHog's insights on them.
 
 use jiff::civil::Date;
-use panel_core::ids::BrandId;
+use sa_core::ids::BrandId;
 use serde_json::{Value, json};
 
 #[derive(Clone, Debug, Eq, PartialEq)]

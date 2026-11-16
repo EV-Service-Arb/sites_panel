@@ -12,13 +12,10 @@ use panel::{
 	operator::{Actor, NewLead},
 	testing::{Conductor, TestDb, batch, event, grant, panel},
 };
-use panel_core::{
-	fact::LeadChannel,
-	ids::{BrandId, LocationId},
-	notify::Locale,
-};
+use panel_core::{fact::LeadChannel, ids::LocationId};
 use panel_server::testing::{As, alias, app, send};
 use sa_auth::SourceKind;
+use sa_core::{ids::BrandId, notify::Locale};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 

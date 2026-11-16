@@ -7,8 +7,8 @@ use axum::{
 	http::{Method, Request, StatusCode, header},
 };
 use panel::{Panel, booking::PushSources, testing::Conductor};
-use panel_core::notify::Locale;
 use sa_auth::{PermissionSet, SourceKind};
+use sa_core::notify::Locale;
 use serde_json::Value;
 use tower::ServiceExt;
 use uuid::Uuid;

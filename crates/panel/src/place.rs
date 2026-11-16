@@ -6,9 +6,10 @@ use eyre::WrapErr;
 use jiff::{SignedDuration, Timestamp};
 use panel_core::{
 	funnel,
-	ids::{BrandId, LocationId},
+	ids::LocationId,
 	place::{Change, ChangeKind, Editor, FieldErrors, PlaceSettings},
 };
+use sa_core::ids::BrandId;
 use serde_json::{Map, Value};
 use uuid::Uuid;
 

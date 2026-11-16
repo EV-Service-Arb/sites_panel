@@ -36,7 +36,8 @@ use panel::{
 	Panel,
 	booking::{BookingEvent, Change, Contact, Provider, PullError, PullSource, Pulled},
 };
-use panel_core::{ids::BrandId, phone};
+use panel_core::phone;
+use sa_core::ids::BrandId;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, watch};

@@ -39,8 +39,8 @@ use axum::{
 use ev_lib::api::{Guard, Route};
 use panel::{IngestError, Outcome, Panel, booking::PushSources};
 use panel_contracts::v1::{EventResult, IngestResponse};
-use panel_core::notify::Locale;
 use sa_auth::{Analysis, Keys, Permission, PermissionSet, Work};
+use sa_core::notify::Locale;
 use serde_json::{Value, json};
 use tower::{BoxError, ServiceBuilder, limit::GlobalConcurrencyLimitLayer};
 use tower_http::{

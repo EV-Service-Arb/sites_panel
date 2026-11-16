@@ -28,10 +28,11 @@ use panel::{
 	place::{Expected, Live, PlaceError, PlaceView},
 };
 use panel_core::{
-	ids::{BrandId, LocationId},
+	ids::LocationId,
 	place::{Editor, FieldErrors, PlaceLive, PlaceSettings},
 };
 use sa_auth::Places;
+use sa_core::ids::BrandId;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::Semaphore;

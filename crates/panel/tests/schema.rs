@@ -10,11 +10,9 @@ use panel::{
 	store::Store,
 	testing::{TestDb, batch, event, grant},
 };
-use panel_core::{
-	ids::{BrandId, LocationId},
-	notify::Locale,
-};
+use panel_core::ids::LocationId;
 use sa_auth::{PermissionSet, SourceKind};
+use sa_core::{ids::BrandId, notify::Locale};
 use serde_json::json;
 use sqlx::{migrate::Migrator, sqlite::SqlitePoolOptions};
 

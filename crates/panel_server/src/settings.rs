@@ -1,7 +1,7 @@
 //! The environment: secrets and the deployment profile. Where to listen is a flag.
 
 use panel::seal::DataKey;
-use panel_core::notify::Locale;
+use sa_core::notify::Locale;
 
 ev_lib::settings! {
 	/// Each secret is needed only by what uses it; a missing one fails that, with an error
@@ -162,7 +162,7 @@ pub struct GoogleSettings {
 	pub client_secret: String,
 	pub every_minutes: u32,
 	/// Each brand with a refresh token, and its calendar.
-	pub calendars: std::collections::BTreeMap<panel_core::ids::BrandId, panel_server::google_calendar::BrandCalendar>,
+	pub calendars: std::collections::BTreeMap<sa_core::ids::BrandId, panel_server::google_calendar::BrandCalendar>,
 }
 
 impl std::fmt::Debug for GoogleSettings {
@@ -177,8 +177,8 @@ impl std::fmt::Debug for GoogleSettings {
 
 /// A brand from the end of a variable's name: `VIFNET` → `vifnet`. A brand whose id has a `-`
 /// cannot be named so (none has).
-fn brand_of_suffix(suffix: &str) -> eyre::Result<panel_core::ids::BrandId> {
-	panel_core::ids::BrandId::parse(&suffix.to_ascii_lowercase()).map_err(|_| eyre::eyre!("{GOOGLE_REFRESH_PREFIX}{suffix}: {suffix} does not name a brand"))
+fn brand_of_suffix(suffix: &str) -> eyre::Result<sa_core::ids::BrandId> {
+	sa_core::ids::BrandId::parse(&suffix.to_ascii_lowercase()).map_err(|_| eyre::eyre!("{GOOGLE_REFRESH_PREFIX}{suffix}: {suffix} does not name a brand"))
 }
 
 impl Settings {

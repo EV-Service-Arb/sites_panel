@@ -4,27 +4,9 @@
 
 use jiff::SignedDuration;
 use sa_alerts::Rule;
+use sa_core::notify::Locale;
 
 use crate::fact::LeadSuspect;
-
-/// The language of the messages (one per deployment, `TELEGRAM_LOCALE`).
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Locale {
-	Ru,
-	En,
-}
-
-impl std::str::FromStr for Locale {
-	type Err = crate::Invalid;
-
-	fn from_str(s: &str) -> Result<Self, crate::Invalid> {
-		match s.trim() {
-			"ru" => Ok(Self::Ru),
-			"en" => Ok(Self::En),
-			other => Err(crate::Invalid::new(format!("TELEGRAM_LOCALE {other:?} is not one of ru, en"))),
-		}
-	}
-}
 
 /// A button under a lead's message.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

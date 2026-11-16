@@ -5,13 +5,13 @@
 use std::{collections::BTreeMap, fmt};
 
 use jiff::{Timestamp, civil::Date};
+use sa_core::{Invalid, ids::is_slug};
 
 use crate::{
-	Invalid,
 	booking::{BookingMatch, Closed, DayPart, Provider},
 	event::Subject,
 	experiment::{Declaration, Patch},
-	ids::is_slug,
+	pricing::InputId,
 };
 
 /// ISO 4217 code: three uppercase letters.
@@ -225,7 +225,7 @@ pub struct LeadOffer {
 	pub price: Option<QuotedPrice>,
 	/// What the visitor picked for an estimate, input id → value id; empty for any other flow.
 	/// Slugs, never free text: no PII.
-	pub estimate_inputs: BTreeMap<String, String>,
+	pub estimate_inputs: BTreeMap<InputId, InputId>,
 }
 
 impl LeadOffer {
@@ -252,24 +252,21 @@ impl LeadOffer {
 			(false, true) => return Err(Invalid::new("properties.quoted_cents and properties.pricing_valid_from are only for flow estimate or fixed")),
 			_ => {}
 		}
-		let estimate_inputs: BTreeMap<String, String> = inputs.into_iter().collect();
-		if !estimate_inputs.is_empty() && flow != Some(LeadFlow::Estimate) {
+		let inputs: BTreeMap<String, String> = inputs.into_iter().collect();
+		if !inputs.is_empty() && flow != Some(LeadFlow::Estimate) {
 			return Err(Invalid::new("properties.estimate_inputs is only for flow estimate"));
 		}
-		if estimate_inputs.len() > MAX_ESTIMATE_INPUTS {
+		if inputs.len() > MAX_ESTIMATE_INPUTS {
 			return Err(Invalid::new(format!("properties.estimate_inputs holds more than {MAX_ESTIMATE_INPUTS} inputs")));
 		}
 		// The words, never the value: it may be anything a source put there.
-		if !estimate_inputs.iter().all(|(k, v)| is_input_slug(k) && is_input_slug(v)) {
-			return Err(Invalid::new("properties.estimate_inputs keys and values are 1–40 of [a-z0-9_-]"));
-		}
+		let estimate_inputs = inputs
+			.iter()
+			.map(|(k, v)| Ok((InputId::parse(k)?, InputId::parse(v)?)))
+			.collect::<Result<_, Invalid>>()
+			.map_err(|_| Invalid::new("properties.estimate_inputs keys and values are 1–40 of [a-z0-9_-]"))?;
 		Ok(Self { flow, price, estimate_inputs })
 	}
-}
-
-/// 1–40 of `[a-z0-9_-]`: an estimate's input or value id, as a pricing model names it.
-fn is_input_slug(s: &str) -> bool {
-	(1..=40).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
 }
 
 /// `YYYY-MM-DD`, a real day: RFC 3339's full-date, nothing looser.
@@ -621,8 +618,10 @@ pub fn bounded(field: &str, text: Option<String>) -> Result<Option<String>, Inva
 
 #[cfg(test)]
 mod tests {
+	use sa_core::ids::BrandId;
+
 	use super::*;
-	use crate::ids::{BrandId, JobId, LeadId};
+	use crate::ids::{JobId, LeadId};
 
 	#[test]
 	fn payments_and_quotes() {

@@ -7,11 +7,12 @@ use panel::{
 	testing::{TestDb, batch, event, grant, panel},
 };
 use panel_core::{
-	ids::{BrandId, JobId, LeadId, LocationId},
+	ids::{JobId, LeadId, LocationId},
 	lead::Stage,
 	place::Editor,
 };
 use sa_auth::SourceKind;
+use sa_core::ids::BrandId;
 use serde_json::json;
 use uuid::Uuid;
 

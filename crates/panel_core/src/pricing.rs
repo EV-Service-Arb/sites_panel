@@ -9,11 +9,12 @@
 
 use std::collections::BTreeMap;
 
+use sa_core::Invalid;
 use serde::{Serialize, Serializer};
 use serde_json::{Map, Value};
 use ts_rs::TS;
 
-use crate::{Invalid, safe_integer};
+use crate::safe_integer;
 
 /// The model's format; a model of another is refused whole.
 pub const FORMAT: i64 = 1;
@@ -308,21 +309,30 @@ fn at(path: &str, key: &str) -> String {
 	if path.is_empty() { key.to_owned() } else { format!("{path}.{key}") }
 }
 
-/// `^[a-z0-9_-]{1,40}$`.
-pub fn is_slug(s: &str) -> bool {
-	(1..=40).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
-}
+checked_str!(
+	/// An input's, an option's or a need's id in a model, and so a lead's `estimate_inputs`' keys and
+	/// values: `^[a-z0-9_-]{1,40}$`.
+	pub struct InputId,
+	pattern = LIMITS.slug,
+	refused = "not a slug, [a-z0-9_-]{1,40}",
+	|s| (1..=40).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
+);
 
-/// `^[a-z]{2}(-[A-Z]{2})?$`: `fr`, `en`, `fr-FR`.
-pub fn is_locale(s: &str) -> bool {
-	let b = s.as_bytes();
-	let lang = |b: &[u8]| b.iter().all(u8::is_ascii_lowercase);
-	match b.len() {
-		2 => lang(b),
-		5 => lang(&b[..2]) && b[2] == b'-' && b[3..].iter().all(u8::is_ascii_uppercase),
-		_ => false,
+checked_str!(
+	/// A label's locale: `fr`, `en`, `fr-FR`.
+	pub struct LocaleTag,
+	pattern = LIMITS.locale,
+	refused = "not a locale like fr, en or fr-FR",
+	|s| {
+		let b = s.as_bytes();
+		let lang = |b: &[u8]| b.iter().all(u8::is_ascii_lowercase);
+		match b.len() {
+			2 => lang(b),
+			5 => lang(&b[..2]) && b[2] == b'-' && b[3..].iter().all(u8::is_ascii_uppercase),
+			_ => false,
+		}
 	}
-}
+);
 
 /// `YYYY-MM-DD` of ASCII digits, and a day the (proleptic Gregorian) calendar has.
 pub fn is_date(s: &str) -> bool {
@@ -389,7 +399,7 @@ impl Check {
 
 	fn slug(&mut self, path: &str, v: Option<&Value>) -> String {
 		match v.and_then(Value::as_str) {
-			Some(s) if is_slug(s) => s.to_owned(),
+			Some(s) if InputId::parse(s).is_ok() => s.to_owned(),
 			_ => {
 				self.fail(path, Code::Slug, "a slug, [a-z0-9_-]{1,40}");
 				String::new()
@@ -404,7 +414,7 @@ impl Check {
 		};
 		let mut out = Labels::new();
 		for (locale, text) in m {
-			if !is_locale(locale) {
+			if LocaleTag::parse(locale).is_err() {
 				self.fail(at(path, locale), Code::Locale, "not a locale (fr, en, fr-FR)");
 				continue;
 			}
@@ -557,7 +567,7 @@ impl PricingModel {
 				}
 				for (slug, need) in entries {
 					let path = format!("needs.{slug}");
-					if !is_slug(slug) {
+					if InputId::parse(slug).is_err() {
 						c.fail(&path, Code::Slug, "the need must be a slug, [a-z0-9_-]{1,40}");
 					}
 					if let Some(pricing) = c.need(&path, need, &inputs) {
@@ -680,7 +690,7 @@ pub fn parse_locales<'a>(raw: impl IntoIterator<Item = &'a str>) -> Result<Vec<S
 	let mut out: Vec<String> = Vec::new();
 	for locale in raw {
 		let locale = locale.trim();
-		if !is_locale(locale) {
+		if LocaleTag::parse(locale).is_err() {
 			return Err(Invalid::new(format!("{locale:?} is not a locale like fr, en or fr-FR")));
 		}
 		if out.iter().any(|l| l == locale) {
@@ -724,8 +734,10 @@ mod tests {
 		for bad in ["2026-02-29", "1900-02-29", "2026-13-01", "2026-00-10", "2026-10-1", "2026-10-01T00:00:00Z", "２０２６-10-01"] {
 			assert!(!is_date(bad), "{bad}");
 		}
-		assert!(is_slug("a-b_1") && !is_slug("A") && !is_slug("") && !is_slug(&"a".repeat(41)));
-		assert!(is_locale("fr") && is_locale("fr-FR") && !is_locale("FR") && !is_locale("fr-fr") && !is_locale("fra"));
+		let slug = |s: &str| InputId::parse(s).is_ok();
+		assert!(slug("a-b_1") && !slug("A") && !slug("") && !slug(&"a".repeat(41)));
+		let locale = |s: &str| LocaleTag::parse(s).is_ok();
+		assert!(locale("fr") && locale("fr-FR") && !locale("FR") && !locale("fr-fr") && !locale("fra"));
 		assert_eq!(parse_locales("fr,en".split(',')).unwrap(), ["fr", "en"]);
 		assert!(parse_locales(["fr", "fr"]).is_err());
 		assert!(parse_locales([]).is_err());

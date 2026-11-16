@@ -160,6 +160,7 @@ pub fn distinct_id(brand: &str, lead: &str, analytics_id: Option<&AnalyticsId>) 
 #[cfg(test)]
 mod tests {
 	use sa_auth::SourceKind;
+	use sa_core::ids::BrandId;
 	use uuid::Uuid;
 
 	use super::*;
@@ -167,7 +168,7 @@ mod tests {
 		booking::{Closed, DayPart, Provider},
 		event::Subject,
 		fact::{CallOutcome, LeadChannel, LeadOffer, MessageRef, Messenger},
-		ids::{BrandId, EventId, LeadId, LocationId},
+		ids::{EventId, LeadId, LocationId},
 	};
 
 	fn rec(fact: Fact) -> Recorded {

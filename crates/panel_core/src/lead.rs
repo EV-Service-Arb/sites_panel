@@ -6,11 +6,12 @@
 
 use jiff::Timestamp;
 use sa_auth::SourceKind;
+use sa_core::ids::BrandId;
 
 use crate::{
 	event::Subject,
 	fact::{AnalyticsId, Fact, LeadChannel, LeadOffer, LeadSuspect, MessageRef, Messenger},
-	ids::{BrandId, EventId, JobId, LeadId, LocationId},
+	ids::{EventId, JobId, LeadId, LocationId},
 };
 
 vocabulary! {

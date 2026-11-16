@@ -25,14 +25,14 @@ use panel::{
 	operator::{ActionError, Actor, CallOutcome, Done, EventView, FunnelBy, FunnelSlice, LeadQuery, LeadView, NewLead, Payment, Pii, StageMove, SuspectFilter},
 };
 use panel_core::{
-	Invalid,
 	booking::{BookingMatch, BookingStatus, DayPart, Provider},
 	fact::{LeadChannel, LeadFlow, MessageRef, Messenger},
 	funnel::{MIN_SAMPLE, Share},
-	ids::{BrandId, JobId, LeadId, LocationId},
+	ids::{JobId, LeadId, LocationId},
 	lead::Stage,
 };
 use sa_auth::{Leads, Pii as SeesPii, SourceKind};
+use sa_core::{Invalid, ids::BrandId};
 use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use sha2::{Digest, Sha256};

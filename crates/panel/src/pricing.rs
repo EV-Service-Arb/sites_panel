@@ -6,10 +6,10 @@
 use eyre::WrapErr;
 use jiff::Timestamp;
 use panel_core::{
-	ids::BrandId,
 	place::Editor,
 	pricing::{self, PricingInputs, PricingModel, Problem},
 };
+use sa_core::ids::BrandId;
 use serde_json::Value;
 use uuid::Uuid;
 

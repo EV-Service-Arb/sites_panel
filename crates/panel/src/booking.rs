@@ -29,9 +29,10 @@ use panel_contracts::SCHEMA;
 pub use panel_core::booking::{BookingEvent, Change, Contact, Provider};
 use panel_core::{
 	booking::{BookingMatch, BookingStatus, Closed, OperatorAction, is_external_ref, is_version},
-	ids::{BrandId, EventId, LeadId},
+	ids::{EventId, LeadId},
 	phone,
 };
+use sa_core::ids::BrandId;
 use serde_json::{Map, Value, json};
 use uuid::Uuid;
 

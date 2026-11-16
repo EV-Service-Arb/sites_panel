@@ -10,10 +10,11 @@ use panel::{
 	testing::{TestDb, batch, event, grant, panel},
 };
 use panel_core::{
-	ids::{BrandId, LeadId, LocationId},
+	ids::{LeadId, LocationId},
 	place::{Editor, PlaceSettings},
 };
 use sa_auth::SourceKind;
+use sa_core::ids::BrandId;
 use serde_json::json;
 use tokio::sync::broadcast::{Receiver, error::TryRecvError};
 use uuid::Uuid;

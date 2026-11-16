@@ -27,7 +27,8 @@ contracts/proto/scope/v1/            banking's ScopeLedger, vendored: the invoic
 crates/panel_contracts/              those protos, generated at build time: prost messages + pbjson
                                      serde (protojson); tonic clients for the ledger
 crates/panel_core/                   no I/O: no database, network, clock or randomness
-  src/ids.rs                         EventId (UUIDv7, ev_lib's Id), brand/location/lead/job ids
+  src/ids.rs                         EventId (UUIDv7, ev_lib's Id), location/lead/job ids; a brand
+                                     is sa_core's BrandId, a refusal sa_core's Invalid
   src/event.rs                       Envelope, TypeKey (type@version), KeyGrant: which kind and
                                      brands a key may write
   src/fact.rs                        the registered types, typed (Fact), and what each needs of
@@ -107,6 +108,8 @@ ts/sites-contract/                   @evinvest/sites-contract (npm): the contrac
                                      — what the sites build against, the front end imports by
                                      path; released by an `@evinvest/sites-contract-v*` tag
 sa_auth (the conductor's crate)      the `sa` permissions and the assertion: verified here
+sa_core (the conductor's crate)      what both sides name alike: BrandId and its slug, Invalid, the
+                                     notes' Locale
 frontend/                            the `mfe-sites` bundle: <mfe-sites-panel> (the page, routes
                                      under `base`) and <mfe-sites-nav> (the conductor's Sites
                                      dropdown); `npm run build` → dist/ (PANEL_MFE_DIR); the

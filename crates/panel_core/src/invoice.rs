@@ -6,9 +6,8 @@
 //! keeps a row per invoice it asked for, so a retry finds the first attempt and the list needs
 //! no call to banking.
 
+use sa_core::Invalid;
 use uuid::Uuid;
-
-use crate::Invalid;
 
 /// The concierge tenant (banking scope) the panel's invoices live in.
 pub const SCOPE: &str = "sa";

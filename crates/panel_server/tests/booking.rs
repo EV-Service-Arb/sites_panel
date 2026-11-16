@@ -23,13 +23,13 @@ use panel::{
 	live::{Signal, Topic},
 	testing::{Conductor, TestDb, batch, event, grant, panel},
 };
-use panel_core::ids::BrandId;
 use panel_server::{
 	google_calendar::{BrandCalendar, GoogleCalendar},
 	http::Limits,
 	testing::{As, Client, alias, app, app_with, raw, send},
 };
 use sa_auth::SourceKind;
+use sa_core::ids::BrandId;
 use serde_json::{Value, json};
 use tokio::sync::broadcast;
 use tower::ServiceExt;

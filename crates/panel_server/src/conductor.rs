@@ -33,11 +33,9 @@ use panel::{
 	live::{Change, Signal},
 	notifications::Notification,
 };
-use panel_core::{
-	ids::BrandId,
-	notify::{Button as SiteButton, Locale, Rendered},
-};
+use panel_core::notify::{Button as SiteButton, Rendered};
 use sa_alerts::{Call, Note, NotePage, NoteText, Origin};
+use sa_core::{ids::BrandId, notify::Locale};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::broadcast::{Receiver, error::RecvError};

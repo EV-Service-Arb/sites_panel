@@ -19,10 +19,8 @@
 
 use eyre::WrapErr;
 use jiff::{SignedDuration, Timestamp};
-use panel_core::{
-	Invalid,
-	invoice::{self as rules, InvoiceState},
-};
+use panel_core::invoice::{self as rules, InvoiceState};
+use sa_core::Invalid;
 use uuid::Uuid;
 
 pub use crate::store::invoices::{Invoice, Paid};

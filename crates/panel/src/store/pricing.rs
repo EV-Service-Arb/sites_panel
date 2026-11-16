@@ -5,7 +5,7 @@
 
 use eyre::WrapErr;
 use jiff::Timestamp;
-use panel_core::ids::BrandId;
+use sa_core::ids::BrandId;
 use serde_json::Value;
 use sqlx::{SqliteConnection, types::Json};
 use uuid::Uuid;

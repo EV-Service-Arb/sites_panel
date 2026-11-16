@@ -10,11 +10,12 @@
 use std::collections::BTreeMap;
 
 use jiff::{Timestamp, civil::Date};
+use sa_core::Invalid;
 use serde::Serialize;
 use serde_json::Value;
 use ts_rs::TS;
 
-use crate::{Invalid, ids::EventId};
+use crate::ids::EventId;
 
 vocabulary! {
 	/// Where a slot is booked.

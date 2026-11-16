@@ -11,11 +11,10 @@ use eyre::WrapErr;
 use jiff::Timestamp;
 use panel_contracts::SCHEMA;
 use panel_core::{
-	Invalid,
 	experiment::{Field, Patch, State, label},
-	ids::BrandId,
 	place::Editor,
 };
+use sa_core::{Invalid, ids::BrandId};
 use serde::Serialize;
 use serde_json::json;
 use ts_rs::TS;
@@ -75,7 +74,7 @@ pub fn posthog_url(project: &PosthogProject, brand: &BrandId, state: &State) -> 
 			"kind": "FunnelsQuery",
 			"series": [event("experiment_exposed"), event("experiment_lead")],
 			"properties": {"type": "AND", "values": [{"type": "AND", "values": [
-				prop("experiment", &state.declared.key, "exact"),
+				prop("experiment", state.declared.key.as_str(), "exact"),
 				prop("brand_id", brand.as_str(), "exact"),
 				prop("forced", "true", "is_not"),
 			]}]},
@@ -101,7 +100,7 @@ impl Panel {
 
 	async fn experiment(&self, brand: &BrandId, key: &str) -> eyre::Result<Option<State>> {
 		let mut conn = self.store.pool().acquire().await.wrap_err("a connection")?;
-		Ok(stored::list(&mut conn, Some(brand)).await?.into_iter().map(|(_, s)| s).find(|s| s.declared.key == key))
+		Ok(stored::list(&mut conn, Some(brand)).await?.into_iter().map(|(_, s)| s).find(|s| s.declared.key.as_str() == key))
 	}
 
 	/// What a brand's landings lay over their code: per current experiment, the override fields
@@ -120,7 +119,7 @@ impl Panel {
 				holdout,
 			};
 			if o != LiveOverride::default() {
-				out.insert(s.declared.key.clone(), o);
+				out.insert(s.declared.key.to_string(), o);
 			}
 		}
 		Ok(LiveExperiments { experiments: out })
@@ -132,7 +131,7 @@ impl Panel {
 	pub async fn configure_experiment(&self, by: &Editor, brand: &BrandId, patch: Patch, now: Timestamp) -> Result<ExperimentView, ExperimentError> {
 		let name = label(by.label()).map_err(|e| ExperimentError::Invalid(Invalid::new(e.0.trim_start_matches("properties.").to_owned())))?;
 		let source_id = by.user_id().map_or_else(|| "cli".to_owned(), |u| u.to_string());
-		let current = self.experiment(brand, &patch.key).await?.filter(|s| !s.retired).ok_or(ExperimentError::NotFound)?;
+		let current = self.experiment(brand, patch.key.as_str()).await?.filter(|s| !s.retired).ok_or(ExperimentError::NotFound)?;
 		current.check_patch(&patch).map_err(ExperimentError::Invalid)?;
 		if !current.changes(&patch) {
 			return Ok(self.view(brand.clone(), current));
@@ -173,8 +172,11 @@ impl Panel {
 			// Deferred is ingest's, for a source's booking ahead of its lead; never the panel's own.
 			crate::Outcome::Rejected(e) | crate::Outcome::Deferred(e) => return Err(ExperimentError::Invalid(e)),
 		}
-		tracing::info!(source_id, %brand, key = patch.key, "experiment configured");
-		let state = self.experiment(brand, &patch.key).await?.ok_or_else(|| eyre::eyre!("an experiment configured and gone"))?;
+		tracing::info!(source_id, %brand, key = %patch.key, "experiment configured");
+		let state = self
+			.experiment(brand, patch.key.as_str())
+			.await?
+			.ok_or_else(|| eyre::eyre!("an experiment configured and gone"))?;
 		Ok(self.view(brand.clone(), state))
 	}
 }

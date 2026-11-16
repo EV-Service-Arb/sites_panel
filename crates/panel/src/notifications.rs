@@ -11,10 +11,11 @@ use eyre::WrapErr;
 use jiff::{SignedDuration, Timestamp};
 use panel_core::{
 	funnel::CONTACT_SLA,
-	ids::{BrandId, LeadId},
-	notify::{BookingChange, LeadNote, Locale, Note, Rendered},
+	ids::LeadId,
+	notify::{BookingChange, LeadNote, Note, Rendered},
 };
 use sa_alerts::Rule;
+use sa_core::{ids::BrandId, notify::Locale};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;

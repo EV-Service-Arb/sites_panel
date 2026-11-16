@@ -9,8 +9,9 @@ use panel::{
 	pricing::{ChangeKind, PricingError},
 	testing::{TestDb, batch, event, grant, panel},
 };
-use panel_core::{ids::BrandId, place::Editor, pricing::PricingInputs};
+use panel_core::{place::Editor, pricing::PricingInputs};
 use sa_auth::SourceKind;
+use sa_core::ids::BrandId;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
