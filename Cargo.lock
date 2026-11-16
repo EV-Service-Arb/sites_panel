@@ -861,7 +861,9 @@ dependencies = [
 
 [[package]]
 name = "ev_lib"
-version = "0.32.0"
+version = "0.33.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "562d5db20f34579aac60e6b217460a3493278fa12ae3a0923d68285f38006f87"
 dependencies = [
  "aide",
  "async-trait",
@@ -2162,7 +2164,7 @@ dependencies = [
 name = "panel_core"
 version = "0.1.0"
 dependencies = [
- "ev_lib 0.32.0",
+ "ev_lib 0.33.0",
  "jiff",
  "sa_alerts",
  "sa_auth",
@@ -2178,7 +2180,7 @@ dependencies = [
 name = "panel_gen"
 version = "0.1.0"
 dependencies = [
- "ev_lib 0.32.0",
+ "ev_lib 0.33.0",
  "panel",
  "panel_contracts",
  "panel_core",
@@ -2198,7 +2200,7 @@ dependencies = [
  "base64 0.22.1",
  "clap",
  "color-eyre",
- "ev_lib 0.32.0",
+ "ev_lib 0.33.0",
  "eyre",
  "futures",
  "getrandom 0.3.4",
@@ -2914,6 +2916,7 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 [[package]]
 name = "sa_alerts"
 version = "0.1.0"
+source = "git+https://github.com/EV-Service-Arb/site_conductor?branch=main#b8df89a31f542242afa9a0b2c606bf24d3dc8ea5"
 dependencies = [
  "jiff",
  "sa_auth",
@@ -2927,6 +2930,7 @@ dependencies = [
 [[package]]
 name = "sa_auth"
 version = "0.1.0"
+source = "git+https://github.com/EV-Service-Arb/site_conductor?branch=main#b8df89a31f542242afa9a0b2c606bf24d3dc8ea5"
 dependencies = [
  "base64 0.22.1",
  "concierge_iam",
