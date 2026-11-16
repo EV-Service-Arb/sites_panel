@@ -12,7 +12,7 @@ use panel::{
 	operator::{Actor, NewLead},
 	testing::{Conductor, TestDb, batch, event, grant, panel},
 };
-use panel_core::{fact::LeadChannel, ids::LocationId};
+use panel_core::{fact::ManualChannel, ids::LocationId};
 use panel_server::testing::{As, alias, app, send};
 use sa_auth::SourceKind;
 use sa_core::{ids::BrandId, notify::Locale};
@@ -141,7 +141,7 @@ async fn a_new_lead_is_one_note_with_and_without_its_pii_and_its_buttons_call_ba
 		location: LocationId::parse("royat").unwrap(),
 		need: "a tap".into(),
 		phone: None,
-		channel: LeadChannel::PhoneInbound,
+		channel: ManualChannel::PhoneInbound,
 	};
 	panel.create_lead(Actor(by), lead, now).await.unwrap();
 	assert_eq!(panel.fan_out(now, Locale::Ru).await.unwrap(), 1);
@@ -209,7 +209,7 @@ async fn each_key_s_last_receipt() {
 				location: LocationId::parse("royat").unwrap(),
 				need: "a tap".into(),
 				phone: None,
-				channel: LeadChannel::PhoneInbound,
+				channel: ManualChannel::PhoneInbound,
 			},
 			now,
 		)

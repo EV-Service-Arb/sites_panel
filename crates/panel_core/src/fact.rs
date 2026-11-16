@@ -81,9 +81,6 @@ vocabulary! {
 }
 
 impl LeadChannel {
-	/// The channels an operator takes a lead in by hand: a call, or a conversation a customer
-	/// started on a messenger without the landing. A form and a callback are the landing's.
-	pub const MANUAL: [Self; 3] = [Self::PhoneInbound, Self::Whatsapp, Self::Telegram];
 	/// The channels a landing sends: the panel's `phone_inbound` is for the calls it records.
 	pub const SITE: [Self; 4] = [Self::Form, Self::Callback, Self::Whatsapp, Self::Telegram];
 
@@ -276,35 +273,47 @@ fn rfc3339_date(raw: &str) -> Option<Date> {
 	shaped.then(|| raw.parse().ok()).flatten()
 }
 
-/// How the customer was reached.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ContactChannel {
-	Phone,
-	Whatsapp,
-	Email,
-	Telegram,
-	Other,
+vocabulary! {
+	/// How the customer was reached.
+	pub enum ContactChannel, "properties.channel is not one of phone, whatsapp, email, telegram, other" {
+		Phone => "phone",
+		Whatsapp => "whatsapp",
+		Email => "email",
+		Telegram => "telegram",
+		Other => "other",
+	}
 }
 
-impl ContactChannel {
-	pub fn as_str(self) -> &'static str {
-		match self {
-			Self::Phone => "phone",
-			Self::Whatsapp => "whatsapp",
-			Self::Email => "email",
-			Self::Telegram => "telegram",
-			Self::Other => "other",
-		}
+vocabulary! {
+	/// Why an operator says a lead was lost: the panel's words, kept few so the reports compare.
+	/// The registry takes any slug (`lead.lost` events journaled before the list).
+	pub enum LostReason, "reason is not one of too_expensive, no_answer, went_elsewhere, out_of_area, not_needed, spam, other" {
+		TooExpensive => "too_expensive",
+		NoAnswer => "no_answer",
+		WentElsewhere => "went_elsewhere",
+		OutOfArea => "out_of_area",
+		NotNeeded => "not_needed",
+		Spam => "spam",
+		Other => "other",
 	}
+}
 
-	pub fn parse(raw: &str) -> Result<Self, Invalid> {
-		match raw {
-			"phone" => Ok(Self::Phone),
-			"whatsapp" => Ok(Self::Whatsapp),
-			"email" => Ok(Self::Email),
-			"telegram" => Ok(Self::Telegram),
-			"other" => Ok(Self::Other),
-			_ => Err(Invalid::new("properties.channel is not one of phone, whatsapp, email, telegram, other")),
+vocabulary! {
+	/// The channels an operator takes a lead in by hand: a call, or a conversation a customer
+	/// started on a messenger without the landing. A form and a callback are the landing's.
+	pub enum ManualChannel, "channel is not one of phone_inbound, whatsapp, telegram" {
+		PhoneInbound => "phone_inbound",
+		Whatsapp => "whatsapp",
+		Telegram => "telegram",
+	}
+}
+
+impl From<ManualChannel> for LeadChannel {
+	fn from(c: ManualChannel) -> Self {
+		match c {
+			ManualChannel::PhoneInbound => Self::PhoneInbound,
+			ManualChannel::Whatsapp => Self::Whatsapp,
+			ManualChannel::Telegram => Self::Telegram,
 		}
 	}
 }
@@ -330,35 +339,15 @@ impl AnalyticsId {
 	}
 }
 
-/// How a call ended, as the operator tells it. Only what a person can know without
-/// telephony: no durations, no missed calls (spec §10.1).
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum CallOutcome {
-	Answered,
-	NoAnswer,
-	WrongNumber,
-	/// The customer asked to be called back.
-	Later,
-}
-
-impl CallOutcome {
-	pub fn as_str(self) -> &'static str {
-		match self {
-			Self::Answered => "answered",
-			Self::NoAnswer => "no_answer",
-			Self::WrongNumber => "wrong_number",
-			Self::Later => "later",
-		}
-	}
-
-	pub fn parse(raw: &str) -> Result<Self, Invalid> {
-		match raw {
-			"answered" => Ok(Self::Answered),
-			"no_answer" => Ok(Self::NoAnswer),
-			"wrong_number" => Ok(Self::WrongNumber),
-			"later" => Ok(Self::Later),
-			_ => Err(Invalid::new("properties.outcome is not one of answered, no_answer, wrong_number, later")),
-		}
+vocabulary! {
+	/// How a call ended, as the operator tells it. Only what a person can know without
+	/// telephony: no durations, no missed calls (spec §10.1).
+	pub enum CallOutcome, "properties.outcome is not one of answered, no_answer, wrong_number, later" {
+		Answered => "answered",
+		NoAnswer => "no_answer",
+		WrongNumber => "wrong_number",
+		/// The customer asked to be called back.
+		Later => "later",
 	}
 }
 

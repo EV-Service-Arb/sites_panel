@@ -39,7 +39,7 @@ use eyre::WrapErr;
 use jiff::Timestamp;
 use panel_core::{
 	event::{Envelope, KeyGrant},
-	fact::{Fact, MessageRef},
+	fact::{Fact, LeadChannel, LeadFlow, MessageRef},
 	ids::{LeadId, LocationId},
 	lead::Recorded,
 };
@@ -112,7 +112,7 @@ pub struct EventVerdict {
 pub struct RefLead {
 	pub lead_id: String,
 	/// `None` for a lead seen before its `lead.created`.
-	pub channel: Option<String>,
+	pub channel: Option<LeadChannel>,
 	pub stage: &'static str,
 	pub created_at: Option<Timestamp>,
 	pub message_ref: String,
@@ -121,7 +121,7 @@ pub struct RefLead {
 	pub need: Option<String>,
 	pub locality: Option<String>,
 	pub quoted_cents: Option<i64>,
-	pub flow: Option<String>,
+	pub flow: Option<LeadFlow>,
 	/// When the customer first wrote on a messenger, and on which: a bot need not say it twice.
 	pub messaged_at: Option<Timestamp>,
 	pub messaged_channel: Option<&'static str>,

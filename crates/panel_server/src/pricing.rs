@@ -17,9 +17,9 @@ use jiff::Timestamp;
 use panel::{
 	Panel,
 	place::Expected,
-	pricing::{PricingError, PricingView},
+	pricing::{ChangeKind, PricingError, PricingView},
 };
-use panel_core::pricing::PricingModel;
+use panel_core::pricing::{ModelPart, PricingModel};
 use sa_auth::{Gate, Pricing, Work};
 use sa_core::ids::BrandId;
 use serde::{Deserialize, Serialize};
@@ -122,8 +122,7 @@ struct ChangeDto {
 	id: Uuid,
 	at: Timestamp,
 	by: String,
-	/// set | remove
-	kind: &'static str,
+	kind: ChangeKind,
 	/// The saved model's `validFrom`; null for a removal.
 	valid_from: Option<String>,
 	/// How many needs the saved model prices; null for a removal.
@@ -131,6 +130,9 @@ struct ChangeDto {
 	/// The model the change left; null for a removal.
 	#[schemars(with = "Option<PricingModel>")]
 	model: Option<Value>,
+	/// What it changed of the model before it, in the model's order; null for a first save or
+	/// when either side is a removal.
+	changed: Option<Vec<ModelPart>>,
 }
 
 #[derive(JsonSchema, Serialize)]
@@ -150,10 +152,11 @@ async fn pricing_changes(State(panel): State<Panel>, Ids(BrandPath { brand }): I
 			id: c.id,
 			at: c.at,
 			by: c.by,
-			kind: c.kind.as_str(),
+			kind: c.kind,
 			valid_from: c.valid_from,
 			needs: c.needs,
 			model: c.model,
+			changed: c.changed,
 		})
 		.collect();
 	Ok(Json(ChangesDto { changes }))

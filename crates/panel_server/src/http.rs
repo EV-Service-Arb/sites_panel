@@ -355,7 +355,7 @@ async fn lead_by_ref(State(ingest): State<Ingest>, Path((brand, message_ref)): P
 				("need", lead.need.map(Value::from)),
 				("locality", lead.locality.map(Value::from)),
 				("quoted_cents", lead.quoted_cents.map(Value::from)),
-				("flow", lead.flow.map(Value::from)),
+				("flow", lead.flow.map(|f| Value::from(f.as_str()))),
 				("messaged_at", lead.messaged_at.map(|t| Value::from(t.to_string()))),
 				("messaged_channel", lead.messaged_channel.map(Value::from)),
 			];

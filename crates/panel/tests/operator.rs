@@ -43,7 +43,7 @@ async fn actions_are_events_and_move_the_projection() {
 				location: LocationId::parse("paris-11").unwrap(),
 				need: "  a leaking tap ".into(),
 				phone: Some("+33 6 00 00 00 00".into()),
-				channel: panel_core::fact::LeadChannel::PhoneInbound,
+				channel: panel_core::fact::ManualChannel::PhoneInbound,
 			},
 			t(0),
 		)
@@ -53,7 +53,7 @@ async fn actions_are_events_and_move_the_projection() {
 
 	let (view, events) = panel.lead_card(&brand(), &lead, Pii::Reveal, t(0)).await.unwrap().unwrap();
 	assert_eq!(view.row.stage, Stage::Created);
-	assert_eq!(view.row.channel.as_deref(), Some("phone_inbound"));
+	assert_eq!(view.row.channel, Some(panel_core::fact::LeadChannel::PhoneInbound));
 	assert!(view.row.manual);
 	assert_eq!(view.pii.unwrap(), json!({"need": "a leaking tap", "phone": "+33 6 00 00 00 00"}));
 	assert_eq!(events.len(), 1);
@@ -67,17 +67,23 @@ async fn actions_are_events_and_move_the_projection() {
 	let attempt = panel.attempt_call(by, &brand(), &lead, t(1)).await.unwrap();
 	let call = |attempt| CallOutcome {
 		attempt,
-		outcome: "answered".into(),
+		outcome: panel_core::fact::CallOutcome::Answered,
 	};
 	panel.log_call(by, &brand(), &lead, call(attempt.raw()), t(2)).await.unwrap();
 	assert!(matches!(panel.log_call(by, &brand(), &lead, call(Uuid::now_v7()), t(2)).await, Err(ActionError::NotFound)));
-	let bad = CallOutcome {
-		attempt: attempt.raw(),
-		outcome: "voicemail".into(),
-	};
-	assert!(matches!(panel.log_call(by, &brand(), &lead, bad, t(2)).await, Err(ActionError::Invalid(_))));
 
-	panel.move_lead(by, &brand(), &lead, StageMove::Contacted { channel: Some("phone".into()) }, t(3)).await.unwrap();
+	panel
+		.move_lead(
+			by,
+			&brand(),
+			&lead,
+			StageMove::Contacted {
+				channel: Some(panel_core::fact::ContactChannel::Phone),
+			},
+			t(3),
+		)
+		.await
+		.unwrap();
 	assert!(
 		matches!(panel.move_lead(by, &brand(), &lead, StageMove::Completed, t(4)).await, Err(ActionError::Conflict(_))),
 		"nothing won yet"
@@ -130,14 +136,6 @@ async fn actions_are_events_and_move_the_projection() {
 	let after = panel.lead_card(&brand(), &lead, Pii::Reveal, t(9)).await.unwrap().unwrap().0.row;
 	assert_eq!(format!("{before:?}"), format!("{after:?}"), "the rebuild lands on the same state");
 
-	let lost = StageMove::Lost {
-		reason: "Too expensive".into(),
-		note: None,
-	};
-	assert!(
-		matches!(panel.move_lead(by, &brand(), &lead, lost, t(10)).await, Err(ActionError::Invalid(_))),
-		"a reason is a slug"
-	);
 	let nobody = LeadId::parse("L-404").unwrap();
 	assert!(matches!(panel.attempt_call(by, &brand(), &nobody, t(10)).await, Err(ActionError::NotFound)));
 	let won_elsewhere = StageMove::Won {
@@ -240,7 +238,7 @@ async fn slices_places_payments_and_counts() {
 		location: LocationId::parse("apex").unwrap(),
 		need: "a boiler".into(),
 		phone: None,
-		channel: panel_core::fact::LeadChannel::PhoneInbound,
+		channel: panel_core::fact::ManualChannel::PhoneInbound,
 	};
 	panel.create_lead(by, new, at(4)).await.unwrap();
 	let lead = |id: &str| LeadId::parse(id).unwrap();
@@ -364,14 +362,7 @@ async fn messenger_leads_by_hand() {
 		phone: None,
 		channel,
 	};
-	let (wrote, _) = panel.create_lead(by, new(LeadChannel::Whatsapp), t(0)).await.unwrap();
-	for not_by_hand in [LeadChannel::Form, LeadChannel::Callback] {
-		let refused = panel.create_lead(by, new(not_by_hand), t(0)).await;
-		assert!(
-			matches!(&refused, Err(ActionError::Invalid(e)) if e.0 == "channel is one of phone_inbound, whatsapp, telegram"),
-			"{not_by_hand:?}: {refused:?}"
-		);
-	}
+	let (wrote, _) = panel.create_lead(by, new(panel_core::fact::ManualChannel::Whatsapp), t(0)).await.unwrap();
 	let landing = [messenger_lead(t(1), "aquafix", "L-1", "telegram", "AQ-7K3F")];
 	panel.ingest(&site(), &batch("aquafix-site", &landing), t(2)).await.unwrap();
 
@@ -406,8 +397,8 @@ async fn messenger_leads_by_hand() {
 	assert_eq!(by_ref.len(), 1);
 	let row = &by_ref[0].row;
 	assert_eq!(
-		(row.lead_id.as_str(), row.channel.as_deref(), row.message_ref.as_deref()),
-		("L-1", Some("telegram"), Some("AQ-7K3F"))
+		(row.lead_id.as_str(), row.channel, row.message_ref.as_deref()),
+		("L-1", Some(LeadChannel::Telegram), Some("AQ-7K3F"))
 	);
 	assert_eq!(row.messaged, Some((t(3), Messenger::Telegram)));
 	assert_eq!(row.stage, Stage::Created, "writing is not being contacted");

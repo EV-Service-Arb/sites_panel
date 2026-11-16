@@ -11,7 +11,7 @@ use eyre::WrapErr;
 use jiff::{Timestamp, civil::Date};
 use panel_contracts::SCHEMA;
 use panel_core::{
-	fact::{LeadChannel, LeadFlow, MessageRef, Messenger, bounded},
+	fact::{ContactChannel, LeadChannel, LeadFlow, LostReason, ManualChannel, MessageRef, Messenger, bounded},
 	funnel::{self, Totals},
 	ids::{EventId, JobId, LeadId, LocationId},
 	lead::Stage,
@@ -91,15 +91,14 @@ pub struct NewLead {
 	/// What the customer needs, in their words: PII.
 	pub need: String,
 	pub phone: Option<String>,
-	/// How it came in: one of [`LeadChannel::MANUAL`].
-	pub channel: LeadChannel,
+	pub channel: ManualChannel,
 }
 
 /// A move of a lead through the funnel (stages 6–9).
 #[derive(Clone, Debug)]
 pub enum StageMove {
 	Contacted {
-		channel: Option<String>,
+		channel: Option<ContactChannel>,
 	},
 	Quoted {
 		amount: Option<i64>,
@@ -110,7 +109,7 @@ pub enum StageMove {
 		job_id: Option<JobId>,
 	},
 	Lost {
-		reason: String,
+		reason: LostReason,
 		note: Option<String>,
 	},
 	/// The lead's won job is done.
@@ -121,7 +120,7 @@ pub enum StageMove {
 #[derive(Clone, Debug)]
 pub struct CallOutcome {
 	pub attempt: Uuid,
-	pub outcome: String,
+	pub outcome: panel_core::fact::CallOutcome,
 }
 
 /// A payment, entered by hand (owner, 2026-09-30).
@@ -276,9 +275,6 @@ impl Panel {
 			.map_err(ActionError::Invalid)?
 			.ok_or_else(|| ActionError::Invalid(Invalid::new("need is required")))?;
 		let phone = bounded("phone", lead.phone).map_err(ActionError::Invalid)?;
-		if !LeadChannel::MANUAL.contains(&lead.channel) {
-			return Err(ActionError::Invalid(Invalid::new("channel is one of phone_inbound, whatsapp, telegram")));
-		}
 		let lead_id = match key {
 			Some(k) => format!("p-{}", idempotent_id(by, "lead.created/lead_id", k).simple()),
 			None => opaque_new("p", now),
@@ -319,7 +315,7 @@ impl Panel {
 		let current = self.lead_row(brand, lead).await?.ok_or(ActionError::NotFound)?;
 		let mut subject = subject_of(&current);
 		let (r#type, properties) = match to {
-			StageMove::Contacted { channel } => ("lead.contacted", optional(&[("channel", channel.map(Value::from))])),
+			StageMove::Contacted { channel } => ("lead.contacted", optional(&[("channel", channel.map(|c| Value::from(c.as_str())))])),
 			StageMove::Quoted { amount, currency } => ("lead.quoted", optional(&[("amount", amount.map(Value::from)), ("currency", currency.map(Value::from))])),
 			StageMove::Won { job_id } => {
 				let job = match job_id {
@@ -329,7 +325,7 @@ impl Panel {
 				subject["jobId"] = json!(job.as_str());
 				("job.won", json!({}))
 			}
-			StageMove::Lost { reason, note } => ("lead.lost", optional(&[("reason", Some(Value::from(reason))), ("note", note.map(Value::from))])),
+			StageMove::Lost { reason, note } => ("lead.lost", optional(&[("reason", Some(Value::from(reason.as_str()))), ("note", note.map(Value::from))])),
 			StageMove::Completed => {
 				if current.job_id.is_none() {
 					return Err(Conflict::NoWonJob.into());
@@ -379,7 +375,7 @@ impl Panel {
 			return Err(ActionError::NotFound);
 		}
 		drop(conn);
-		let properties = json!({"outcome": call.outcome, "attemptId": call.attempt.to_string()});
+		let properties = json!({"outcome": call.outcome.as_str(), "attemptId": call.attempt.to_string()});
 		Ok(self.act(by, None, "call.logged", subject_of(&current), properties, None, now).await?.value.1)
 	}
 

@@ -71,7 +71,7 @@ async fn journaled_events_publish_after_the_commit_and_only_then() {
 		location: LocationId::parse("royat").unwrap(),
 		need: "a leak".into(),
 		phone: None,
-		channel: panel_core::fact::LeadChannel::PhoneInbound,
+		channel: panel_core::fact::ManualChannel::PhoneInbound,
 	};
 	let (made, _) = panel.create_lead(by, new, now).await.unwrap();
 	assert_eq!(next(&mut rx), (Topic::Leads, some("aquafix"), Some(made.as_str().to_owned())));

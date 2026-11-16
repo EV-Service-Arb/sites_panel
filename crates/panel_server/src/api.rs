@@ -4,7 +4,7 @@
 //!
 //! Timestamps are RFC 3339 strings, money is minor units of its currency.
 
-use std::collections::BTreeMap;
+use std::{borrow::Cow, collections::BTreeMap};
 
 use axum::{
 	Json,
@@ -15,20 +15,23 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use ev_lib::api::{
 	Body, Created, ErrorCode, GenContext, Ids, JsonSchema, OperationInput, Params, Refusal, Refuses, Upserted,
 	openapi::{HeaderStyle, Operation, Parameter, ParameterData, ParameterSchemaOrContent, ReferenceOr, SchemaObject},
+	schemars::{Schema, SchemaGenerator, json_schema},
 };
 use jiff::{SignedDuration, Timestamp, civil::Date, tz::TimeZone};
 use panel::{
 	Panel,
 	operator::{ActionError, Actor, CallOutcome, Conflict, Done, EventView, FunnelBy, FunnelSlice, LeadQuery, LeadView, NewLead, Payment, Pii, StageMove, SuspectFilter},
+	store::events::Status as EventStatus,
 };
 use panel_core::{
 	booking::{BookingMatch, BookingStatus, DayPart, Provider},
-	fact::{LeadChannel, LeadFlow, MessageRef, Messenger},
+	fact::{self, ContactChannel, LeadChannel, LeadFlow, LeadSuspect, LostReason, ManualChannel, MessageRef, Messenger},
 	funnel::{MIN_SAMPLE, Share},
 	ids::{JobId, LeadId, LocationId},
 	lead::Stage,
+	pricing::InputId,
 };
-use sa_auth::{Analysis, Denied, Gate, Leads, PermissionSet, Pii as SeesPii, SourceKind, User, Work};
+use sa_auth::{Analysis, Catalog, Denied, Gate, Leads, PermissionSet, Pii as SeesPii, Service, SourceKind, User, Work};
 use sa_core::{Invalid, ids::BrandId};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
@@ -46,7 +49,15 @@ const MAX_MINOR: i64 = 10_000_000_000;
 
 /// The currencies a quote or a payment may be in. Checked here, not in the registry: a rebuild
 /// must not re-judge what was journaled under an older list.
-pub const CURRENCIES: [&str; 4] = ["EUR", "USD", "GBP", "AUD"];
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize, strum::IntoStaticStr, strum::VariantArray)]
+#[serde(rename_all = "UPPERCASE")]
+#[strum(serialize_all = "UPPERCASE")]
+pub enum Currency {
+	Eur,
+	Usd,
+	Gbp,
+	Aud,
+}
 
 /// The header a client sets to make a write safe to retry.
 pub const IDEMPOTENCY_KEY: &str = "idempotency-key";
@@ -56,13 +67,6 @@ fn amount(what: &str, v: i64) -> ApiResult<i64> {
 		return Err(Refusal::new(Code::BadRequest, format!("{what} is more than {MAX_MINOR} minor units")));
 	}
 	Ok(v)
-}
-
-fn currency(v: &str) -> ApiResult<String> {
-	if !CURRENCIES.contains(&v) {
-		return Err(Refusal::new(Code::BadRequest, format!("currency is one of {}", CURRENCIES.join(", "))));
-	}
-	Ok(v.to_owned())
 }
 
 pub(crate) fn routes() -> Vec<ApiRoute> {
@@ -341,14 +345,30 @@ pub struct Me {
 	sub: Uuid,
 	/// The caller's `sa:sites:*` permissions.
 	#[ts(type = "Array<Permission>")]
-	permissions: Vec<String>,
+	permissions: Vec<SitesPermission>,
+}
+
+/// A `sa:sites:*` permission, one of those the conductor's catalog names.
+#[derive(Serialize)]
+#[serde(transparent)]
+struct SitesPermission(String);
+
+impl JsonSchema for SitesPermission {
+	fn schema_name() -> Cow<'static, str> {
+		"Permission".into()
+	}
+
+	fn json_schema(_: &mut SchemaGenerator) -> Schema {
+		let words: Vec<String> = Catalog::collect("sa", 0).permissions.into_iter().filter(|p| p.starts_with(Service::Sites.prefix())).collect();
+		json_schema!({ "type": "string", "enum": words })
+	}
 }
 
 /// The caller, as the conductor vouched for them: their user id and `sa:sites:*` permissions.
 async fn me(caller: Caller) -> Json<Me> {
 	Json(Me {
 		sub: caller.user_id,
-		permissions: caller.permissions.iter().map(str::to_owned).collect(),
+		permissions: caller.permissions.iter().map(|p| SitesPermission(p.to_owned())).collect(),
 	})
 }
 
@@ -363,16 +383,15 @@ struct LeadDto {
 	location: Option<String>,
 	job_id: Option<String>,
 	stage: Stage,
-	/// form | phone_inbound | callback | whatsapp | telegram; null for a lead seen before its
-	/// creation.
-	channel: Option<String>,
+	/// Null for a lead seen before its creation.
+	channel: Option<LeadChannel>,
 	/// The ref the customer carries into a messenger (`AQ-7K3F`), when the landing made one.
 	message_ref: Option<String>,
 	/// When the customer first wrote on a messenger, and on which; null while they have not.
 	messaged_at: Option<Timestamp>,
 	messaged_channel: Option<Messenger>,
-	/// `rate_limited` | `too_fast` when the landing's antispam doubted it; null otherwise.
-	suspect: Option<String>,
+	/// Why the landing's antispam doubted it; null otherwise.
+	suspect: Option<LeadSuspect>,
 	/// Typed in by hand (an event of kind `panel`).
 	manual: bool,
 	/// When each stage was first reached.
@@ -383,15 +402,16 @@ struct LeadDto {
 	completed_at: Option<Timestamp>,
 	paid_at: Option<Timestamp>,
 	lost_at: Option<Timestamp>,
+	/// A slug: the panel's `LostReason` words, or another a `lead.lost` of before them said.
 	lost_reason: Option<String>,
-	/// `quote` | `estimate` | `fixed`: the landing's flow; null when it said none.
-	flow: Option<String>,
+	/// The landing's flow; null when it said none.
+	flow: Option<LeadFlow>,
 	/// The price an estimate or a fixed price showed, integer cents EUR TTC.
 	quoted_cents: Option<i64>,
-	/// `YYYY-MM-DD`: when the pricing model behind `quoted_cents` took effect.
-	pricing_valid_from: Option<String>,
+	/// When the pricing model behind `quoted_cents` took effect.
+	pricing_valid_from: Option<Date>,
 	/// An estimate's inputs, input id → value id.
-	estimate_inputs: Option<Value>,
+	estimate_inputs: Option<BTreeMap<InputId, InputId>>,
 	/// Its booking; `status: none` when it has none.
 	booking: LeadBookingDto,
 	last_event_at: Timestamp,
@@ -491,9 +511,7 @@ enum Suspect {
 struct LeadsQuery {
 	stage: Option<Stage>,
 	brand: Option<BrandId>,
-	/// The conductor's selection of GMBs, ids split by commas (`3,7`): only the leads of places
-	/// linked to one of them. Empty selects none; absent narrows nothing.
-	gmb: Option<String>,
+	gmb: Option<Gmbs>,
 	/// Only the leads overdue for their first contact.
 	overdue: Option<bool>,
 	/// Created on or after this UTC day.
@@ -515,16 +533,35 @@ struct LeadsQuery {
 	limit: Option<u32>,
 }
 
-/// `gmb` of a read: the conductor's selection, `1,7,12`; empty selects none, absent narrows nothing.
-fn gmbs(raw: Option<&str>) -> ApiResult<Option<Vec<i64>>> {
-	let Some(raw) = raw else { return Ok(None) };
-	if raw.is_empty() {
-		return Ok(Some(Vec::new()));
+/// The conductor's selection of GMBs, ids split by commas (`3,7`): only what belongs to the
+/// places linked to one of them. Empty selects none; absent narrows nothing.
+pub(crate) struct Gmbs(pub Vec<i64>);
+
+impl<'de> Deserialize<'de> for Gmbs {
+	fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+		let raw = String::deserialize(d)?;
+		if raw.is_empty() {
+			return Ok(Self(Vec::new()));
+		}
+		raw.split(',')
+			.map(|id| id.parse().map_err(|_| serde::de::Error::custom(format!("gmb is GMB ids split by commas, not {raw}"))))
+			.collect::<Result<_, _>>()
+			.map(Self)
 	}
-	raw.split(',')
-		.map(|id| id.parse().map_err(|_| Refusal::new(Code::BadRequest, format!("gmb is GMB ids split by commas, not {raw}"))))
-		.collect::<ApiResult<_>>()
-		.map(Some)
+}
+
+impl JsonSchema for Gmbs {
+	fn schema_name() -> Cow<'static, str> {
+		"Gmbs".into()
+	}
+
+	fn json_schema(_: &mut SchemaGenerator) -> Schema {
+		json_schema!({
+			"type": "string",
+			"pattern": "^([0-9]+(,[0-9]+)*)?$",
+			"description": "GMB ids split by commas (`3,7`): only what belongs to the places linked to one of them; empty selects none."
+		})
+	}
 }
 
 fn cursor_encode((at, brand, lead): &(Timestamp, String, String)) -> String {
@@ -562,7 +599,7 @@ async fn list_leads(State(panel): State<Panel>, caller: Caller, Params(q): Param
 	let query = LeadQuery {
 		stage: q.stage,
 		brand: q.brand,
-		gmbs: gmbs(q.gmb.as_deref())?,
+		gmbs: q.gmb.map(|g| g.0),
 		overdue: q.overdue.unwrap_or(false),
 		created_from: q.created_from.map(day_start).transpose()?,
 		created_before: q.created_to.map(next_day).transpose()?,
@@ -604,8 +641,8 @@ struct EventDto {
 	/// Typed in by hand (kind `panel`).
 	manual: bool,
 	job_id: Option<String>,
-	/// accepted | unregistered | …: how the registry judged it.
-	status: String,
+	/// How the registry judged it.
+	status: EventStatus,
 	status_reason: Option<String>,
 	/// The event's properties, as its type has them.
 	properties: Value,
@@ -658,9 +695,9 @@ struct CreateLead {
 	location: LocationId,
 	need: String,
 	phone: Option<String>,
-	/// phone_inbound (the default) | whatsapp | telegram: a customer who called, or wrote on a
-	/// messenger without the landing.
-	channel: Option<LeadChannel>,
+	/// A customer who called (`phone_inbound`, when absent), or wrote on a messenger without the
+	/// landing.
+	channel: Option<ManualChannel>,
 }
 
 #[derive(JsonSchema, Serialize)]
@@ -679,11 +716,7 @@ async fn create_lead(State(panel): State<Panel>, caller: Caller, IdempotencyKey(
 		location: b.location,
 		need: b.need,
 		phone: b.phone,
-		channel: match b.channel {
-			None => LeadChannel::PhoneInbound,
-			Some(c) if LeadChannel::MANUAL.contains(&c) => c,
-			Some(_) => return Err(Refusal::new(Code::BadRequest, "channel is one of phone_inbound, whatsapp, telegram")),
-		},
+		channel: b.channel.unwrap_or(ManualChannel::PhoneInbound),
 	};
 	let brand = new.brand.clone();
 	let done = panel.create_lead_once(Actor(caller.user_id), new, Timestamp::now(), key.as_deref()).await?;
@@ -700,19 +733,18 @@ async fn create_lead(State(panel): State<Panel>, caller: Caller, IdempotencyKey(
 #[schemars(rename = "StageMove")]
 enum StageBody {
 	Contacted {
-		channel: Option<String>,
+		channel: Option<ContactChannel>,
 	},
 	Quoted {
 		/// Minor units, |amount| ≤ 10^10.
 		amount: Option<i64>,
-		/// EUR | USD | GBP | AUD.
-		currency: Option<String>,
+		currency: Option<Currency>,
 	},
 	Won {
 		job_id: Option<String>,
 	},
 	Lost {
-		reason: String,
+		reason: LostReason,
 		note: Option<String>,
 	},
 	Completed,
@@ -734,7 +766,7 @@ async fn move_lead(
 		StageBody::Contacted { channel } => StageMove::Contacted { channel },
 		StageBody::Quoted { amount: a, currency: c } => StageMove::Quoted {
 			amount: a.map(|a| amount("amount", a)).transpose()?,
-			currency: c.as_deref().map(currency).transpose()?,
+			currency: c.map(|c| <&str>::from(c).to_owned()),
 		},
 		StageBody::Won { job_id } => StageMove::Won {
 			job_id: job_id.as_deref().map(JobId::parse).transpose()?,
@@ -804,8 +836,7 @@ struct AttemptPath {
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "CallOutcome")]
 struct OutcomeBody {
-	/// answered | no_answer | wrong_number | later
-	outcome: String,
+	outcome: fact::CallOutcome,
 }
 
 /// How an attempted call went (`call.logged`).
@@ -823,8 +854,7 @@ struct PaymentBody {
 	billed: i64,
 	/// Minor units, |amount| ≤ 10^10.
 	commission: i64,
-	/// EUR | USD | GBP | AUD.
-	currency: String,
+	currency: Currency,
 }
 
 /// Records a payment for a lead's job, entered by hand (`payment.received`).
@@ -838,7 +868,7 @@ async fn record_payment(
 	let p = Payment {
 		billed: amount("billed", b.billed)?,
 		commission: amount("commission", b.commission)?,
-		currency: currency(&b.currency)?,
+		currency: <&str>::from(b.currency).to_owned(),
 	};
 	let done = panel.record_payment_once(Actor(caller.user_id), &brand, &lead, p, Timestamp::now(), key.as_deref()).await?;
 	Ok(recorded(done, |e| Journaled { event_id: e.raw() }))
@@ -865,8 +895,7 @@ struct FunnelQuery {
 	brand: Option<BrandId>,
 	/// Absent: the whole funnel.
 	by: Option<By>,
-	/// The conductor's selection of GMBs, as `GET /leads` takes it.
-	gmb: Option<String>,
+	gmb: Option<Gmbs>,
 }
 
 /// A share as the front end may show it: `percent` only when `of` is large enough, and
@@ -991,7 +1020,7 @@ async fn funnel(State(panel): State<Panel>, Params(q): Params<FunnelQuery>) -> A
 		None => FunnelBy::All,
 		Some(By::Location) => FunnelBy::Location,
 	};
-	let selected = gmbs(q.gmb.as_deref())?;
+	let selected = q.gmb.map(|g| g.0);
 	let slices = panel.funnel_slices(from, to, q.brand.as_ref(), selected.as_deref(), by).await?;
 	let slices = match by {
 		FunnelBy::All => Slices::Whole(slices.into_iter().next().ok_or_else(|| Refusal::from(eyre::eyre!("the whole funnel came back empty")))?.into()),
@@ -1022,8 +1051,7 @@ async fn funnel(State(panel): State<Panel>, Params(q): Params<FunnelQuery>) -> A
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct PlacesQuery {
-	/// The conductor's selection of GMBs, as `GET /leads` takes it.
-	gmb: Option<String>,
+	gmb: Option<Gmbs>,
 }
 
 #[derive(JsonSchema, Serialize)]
@@ -1046,7 +1074,7 @@ struct PlacesDto {
 /// Every place the panel knows: every location a lead names, and every place registered.
 async fn list_places(State(panel): State<Panel>, Params(q): Params<PlacesQuery>) -> ApiResult<Json<PlacesDto>> {
 	let places = panel
-		.places(gmbs(q.gmb.as_deref())?.as_deref())
+		.places(q.gmb.as_ref().map(|g| g.0.as_slice()))
 		.await?
 		.into_iter()
 		.map(|p| PlaceRowDto {
@@ -1064,8 +1092,7 @@ async fn list_places(State(panel): State<Panel>, Params(q): Params<PlacesQuery>)
 #[serde(deny_unknown_fields)]
 struct CountsQuery {
 	brand: Option<BrandId>,
-	/// The conductor's selection of GMBs, as `GET /leads` takes it.
-	gmb: Option<String>,
+	gmb: Option<Gmbs>,
 }
 
 #[derive(JsonSchema, Serialize)]
@@ -1079,7 +1106,7 @@ struct CountsDto {
 
 /// How many leads are at each stage, and how many are overdue for their first contact.
 async fn lead_counts(State(panel): State<Panel>, Params(q): Params<CountsQuery>) -> ApiResult<Json<CountsDto>> {
-	let counts = panel.lead_counts(q.brand.as_ref(), gmbs(q.gmb.as_deref())?.as_deref(), Timestamp::now()).await?;
+	let counts = panel.lead_counts(q.brand.as_ref(), q.gmb.as_ref().map(|g| g.0.as_slice()), Timestamp::now()).await?;
 	Ok(Json(CountsDto {
 		total: counts.stages.iter().map(|(_, n)| n).sum(),
 		stages: counts.stages.into_iter().collect(),

@@ -1,14 +1,17 @@
 //! What the operator screens read: leads with the PII of their creation, a lead's events,
 //! and the funnel's daily totals from `reporting_funnel_daily`.
 
+use std::collections::BTreeMap;
+
 use eyre::WrapErr;
 use jiff::{Timestamp, civil::Date};
 use panel_core::{
 	booking::{BookingMatch, BookingState, BookingStatus, DayPart, Provider},
-	fact::{LeadChannel, LeadFlow, MessageRef, Messenger},
+	fact::{LeadChannel, LeadFlow, LeadSuspect, MessageRef, Messenger},
 	funnel::Totals,
 	ids::LeadId,
 	lead::Stage,
+	pricing::InputId,
 };
 use sa_core::ids::BrandId;
 use serde_json::Value;
@@ -25,10 +28,9 @@ pub struct LeadRow {
 	pub location_id: Option<String>,
 	pub job_id: Option<String>,
 	pub stage: Stage,
-	pub channel: Option<String>,
-	/// Why the landing's antispam doubted it (`rate_limited`, `too_fast`); `None` for an
-	/// ordinary lead.
-	pub suspect: Option<String>,
+	pub channel: Option<LeadChannel>,
+	/// Why the landing's antispam doubted it; `None` for an ordinary lead.
+	pub suspect: Option<LeadSuspect>,
 	pub manual: bool,
 	pub created_at: Option<Timestamp>,
 	pub contacted_at: Option<Timestamp>,
@@ -38,14 +40,14 @@ pub struct LeadRow {
 	pub paid_at: Option<Timestamp>,
 	pub lost_at: Option<Timestamp>,
 	pub lost_reason: Option<String>,
-	/// `quote` | `estimate` | `fixed`, from its `lead.created`; `None` when that said none.
-	pub flow: Option<String>,
+	/// From its `lead.created`; `None` when that said none.
+	pub flow: Option<LeadFlow>,
 	/// The price an estimate or a fixed price showed, integer cents EUR TTC.
 	pub quoted_cents: Option<i64>,
-	/// `YYYY-MM-DD`: when the pricing model behind `quoted_cents` took effect.
-	pub pricing_valid_from: Option<String>,
+	/// When the pricing model behind `quoted_cents` took effect.
+	pub pricing_valid_from: Option<Date>,
 	/// An estimate's inputs, input id → value id.
-	pub estimate_inputs: Option<Value>,
+	pub estimate_inputs: Option<BTreeMap<InputId, InputId>>,
 	/// The ref the customer carries into a messenger (`AQ-7K3F`), from its `lead.created`.
 	pub message_ref: Option<String>,
 	/// When the customer first wrote on a messenger (`lead.messaged`), and on which.
@@ -87,7 +89,7 @@ struct Row {
 	flow: Option<String>,
 	quoted_cents: Option<i64>,
 	pricing_valid_from: Option<String>,
-	estimate_inputs: Option<Json<Value>>,
+	estimate_inputs: Option<Json<BTreeMap<InputId, InputId>>>,
 	booking_status: Option<String>,
 	booking_provider: Option<String>,
 	booking_start_at: Option<i64>,
@@ -111,7 +113,8 @@ impl TryFrom<Row> for LeadRow {
 
 	fn try_from(r: Row) -> eyre::Result<Self> {
 		let t = |ts: Option<i64>| ts.map(from_db).transpose();
-		let at = || format!("stored booking of lead {}/{}", r.brand_id, r.lead_id);
+		let lead = format!("{}/{}", r.brand_id, r.lead_id);
+		let at = || format!("stored booking of lead {lead}");
 		let booking = BookingState {
 			status: r.booking_status.as_deref().map(BookingStatus::parse).transpose().wrap_err_with(at)?.unwrap_or_default(),
 			provider: r.booking_provider.as_deref().map(Provider::parse).transpose().wrap_err_with(at)?,
@@ -133,9 +136,9 @@ impl TryFrom<Row> for LeadRow {
 			booking,
 			messaged,
 			message_ref: r.message_ref,
-			flow: r.flow,
+			flow: r.flow.as_deref().map(LeadFlow::parse).transpose().wrap_err_with(|| format!("stored flow of lead {lead}"))?,
 			quoted_cents: r.quoted_cents,
-			pricing_valid_from: r.pricing_valid_from,
+			pricing_valid_from: r.pricing_valid_from.as_deref().map(super::day_from_db).transpose()?,
 			estimate_inputs: r.estimate_inputs.map(|j| j.0),
 			stage: Stage::parse(&r.stage).wrap_err_with(|| format!("stored stage of lead {}/{}", r.brand_id, r.lead_id))?,
 			created_at: t(r.created_at)?,
@@ -155,8 +158,18 @@ impl TryFrom<Row> for LeadRow {
 			lead_id: r.lead_id,
 			location_id: r.location_id,
 			job_id: r.job_id,
-			channel: r.channel,
-			suspect: r.suspect,
+			channel: r
+				.channel
+				.as_deref()
+				.map(LeadChannel::parse)
+				.transpose()
+				.wrap_err_with(|| format!("stored channel of lead {lead}"))?,
+			suspect: r
+				.suspect
+				.as_deref()
+				.map(LeadSuspect::parse)
+				.transpose()
+				.wrap_err_with(|| format!("stored suspect of lead {lead}"))?,
 			manual: r.manual,
 			lost_reason: r.lost_reason,
 		})
@@ -335,7 +348,7 @@ pub struct EventRow {
 	pub source_kind: String,
 	pub source_id: String,
 	pub job_id: Option<String>,
-	pub status: String,
+	pub status: super::events::Status,
 	pub status_reason: Option<String>,
 	pub properties: Value,
 	pub sealed: Sealed,
@@ -384,7 +397,7 @@ pub async fn lead_events(conn: &mut SqliteConnection, brand: &BrandId, lead: &Le
 				source_kind: r.source_kind,
 				source_id: r.source_id,
 				job_id: r.job_id,
-				status: r.status,
+				status: super::events::Status::parse(&r.status)?,
 				status_reason: r.status_reason,
 				properties: r.properties.0,
 			})

@@ -309,6 +309,33 @@ fn at(path: &str, key: &str) -> String {
 	if path.is_empty() { key.to_owned() } else { format!("{path}.{key}") }
 }
 
+vocabulary! {
+	/// A part of a model a change names, in the model's order.
+	pub enum ModelPart, "not one of validFrom, general, inputs, needs" {
+		ValidFrom => "validFrom",
+		/// `roundToCents` and `minimumCents`.
+		General => "general",
+		Inputs => "inputs",
+		Needs => "needs",
+	}
+}
+
+impl ModelPart {
+	/// What `after` changed of `before`, both models in their wire shape; none for the same
+	/// model saved again.
+	pub fn changed(before: &Value, after: &Value) -> Vec<Self> {
+		fn of(m: &Value, part: ModelPart) -> [Option<&Value>; 2] {
+			match part {
+				ModelPart::ValidFrom => [m.get("validFrom"), None],
+				ModelPart::General => [m.get("roundToCents"), m.get("minimumCents")],
+				ModelPart::Inputs => [m.get("inputs"), None],
+				ModelPart::Needs => [m.get("needs"), None],
+			}
+		}
+		Self::ALL.into_iter().filter(|&part| of(before, part) != of(after, part)).collect()
+	}
+}
+
 checked_str!(
 	/// An input's, an option's or a need's id in a model, and so a lead's `estimate_inputs`' keys and
 	/// values: `^[a-z0-9_-]{1,40}$`.

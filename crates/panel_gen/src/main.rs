@@ -13,13 +13,13 @@ use panel_core::{
 	booking::{self, BookingMatch, BookingStatus, DayPart, PageProvider, Provider},
 	event::may_write,
 	experiment,
-	fact::{self, LeadChannel, LeadFlow, LeadSuspect, Messenger},
+	fact::{self, LeadChannel, LeadFlow, LeadSuspect, ManualChannel, Messenger},
 	funnel::CONTACT_SLA,
 	lead::Stage,
 	place::{self, DayOfWeek, FIELDS, PlaceLive},
 	pricing::{self, InputKind, PricingModel},
 };
-use panel_server::api::{CURRENCIES, IDEMPOTENCY_KEY, Me};
+use panel_server::api::{Currency, IDEMPOTENCY_KEY, Me};
 use sa_auth::{Catalog, Service, SourceKind};
 
 /// `export const NAME = [...] as const;`: the words of a vocabulary whose type ts-rs declares.
@@ -171,7 +171,7 @@ fn frontend(root: &Path) {
 			Ts::Union {
 				name: "MANUAL_CHANNELS",
 				ty: "ManualChannel",
-				items: LeadChannel::MANUAL.map(LeadChannel::as_str).into(),
+				items: ManualChannel::ALL.map(ManualChannel::as_str).into(),
 			},
 			Ts::Union {
 				name: "BOOKING_MATCHES",
@@ -189,7 +189,7 @@ fn frontend(root: &Path) {
 		&[Ts::Union {
 			name: "CURRENCIES",
 			ty: "Currency",
-			items: CURRENCIES.into(),
+			items: <Currency as strum::VariantArray>::VARIANTS.iter().map(|&c| <&str>::from(c)).collect(),
 		}],
 	);
 	Ts::write(

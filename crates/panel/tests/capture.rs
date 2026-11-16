@@ -75,7 +75,18 @@ async fn only_a_fresh_commit_queues_and_never_the_rebuild() {
 	let l1 = LeadId::parse("L-1").unwrap();
 	// A minute on: the outbox is read in occurred_at order, and ties fall to the ids' random bits.
 	let later = now + SignedDuration::from_mins(1);
-	panel.move_lead(by, &brand, &l1, StageMove::Contacted { channel: Some("phone".into()) }, later).await.unwrap();
+	panel
+		.move_lead(
+			by,
+			&brand,
+			&l1,
+			StageMove::Contacted {
+				channel: Some(panel_core::fact::ContactChannel::Phone),
+			},
+			later,
+		)
+		.await
+		.unwrap();
 	panel.attempt_call(by, &brand, &l1, later).await.unwrap();
 
 	let queued = outbox(&panel).await;

@@ -17,7 +17,7 @@ path = "src/main.rs"
 
 [features]
 # The router called as the conductor calls it, for this crate's tests.
-testing = ["panel/testing", "sa_auth/catalog", "tower/util"]
+testing = ["panel/testing", "tower/util"]
 
 [dependencies]
 axum.workspace = true
@@ -35,7 +35,7 @@ panel_contracts.workspace = true
 panel_core.workspace = true
 reqwest.workspace = true
 sa_alerts.workspace = true
-sa_auth = { workspace = true, features = ["axum"] }
+sa_auth = { workspace = true, features = ["axum", "catalog"] }
 sa_core.workspace = true
 schemars.workspace = true
 serde.workspace = true

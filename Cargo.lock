@@ -2203,6 +2203,7 @@ dependencies = [
  "sa_auth",
  "serde",
  "serde_json",
+ "strum",
 ]
 
 [[package]]

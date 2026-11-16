@@ -17,7 +17,8 @@ use super::{from_db, to_db};
 use crate::wire::{Checked, Incoming, check};
 
 /// Where an event stands with the registry.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, schemars::JsonSchema, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Status {
 	Registered,
 	Unregistered,
@@ -33,7 +34,7 @@ impl Status {
 		}
 	}
 
-	fn parse(s: &str) -> eyre::Result<Self> {
+	pub(crate) fn parse(s: &str) -> eyre::Result<Self> {
 		match s {
 			"registered" => Ok(Self::Registered),
 			"unregistered" => Ok(Self::Unregistered),

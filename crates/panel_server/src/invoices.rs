@@ -12,7 +12,7 @@ use panel::{
 	invoices::{Invoice, InvoiceError, LedgerError, NewInvoice},
 	operator::Actor,
 };
-use panel_core::invoice::{CURRENCY, InvoiceState};
+use panel_core::invoice::{CURRENCY, InvoiceState, MAX_EXPIRES_IN_DAYS, MAX_MEMO_CHARS};
 use sa_auth::{Gate, Invoices, Work};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -133,10 +133,11 @@ struct CreateBody {
 	/// Decimal USDT as a string, a JSON number would round it: whole USDT up to 999 999 999, at
 	/// most 6 decimals.
 	amount: String,
-	/// At most 140 characters; banking refuses links.
+	/// Banking refuses links.
 	#[serde(default)]
+	#[schemars(length(max = MAX_MEMO_CHARS))]
 	memo: String,
-	/// 1 to 30.
+	#[schemars(range(min = 1, max = MAX_EXPIRES_IN_DAYS))]
 	expires_in_days: u32,
 }
 

@@ -7,7 +7,7 @@ use eyre::WrapErr;
 use jiff::Timestamp;
 use panel_core::{
 	place::Editor,
-	pricing::{self, PricingInputs, PricingModel, Problem},
+	pricing::{self, ModelPart, PricingInputs, PricingModel, Problem},
 };
 use sa_core::ids::BrandId;
 use serde_json::Value;
@@ -48,9 +48,12 @@ pub struct PricingChange {
 	pub needs: Option<usize>,
 	/// The model the change left; `None` for a removal.
 	pub model: Option<Value>,
+	/// What it changed of the model before it; `None` for a first save or a side removed.
+	pub changed: Option<Vec<ModelPart>>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, schemars::JsonSchema, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ChangeKind {
 	Set,
 	Remove,
@@ -158,6 +161,7 @@ impl Panel {
 					kind,
 					valid_from: after.and_then(|m| m.get("validFrom")).and_then(Value::as_str).map(str::to_owned),
 					needs: after.and_then(|m| m.get("needs")).and_then(Value::as_object).map(serde_json::Map::len),
+					changed: c.before.as_ref().zip(after).map(|(before, after)| ModelPart::changed(before, after)),
 					model: c.after,
 				})
 			})
