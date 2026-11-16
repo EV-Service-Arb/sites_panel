@@ -71,8 +71,8 @@ crates/panel/                        the engine
   src/booking.rs                     operators' slots, the providers' seam (PushSource,
                                      PullSource), matching, the leased pull
   src/invoices.rs                    invoices issued through banking, mirrored, confirmed
-  src/live.rs                        the in-process bus of what changed, published after each
-                                     commit (see "The change feed")
+  src/live.rs                        the in-process bus of the tables each committed write touched
+                                     (see "The change feed")
   src/testing.rs                     (feature `testing`) throwaway SQLite files, batches, the
                                      conductor's assertions under a test key
   migrations/                        the schema: the init (`reporting_*` views and the
@@ -84,7 +84,7 @@ crates/panel_server/                 the `sites_panel` binary: CLI and HTTP, thi
                                      and its document; ingest's source assertion
   src/api.rs                         the operator API: JSON over the engine's `operator` module;
                                      the refusal codes (`Code`) and the caller (`Caller`)
-  src/conductor.rs                   /api/conductor/*: the change feed, the notes, the receipts;
+  src/conductor.rs                   sa_core::feeds: the change feed, the notes, the receipts;
                                      the fan-out's schedule
   src/places.rs                      a place's settings: the editor's routes, and the sites'
                                      GET /api/internal/…
@@ -308,8 +308,8 @@ a suspect lead that is called and won is still one the antispam doubted.
 
 Where it shows: `leads.suspect` (`TEXT`, NULL or one of the two words by CHECK), recomputed
 like every column of the row, so the rebuild restores it from the journal; `suspect` on
-`Lead` in `/api/v1` and the `suspect=only|exclude` filter of `GET /leads`; a `changed{topic:
-leads}` like any new lead. `reporting_leads` carries the column; `reporting_funnel_daily`
+`Lead` in `/api/v1` and the `suspect=only|exclude` filter of `GET /leads`; told on the change
+feed like any new lead. `reporting_leads` carries the column; `reporting_funnel_daily`
 still counts a suspect lead in `leads` and every stage it reaches, and counts it apart in
 `suspect`, so a report that wants them out subtracts. A note tells of one under `new_lead`,
 headed as suspect with its reason and with the usual buttons, and none reminds of it past the
@@ -387,39 +387,26 @@ The conductor's one live socket per screen is told when what it read may have ch
 comes from here, the data always from `/api/v1` under its checks.
 
 ```text
-GET /api/conductor/changes     application/x-ndjson, open until the process stops
-  {"type":"resync"}            first on every connection, after a rebuild in the serving
-                               process, and when the reader fell 1024 behind
-  {"type":"changed","topic","brand_id"?,"id"?,"at","permission"}   after each commit
+GET sa_core::feeds::CHANGES    application/x-ndjson of sa_core::feeds::Line, open until the
+                               process stops (sa_core::feeds::changes)
+  {"type":"resync"}            first on every connection, and when the reader fell 1024 behind
+  {"type":"changed","topic"}   sites.<table>: a table a committed write touched
   {"type":"ping"}              every 25 s: a quiet feed is told from a dead one
 ```
 
-| `topic` | when | `brand_id` | `id` | `permission` |
-| --- | --- | --- | --- | --- |
-| `leads` | a lead came in (`lead.created`: ingest, or typed in) | its brand | the lead | `sa:sites:work:read` |
-| `lead` | a stage, a call, a payment of one lead (the API or a Telegram button) | its brand | the lead | `sa:sites:work:read` |
-| `places` | a place's settings set, reverted, withdrawn, restored, or the place registered | its brand | the slug | `sa:sites:work:read` |
-| `pricing` | a brand's pricing saved or removed, or its locales set | its brand | — | `sa:sites:work:read` |
-| `experiments` | a landing's declaration, or an admin's change | its brand | the key (a change) | `sa:sites:analysis:read` |
-| `bookings` | a provider's booking without a lead came, changed, or was attached | its brand | — | `sa:sites:work:read` |
-| `invoices` | an invoice stored, read from banking (changed), dropped on a refusal, or paid / cancelled / expired by the confirmation | — | the invoice (one row); — (a confirmation page) | `sa:sites:work:read` |
-
-A booking event tells `lead` for every lead it changed — a provider's booking attached
-elsewhere tells the lead it left and the one it joined. `at` is when the write committed.
-
-- **`permission` is the read's.** `panel::live::Change::permission` is the section that reads
-  the topic, for every brand; the conductor tells a socket whose caller holds it.
-- **Published after the commit, from the engine, in one place per kind of write.** Every
-  event that reaches the projections passes through `Panel::journal`, which publishes once
-  its transaction has committed — ingest, the operator API and an admin's experiment changes
-  alike, so none of them can forget to. A duplicate, a refused event or an unregistered type
-  changed no read and says nothing. Outside the journal: a place's change (`place.rs`, after
-  its transaction), a brand's pricing (`pricing.rs`, the same), the invoices (`invoices.rs`,
-  after each commit that changed a row). A write that changes nothing publishes nothing.
+- **A topic is a table.** The store's pool (`ev_lib::sqlite::pool`) tells each table a
+  committed write touched, once its connection goes back to the pool, whoever wrote it: ingest,
+  the operator API, an admin, the booking pull, the invoices' confirmation, the fan-out, a
+  migration. A rolled-back write tells nothing; a write found at prepare is told even when it
+  matched no row. Every `/api/v1` GET answers `x-sa-reads: <its tables>`, so a screen re-reads
+  only what a change may have touched. No topic names a brand, a row or a permission: the
+  conductor tells every signed-in socket, and the data stays behind `/api/v1`'s checks.
+- **Background passes write only what is due** (the fan-out's prune looks first, the invoices'
+  cursor is written when it moved), so a quiet panel is a quiet feed.
 - **The bus is in-process** (`tokio::sync::broadcast`, one pod). Publishing never waits and
-  never fails a write. A command run in another process (`sites_panel place set`) is not on the
-  feed: the screens find it at their next read.
-- **Shutdown** ends the feed first (`Signal::GoingAway`): an open response would hold the
+  never fails a write. A command run in another process (`sites_panel rebuild-projections`) is
+  not on the feed: the screens find it at their next read.
+- **Shutdown** ends the feed first (`Bus::going_away`): an open response would hold the
   graceful shutdown forever.
 - **Not told:** time passing. A lead becomes overdue (`sla`) with no write; the screens keep
   their own clock for it.
@@ -454,16 +441,17 @@ GET /api/conductor/notifications?after=<seq>&limit=<1..500>
   is markup, no link is made of it, and no line of it can read as one of ours ("Взял: …").
   Both are sealed under `PANEL_DATA_KEY`, the rule and the event bound.
 - **`skip_user`**: whoever typed the lead in, or set or closed the slot, knows of it already.
-- **Buttons** (lead notes): `{id, label, pressed, call: {method, path, body}, leaves}`. "Взял"
-  is `POST /api/v1/leads/{brand}/{lead}/stage {stage: contacted}`, "Не дозвонился" `POST
-  …/no_answer`; the conductor makes the call as the user who pressed, with `Idempotency-Key:
+- **Buttons** (lead notes): `{id, label, pressed, call: {operation, path, body}, leaves}`, the
+  operation by its id in the table (`op_id`) and the path by its parameters (`{brand, lead}`).
+  "Взял" is `move_lead {stage: contacted}`, "Не дозвонился" `no_answer`; the conductor resolves
+  the operation in its catalog and calls it as the user who pressed, with `Idempotency-Key:
   tg/<its outbox id>/<button id>`, so a press repeated records nothing twice. Labels in
   `TELEGRAM_LOCALE` (`ru`, `en`).
 
 ### Each key's last receipt
 
-`GET /api/conductor/internal-reads` → `{since: <boot, RFC 3339>, reads: {<brand>: {locations?, pricing?,
-experiments?: <RFC 3339>}}}`: the last `/api/internal` read per brand and endpoint, kept in memory
+`GET /api/conductor/internal-reads` → `sa_core::feeds::InternalReads` (`{since, reads: {<brand>:
+{locations, pricing, experiments}}}`, null for one not read since): the last `/api/internal` read per brand and endpoint, kept in memory
 only (`conductor::InternalReads`, nothing written on the read path, so it restarts empty; `since`
 says from when). At most 256 brands: past that a new brand is not recorded and none is evicted, so
 an unauthenticated caller cannot push the real ones out. The router mounts `/api/internal` from

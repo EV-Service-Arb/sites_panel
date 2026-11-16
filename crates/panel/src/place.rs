@@ -109,15 +109,6 @@ enum Edit {
 	Withdrawn(bool),
 }
 
-fn place_changed(brand: &BrandId, slug: &LocationId, at: Timestamp) -> crate::live::Change {
-	crate::live::Change {
-		topic: crate::live::Topic::Places,
-		brand: Some(brand.clone()),
-		id: Some(slug.as_str().to_owned()),
-		at,
-	}
-}
-
 impl Panel {
 	/// A place's settings as the editor shows them; an unknown place has none.
 	pub async fn place(&self, brand: &BrandId, slug: &LocationId) -> eyre::Result<PlaceView> {
@@ -160,7 +151,6 @@ impl Panel {
 		tx.commit().await.wrap_err("committing a place's registration")?;
 		if added {
 			tracing::info!(by = editor.label(), %brand, %slug, "place registered");
-			self.live.changed(place_changed(brand, slug, now));
 		}
 		Ok((view(brand, slug, stored), added))
 	}
@@ -207,8 +197,8 @@ impl Panel {
 	}
 
 	/// Makes a registered place the landing of a GMB, or of none; the change is not journaled
-	/// (`place_changes` holds settings), only published.
-	pub async fn link_gmb(&self, brand: &BrandId, slug: &LocationId, gmb_id: Option<i64>, now: Timestamp) -> Result<PlaceView, PlaceError> {
+	/// (`place_changes` holds settings).
+	pub async fn link_gmb(&self, brand: &BrandId, slug: &LocationId, gmb_id: Option<i64>) -> Result<PlaceView, PlaceError> {
 		let mut tx = self.store.begin_write().await?;
 		if !places::place(&mut tx, brand, slug).await?.registered {
 			return Err(PlaceError::NotFound);
@@ -219,7 +209,6 @@ impl Panel {
 		let stored = places::place(&mut tx, brand, slug).await?;
 		tx.commit().await.wrap_err("committing a place's GMB")?;
 		tracing::info!(%brand, %slug, ?gmb_id, "place linked to a GMB");
-		self.live.changed(place_changed(brand, slug, micros(now)?));
 		Ok(view(brand, slug, stored))
 	}
 
@@ -296,7 +285,6 @@ impl Panel {
 		let stored = places::place(&mut tx, brand, slug).await?;
 		tx.commit().await.wrap_err("committing a place's change")?;
 		tracing::info!(by = editor.label(), %brand, %slug, kind = kind.as_str(), "place changed");
-		self.live.changed(place_changed(brand, slug, now));
 		Ok(view(brand, slug, stored))
 	}
 }

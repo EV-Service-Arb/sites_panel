@@ -24,47 +24,38 @@ use super::{
 };
 use crate::wire::Checked;
 
-/// What projecting an event changed that a screen reads beyond the event itself.
-#[derive(Clone, Debug, Default)]
-pub struct Applied {
-	/// Every lead recomputed: the event's, and those a provider's booking left or joined.
-	pub leads: Vec<LeadId>,
-	/// The bookings without a lead changed: one came, went, or was joined to a lead.
-	pub unmatched: bool,
-	/// The event's own lead as it is now, when the event names one that has a row.
-	pub lead: Option<LeadState>,
-}
-
 /// Projects one registered event: its own row, its brand's experiments, the provider's
-/// booking it is about, and every lead that changes with them.
-pub async fn apply(conn: &mut SqliteConnection, event: &Recorded) -> eyre::Result<Applied> {
+/// booking it is about, and every lead that changes with them (the event's, and those a
+/// provider's booking left or joined). Answers the event's own lead as it is now, when the event
+/// names one that has a row.
+pub async fn apply(conn: &mut SqliteConnection, event: &Recorded) -> eyre::Result<Option<LeadState>> {
 	insert_row(conn, event).await?;
 	let brand = &event.subject.brand_id;
 	if is_experiment(&event.fact) {
 		super::experiments::recompute(conn, brand).await?;
 	}
-	let mut applied = Applied::default();
+	let mut leads: Vec<LeadId> = Vec::new();
 	if let Some((provider, external_ref)) = bookings::external_key(&event.fact) {
 		let r = bookings::recompute(conn, brand, provider, external_ref).await?;
-		applied.unmatched = r.unmatched_before || r.unmatched_after;
 		for lead in [r.before, r.after].into_iter().flatten() {
-			if !applied.leads.contains(&lead) {
-				applied.leads.push(lead);
+			if !leads.contains(&lead) {
+				leads.push(lead);
 			}
 		}
 	}
 	if let Some(lead) = &event.subject.lead_id
-		&& !applied.leads.contains(lead)
+		&& !leads.contains(lead)
 	{
-		applied.leads.push(lead.clone());
+		leads.push(lead.clone());
 	}
-	for lead in &applied.leads {
+	let mut own = None;
+	for lead in &leads {
 		let state = recompute_lead(conn, brand, lead).await?;
 		if event.subject.lead_id.as_ref() == Some(lead) {
-			applied.lead = state;
+			own = state;
 		}
 	}
-	Ok(applied)
+	Ok(own)
 }
 
 /// Whether a fact is about the brand's experiments, which are folded per brand.

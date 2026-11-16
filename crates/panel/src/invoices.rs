@@ -188,9 +188,6 @@ impl Panel {
 			}
 		};
 		tx.commit().await.wrap_err("committing an invoice")?;
-		if !replayed {
-			self.live.changed(invoice_changed(Some(id), now));
-		}
 		if row.state != InvoiceState::Creating {
 			return Ok(Done { value: row, replayed });
 		}
@@ -221,9 +218,7 @@ impl Panel {
 				// again. Anything else may have reached banking: the row stays for the retry.
 				if matches!(e, LedgerError::Refused(_) | LedgerError::Invalid(_)) {
 					let mut conn = self.store.pool().acquire().await.wrap_err("a connection for invoices")?;
-					if db::delete_creating(&mut conn, id).await? {
-						self.live.changed(invoice_changed(Some(id), Timestamp::now()));
-					}
+					db::delete_creating(&mut conn, id).await?;
 				}
 				return Err(e.into());
 			}
@@ -286,7 +281,6 @@ impl Panel {
 		if updated != current {
 			db::update(&mut tx, &updated).await?;
 			tx.commit().await.wrap_err("committing an invoice's state")?;
-			self.live.changed(invoice_changed(Some(updated.id), Timestamp::now()));
 		}
 		Ok(updated)
 	}
@@ -305,7 +299,6 @@ impl Panel {
 			let full = page.events.len() >= PULL_LIMIT as usize;
 			let mut tx = self.store.begin_write().await?;
 			eyre::ensure!(db::cursor(&mut tx).await? == after, "the invoice events' cursor moved under the pull");
-			let mut changed = false;
 			for event in &page.events {
 				done.events += 1;
 				match &event.kind {
@@ -315,21 +308,20 @@ impl Panel {
 					// ([`Self::refresh_invoice`]) and stores what it says, paid included.
 					EventKind::InvoicePaid { invoice_id, paid } =>
 						if db::mark_paid(&mut tx, invoice_id, paid, &event.event_id).await? {
-							changed = true;
 							done.paid += 1;
 							tracing::info!(invoice_id, event_id = event.event_id, "invoice paid");
 						},
-					EventKind::InvoiceCancelled { invoice_id } => changed |= ended(&mut tx, invoice_id, InvoiceState::Cancelled).await?,
-					EventKind::InvoiceExpired { invoice_id } => changed |= ended(&mut tx, invoice_id, InvoiceState::Expired).await?,
+					EventKind::InvoiceCancelled { invoice_id } => ended(&mut tx, invoice_id, InvoiceState::Cancelled).await?,
+					EventKind::InvoiceExpired { invoice_id } => ended(&mut tx, invoice_id, InvoiceState::Expired).await?,
 					EventKind::Other => {}
 				}
 			}
 			done.position = page.next_position.max(after);
-			db::set_cursor(&mut tx, done.position).await?;
-			tx.commit().await.wrap_err("committing confirmed invoices")?;
-			if changed {
-				self.live.changed(invoice_changed(None, Timestamp::now()));
+			// An unmoved cursor is not written: every write is told on the live bus.
+			if done.position != after {
+				db::set_cursor(&mut tx, done.position).await?;
 			}
+			tx.commit().await.wrap_err("committing confirmed invoices")?;
 			if !full {
 				break;
 			}
@@ -339,23 +331,11 @@ impl Panel {
 }
 
 /// An invoice the panel knows was cancelled or lapsed at banking; a paid one stays paid.
-/// `true` when the row changed.
-async fn ended(conn: &mut sqlx::SqliteConnection, invoice_id: &str, to: InvoiceState) -> eyre::Result<bool> {
-	let Some(row) = db::by_invoice_id(conn, invoice_id).await? else { return Ok(false) };
+async fn ended(conn: &mut sqlx::SqliteConnection, invoice_id: &str, to: InvoiceState) -> eyre::Result<()> {
+	let Some(row) = db::by_invoice_id(conn, invoice_id).await? else { return Ok(()) };
 	let state = row.state.after(to);
-	if state == row.state {
-		return Ok(false);
+	if state != row.state {
+		db::update(conn, &Invoice { state, ..row }).await?;
 	}
-	db::update(conn, &Invoice { state, ..row }).await?;
-	Ok(true)
-}
-
-/// The invoices' list changed: one row (`id`), or a confirmation page's.
-fn invoice_changed(id: Option<Uuid>, at: Timestamp) -> crate::live::Change {
-	crate::live::Change {
-		topic: crate::live::Topic::Invoices,
-		brand: None,
-		id: id.map(|id| id.to_string()),
-		at,
-	}
+	Ok(())
 }

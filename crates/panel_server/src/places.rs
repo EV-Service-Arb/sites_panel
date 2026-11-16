@@ -286,7 +286,7 @@ struct GmbBody {
 ///
 /// 404 for a place not known; 409 `gmb_taken` when another place has that GMB.
 async fn link_gmb(State(panel): State<Panel>, caller: Caller, Ids(PlacePath { brand, slug }): Ids<PlacePath>, Body(b): Body<GmbBody>) -> ApiResult<Json<PlaceDto>> {
-	let v = panel.link_gmb(&brand, &slug, b.gmb_id, Timestamp::now()).await?;
+	let v = panel.link_gmb(&brand, &slug, b.gmb_id).await?;
 	Ok(Json(place_dto(v, &caller)))
 }
 

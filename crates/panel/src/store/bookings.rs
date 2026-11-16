@@ -182,14 +182,11 @@ async fn events_of(conn: &mut SqliteConnection, brand: &BrandId, provider: Provi
 	Ok(stored.into_iter().filter_map(registered).collect())
 }
 
-/// What recomputing a provider's booking changed: the lead it was joined to before and after,
-/// and whether it was or is without one.
+/// What recomputing a provider's booking changed: the lead it was joined to before and after.
 #[derive(Clone, Debug, Default)]
 pub struct Recomputed {
 	pub before: Option<LeadId>,
 	pub after: Option<LeadId>,
-	pub unmatched_before: bool,
-	pub unmatched_after: bool,
 }
 
 /// Recomputes a provider's booking from its events. Inside a write transaction.
@@ -235,8 +232,6 @@ pub async fn recompute(conn: &mut SqliteConnection, brand: &BrandId, provider: P
 	}
 	let lead_after = after.as_ref().and_then(|b| b.lead.as_ref()).map(|(l, _)| LeadId::parse(l)).transpose()?;
 	Ok(Recomputed {
-		unmatched_before: before.as_ref().is_some_and(|b| b.lead.is_none()),
-		unmatched_after: after.is_some() && lead_after.is_none(),
 		before: before.and_then(|b| b.lead.map(|(l, _)| l)),
 		after: lead_after,
 	})

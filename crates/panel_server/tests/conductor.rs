@@ -85,22 +85,37 @@ async fn a_new_lead_is_one_note_with_and_without_its_pii_and_its_buttons_call_ba
 		note["buttons"],
 		json!([
 			{"id": "take", "label": "Взял", "pressed": "Взял",
-			 "call": {"method": "POST", "path": "/api/v1/leads/aquafix/L-1/stage", "body": {"stage": "contacted"}}, "leaves": []},
+			 "call": {"operation": "move_lead", "path": {"brand": "aquafix", "lead": "L-1"}, "body": {"stage": "contacted"}}, "leaves": []},
 			{"id": "no_answer", "label": "Не дозвонился", "pressed": "Не дозвонился",
-			 "call": {"method": "POST", "path": "/api/v1/leads/aquafix/L-1/no_answer", "body": null}, "leaves": ["take"]},
+			 "call": {"operation": "no_answer", "path": {"brand": "aquafix", "lead": "L-1"}, "body": null}, "leaves": ["take"]},
 		])
 	);
 	assert_eq!(notes(&app, &conductor, body["next"].as_i64().unwrap()).await, json!({"notes": [], "next": body["next"]}));
 
-	// A press: the button's call, as the user who pressed, under the key the outbox derives.
+	// A press: the button's operation, resolved in the document as the conductor's catalog does,
+	// called as the user who pressed, under the key the outbox derives.
+	let document = serde_json::to_value(panel_server::http::document()).unwrap();
 	let olga = As::user(alias("sa:operator"));
 	let press = |button: &'static str| {
 		let call = note["buttons"].as_array().unwrap().iter().find(|b| b["id"] == button).unwrap()["call"].clone();
+		let (template, method) = document["paths"]
+			.as_object()
+			.unwrap()
+			.iter()
+			.flat_map(|(path, item)| item.as_object().unwrap().iter().map(move |(m, op)| (path, m, op)))
+			.find(|(.., op)| op["operationId"] == call["operation"])
+			.map(|(path, m, _)| (path.clone(), m.to_uppercase()))
+			.expect("the operation is in the document");
+		let path = call["path"]
+			.as_object()
+			.unwrap()
+			.iter()
+			.fold(format!("/api/v1{template}"), |p, (name, v)| p.replace(&format!("{{{name}}}"), v.as_str().unwrap()));
 		let (app, conductor, olga) = (app.clone(), &conductor, olga.clone());
 		async move {
 			let key = format!("tg/7/{button}");
 			let body = Some(call["body"].clone()).filter(|b| !b.is_null());
-			send(&app, conductor, &olga, Method::POST, call["path"].as_str().unwrap(), body, &[("idempotency-key", &key)])
+			send(&app, conductor, &olga, Method::from_bytes(method.as_bytes()).unwrap(), &path, body, &[("idempotency-key", &key)])
 				.await
 				.0
 		}
@@ -153,15 +168,28 @@ async fn a_new_lead_is_one_note_with_and_without_its_pii_and_its_buttons_call_ba
 	assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
+/// The tables an `/api/v1` read's answer says it read.
+async fn reads(app: &axum::Router, conductor: &Conductor, path: &str) -> Vec<String> {
+	let assertion = conductor.user(uuid::Uuid::now_v7(), &alias("sa:operator"), "GET", path);
+	let res = app
+		.clone()
+		.oneshot(Request::get(path).header(sa_auth::HEADER, assertion).body(Body::empty()).unwrap())
+		.await
+		.unwrap();
+	assert_eq!(res.status(), StatusCode::OK, "{path}");
+	let header = res.headers()["x-sa-reads"].to_str().unwrap();
+	header.split(", ").filter(|t| !t.is_empty()).map(str::to_owned).collect()
+}
+
 #[tokio::test]
-async fn the_change_feed_starts_with_resync_and_tells_each_change_with_its_permission() {
+async fn a_write_is_told_by_its_tables_and_refreshes_only_the_reads_of_them() {
 	let db = TestDb::create().await;
 	let conductor = Conductor::new("k1");
 	let panel = panel(&db).await;
 	let app = app(panel.clone(), &conductor);
-	let path = "/api/conductor/changes";
+	let path = sa_core::feeds::CHANGES;
 	let req = Request::get(path).header(sa_auth::HEADER, conductor.conductor("GET", path)).body(Body::empty()).unwrap();
-	let res = app.oneshot(req).await.unwrap();
+	let res = app.clone().oneshot(req).await.unwrap();
 	assert_eq!(res.status(), StatusCode::OK);
 	assert_eq!(res.headers()["content-type"], "application/x-ndjson");
 	let mut body = res.into_body();
@@ -173,20 +201,30 @@ async fn the_change_feed_starts_with_resync_and_tells_each_change_with_its_permi
 	};
 	assert_eq!(next().await, json!({"type": "resync"}));
 
-	let now = Timestamp::now();
-	panel
-		.ingest(&grant("aquafix-site", SourceKind::Site, &["aquafix"]), &batch("aquafix-site", &[site_lead("L-1", now)]), now)
-		.await
-		.unwrap();
-	let changed = next().await;
-	assert_eq!(
-		changed,
-		json!({"type": "changed", "topic": "leads", "brand_id": "aquafix", "id": "L-1", "at": changed["at"], "permission": "sa:sites:work:read"})
+	let lead = json!({"brand": "aquafix", "location": "royat", "need": "a tap"});
+	let (status, _) = send(&app, &conductor, &As::user(alias("sa:operator")), Method::POST, "/api/v1/leads", Some(lead), &[]).await;
+	assert_eq!(status, StatusCode::CREATED);
+	let mut topics = Vec::new();
+	while !topics.iter().any(|t| t == "sites.leads") {
+		let line = next().await;
+		assert_eq!(line["type"], "changed", "{line}");
+		topics.push(line["topic"].as_str().unwrap().to_owned());
+	}
+
+	assert!(
+		reads(&app, &conductor, "/api/v1/leads").await.contains(&"sites.leads".to_owned()),
+		"the list follows the leads it read"
 	);
-	panel.rebuild_projections().await.unwrap();
-	assert_eq!(next().await, json!({"type": "resync"}));
-	panel.bus().publish(panel::live::Signal::GoingAway);
-	assert!(body.frame().await.is_none(), "the feed ends when the process stops");
+	let invoices = reads(&app, &conductor, "/api/v1/invoices").await;
+	assert!(!invoices.contains(&"sites.leads".to_owned()), "the invoices do not follow the leads: {invoices:?}");
+
+	panel.bus().going_away();
+	let ended = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+		while let Some(frame) = body.frame().await {
+			frame.unwrap();
+		}
+	});
+	assert!(ended.await.is_ok(), "the feed ends when the process stops");
 }
 
 #[tokio::test]
@@ -244,7 +282,7 @@ async fn the_conductor_sees_which_internal_reads_a_brand_made_since_boot() {
 	for endpoint in ["locations", "pricing"] {
 		assert!(seen[endpoint].as_str().unwrap().parse::<Timestamp>().unwrap() >= since, "{endpoint}");
 	}
-	assert!(seen.get("experiments").is_none(), "never read: absent");
+	assert_eq!(seen["experiments"], Value::Null, "never read");
 	assert!(after["reads"].get("vifnet").is_none());
 
 	let (status, _) = read(&As::Nobody, "/api/conductor/internal-reads").await;

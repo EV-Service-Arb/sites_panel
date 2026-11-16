@@ -223,7 +223,7 @@ pub(crate) fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> R
 }
 
 /// `{brand}/{lead}`.
-#[derive(Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema, Serialize)]
 pub(crate) struct LeadPath {
 	pub brand: BrandId,
 	pub lead: LeadId,
@@ -731,7 +731,7 @@ async fn create_lead(State(panel): State<Panel>, caller: Caller, IdempotencyKey(
 #[derive(Deserialize, JsonSchema)]
 #[serde(tag = "stage", rename_all = "snake_case", deny_unknown_fields)]
 #[schemars(rename = "StageMove")]
-enum StageBody {
+pub(crate) enum StageBody {
 	Contacted {
 		channel: Option<ContactChannel>,
 	},
@@ -755,7 +755,7 @@ enum StageBody {
 ///
 /// Stages move forward; `lost` from anywhere, and later progress reopens a lost lead. 409 when
 /// the move is not from where the lead stands.
-async fn move_lead(
+pub(crate) async fn move_lead(
 	State(panel): State<Panel>,
 	caller: Caller,
 	Ids(LeadPath { brand, lead }): Ids<LeadPath>,
@@ -802,7 +802,7 @@ async fn mark_messaged(
 /// A call nobody answered (`call.attempted` + `call.logged{no_answer}`).
 ///
 /// A note's button: its Idempotency-Key is required, so a press repeated records nothing twice.
-async fn no_answer(
+pub(crate) async fn no_answer(
 	State(panel): State<Panel>,
 	caller: Caller,
 	Ids(LeadPath { brand, lead }): Ids<LeadPath>,

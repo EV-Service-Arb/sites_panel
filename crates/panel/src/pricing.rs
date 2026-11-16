@@ -1,7 +1,7 @@
 //! A brand's pricing, as the panel's editor and the CLI change it and the sites read it
 //! (`panel_core::pricing`). Every change is one write transaction: the current model and the
 //! brand's locales read, the caller's view checked, the new model checked against those locales,
-//! written and journaled; then the live topic `pricing`.
+//! written and journaled.
 
 use eyre::WrapErr;
 use jiff::Timestamp;
@@ -96,15 +96,6 @@ fn view(brand: &BrandId, s: StoredPricing) -> PricingView {
 		model,
 		updated_at,
 		updated_by,
-	}
-}
-
-fn pricing_changed(brand: &BrandId, at: Timestamp) -> crate::live::Change {
-	crate::live::Change {
-		topic: crate::live::Topic::Pricing,
-		brand: Some(brand.clone()),
-		id: None,
-		at,
 	}
 }
 
@@ -226,7 +217,6 @@ impl Panel {
 		let saved = view(brand, stored::pricing(&mut tx, brand).await?);
 		tx.commit().await.wrap_err("committing a brand's pricing")?;
 		tracing::info!(by = editor.label(), %brand, kind = kind.as_str(), "pricing changed");
-		self.live.changed(pricing_changed(brand, at));
 		Ok(saved)
 	}
 
@@ -244,7 +234,6 @@ impl Panel {
 		let saved = view(brand, stored::pricing(&mut tx, brand).await?);
 		tx.commit().await.wrap_err("committing a brand's locales")?;
 		tracing::info!(by = editor.label(), %brand, locales = locales.join(","), "brand locales changed");
-		self.live.changed(pricing_changed(brand, now));
 		Ok(saved)
 	}
 }

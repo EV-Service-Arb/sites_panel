@@ -177,7 +177,7 @@ pub fn router(sites: Sites, limits: Limits) -> Router {
 		.nest(INTERNAL, places::internal().with_state(sites.panel.clone()).layer(Extension(internal_reads)))
 		.merge(booking::hooks(sites.panel, sites.hooks))
 		.nest("/api/v1", v1)
-		.nest("/api/conductor", to_conductor);
+		.merge(to_conductor);
 	if let Some(dir) = sites.mfe {
 		app = app.nest("/mfe", Router::new().fallback_service(ServeDir::new(dir)).layer(middleware::from_fn(mfe_caching)));
 	}

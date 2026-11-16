@@ -4,7 +4,6 @@
 
 use jiff::Timestamp;
 use panel::{
-	live::{Signal, Topic},
 	place::Expected,
 	pricing::{ChangeKind, PricingError},
 	testing::{TestDb, batch, event, grant, panel},
@@ -55,13 +54,13 @@ async fn a_model_is_saved_whole_and_checked_against_what_was_read() {
 	assert_eq!(saved.updated_at, Some(now()));
 	assert_eq!(saved.updated_by.as_deref(), Some("admin@evinvest.ltd"));
 	assert_eq!(panel.live_pricing(&brand).await.unwrap(), Some(cleaning()));
-	let Ok(Signal::Changed(c)) = bus.try_recv() else { panic!("told after the commit") };
-	assert_eq!((c.topic, c.brand.as_ref()), (Topic::Pricing, Some(&brand)));
+	let topics = told(&mut bus).await;
+	assert!(topics.contains("sites.pricing"), "told after the commit: {topics:?}");
 
 	// The same model again changes nothing and says nothing.
 	let again = panel.set_pricing(&admin(), &brand, &cleaning(), Expected::At(saved.updated_at), now()).await.unwrap();
 	assert_eq!(again, saved);
-	assert!(bus.try_recv().is_err());
+	assert_eq!(told(&mut bus).await, std::collections::BTreeSet::new());
 
 	let mut cheaper = cleaning();
 	cheaper["minimumCents"] = json!(3900);
@@ -189,4 +188,14 @@ async fn the_pricing_migration_goes_both_ways() {
 	migrator.run(&pool).await.unwrap();
 	panel.set_pricing(&admin(), &brand(), &cleaning(), Expected::Any, now()).await.unwrap();
 	assert_eq!(panel.pricing_history(&brand()).await.unwrap().len(), 1);
+}
+
+/// The tables the bus told, drained once it has been quiet a moment: a connection tells its
+/// writes when it goes back to the pool, which happens after the call that used it returns.
+async fn told(rx: &mut tokio::sync::broadcast::Receiver<String>) -> std::collections::BTreeSet<String> {
+	let mut out = std::collections::BTreeSet::new();
+	while let Ok(topic) = tokio::time::timeout(std::time::Duration::from_millis(100), rx.recv()).await {
+		out.insert(topic.expect("the test reads as fast as the bus is told"));
+	}
+	out
 }

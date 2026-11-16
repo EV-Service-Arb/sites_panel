@@ -406,17 +406,14 @@ async fn a_cancelled_or_expired_invoice_ends_so() {
 	assert_eq!(states, HashMap::from([("inv-0", "cancelled"), ("inv-1", "expired")]));
 }
 
-/// The `invoices` changes told on the bus since the last call, as `(id named?)`.
-fn told(rx: &mut tokio::sync::broadcast::Receiver<panel::live::Signal>) -> Vec<bool> {
-	let mut out = Vec::new();
-	while let Ok(signal) = rx.try_recv() {
-		if let panel::live::Signal::Changed(c) = signal {
-			assert_eq!(c.topic, panel::live::Topic::Invoices, "{c:?}");
-			assert_eq!(c.brand, None);
-			out.push(c.id.is_some());
-		}
+/// Whether the bus told the `invoices` table, once it has been quiet a moment: a connection
+/// tells its writes when it goes back to the pool, after the call that used it returns.
+async fn told(rx: &mut tokio::sync::broadcast::Receiver<String>) -> bool {
+	let mut invoices = false;
+	while let Ok(topic) = tokio::time::timeout(std::time::Duration::from_millis(100), rx.recv()).await {
+		invoices |= topic.expect("the test reads as fast as the bus is told") == "sites.invoices";
 	}
-	out
+	invoices
 }
 
 #[tokio::test]
@@ -431,33 +428,33 @@ async fn the_screens_are_told_when_an_invoice_row_changes() {
 	let b = user(&app, &conductor, "sa:admin");
 
 	let (_, issued) = issue(&b, Some("k-1"), terms()).await;
-	assert_eq!(told(&mut rx), [true, true], "stored creating, then as banking issued it");
+	assert!(told(&mut rx).await, "stored creating, then as banking issued it");
 	issue(&b, Some("k-1"), terms()).await;
-	assert_eq!(told(&mut rx), [false; 0], "a retry changes nothing");
+	assert!(!told(&mut rx).await, "a retry changes nothing");
 
 	let item = format!("/api/v1/invoices/{}", issued["id"].as_str().unwrap());
 	b.get(&item).await;
-	assert_eq!(told(&mut rx), [false; 0], "a read banking answers the same");
+	assert!(!told(&mut rx).await, "a read banking answers the same");
 	fake.set_state(pb::InvoiceState::Processing);
 	b.get(&item).await;
-	assert_eq!(told(&mut rx), [true], "a read that found it processing");
+	assert!(told(&mut rx).await, "a read that found it processing");
 
 	panel.confirm_invoices(&*ledger).await.unwrap();
-	assert_eq!(told(&mut rx), [false; 0], "no events, nothing told");
+	assert!(!told(&mut rx).await, "no events, nothing told");
 	fake.push_event("e-0", Kind::Charged, "hold-9");
 	panel.confirm_invoices(&*ledger).await.unwrap();
-	assert_eq!(told(&mut rx), [false; 0], "events about nothing the panel holds");
+	assert!(!told(&mut rx).await, "events about nothing the panel holds");
 	fake.push_event("e-1", Kind::InvoicePaid, "inv-0");
 	panel.confirm_invoices(&*ledger).await.unwrap();
-	assert_eq!(told(&mut rx), [false], "paid: one change for the page");
+	assert!(told(&mut rx).await, "paid: one change for the page");
 
 	let (_, two) = issue(&b, Some("k-2"), terms()).await;
-	told(&mut rx);
+	told(&mut rx).await;
 	fake.push_event("e-2", Kind::InvoiceExpired, two["invoice_id"].as_str().unwrap());
 	panel.confirm_invoices(&*ledger).await.unwrap();
-	assert_eq!(told(&mut rx), [false], "expired");
+	assert!(told(&mut rx).await, "expired");
 
 	fake.bank().granted = false;
 	issue(&b, Some("k-3"), terms()).await;
-	assert_eq!(told(&mut rx), [true, true], "stored creating, then dropped on the refusal");
+	assert!(told(&mut rx).await, "stored creating, then dropped on the refusal");
 }

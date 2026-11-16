@@ -870,14 +870,17 @@ dependencies = [
  "form_urlencoded",
  "jiff",
  "js-sys",
+ "libsqlite3-sys",
  "percent-encoding",
  "reqwest",
  "schemars",
  "sentry",
  "serde",
  "serde_json",
+ "sqlx",
  "strum",
  "syn 2.0.119",
+ "tokio",
  "ts-rs",
  "uuid",
  "wasm-bindgen",
@@ -2131,6 +2134,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "chacha20poly1305",
+ "ev_lib 0.33.0",
  "eyre",
  "getrandom 0.3.4",
  "hex",
@@ -2965,6 +2969,9 @@ dependencies = [
 name = "sa_core"
 version = "0.1.0"
 dependencies = [
+ "axum",
+ "ev_lib 0.33.0",
+ "futures",
  "hex",
  "hmac",
  "jiff",
@@ -2977,6 +2984,7 @@ dependencies = [
  "strum",
  "subtle",
  "thiserror",
+ "tokio",
  "url",
  "uuid",
 ]

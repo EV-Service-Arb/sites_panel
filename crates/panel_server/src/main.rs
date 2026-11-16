@@ -508,7 +508,7 @@ async fn serve(panel: Panel, keys: sa_auth::Keys, locale: sa_core::notify::Local
 		// shutdown waits for every response to.
 		let shutdown = async move {
 			shutdown_signal().await;
-			bus.publish(panel::live::Signal::GoingAway);
+			bus.going_away();
 		};
 		let served = axum::serve(listener, app).with_graceful_shutdown(shutdown).await.wrap_err("HTTP server");
 		// Nobody may be listening any more: the work has stopped then.
