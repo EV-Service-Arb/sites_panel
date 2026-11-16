@@ -467,6 +467,11 @@ contract's `provides.internal`.
 `GET /api/conductor/sources/received` → `{<key_id>: <RFC 3339>}`: when each key the journal
 names last had an event received (`max(events.received_at)`); the conductor's "source silent".
 
+### Which place a GMB is the landing of
+
+`GET /api/conductor/places` → `{places: [{gmb_id, brand, slug}]}`: every place with a `gmb_id`
+but the withdrawn; the conductor's review kit mints a GMB's QR (`<brand>/avis/<slug>`) from it.
+
 ## Place settings
 
 A landing bakes its places into its build and lays over each, field by field, what the

@@ -372,7 +372,7 @@ async fn gmbs(State(panel): State<Panel>) -> ApiResult<Json<BTreeMap<i64, GmbPla
 	let rows = panel.gmbs(Timestamp::now()).await?;
 	Ok(Json(
 		rows.into_iter()
-			.map(|(id, brand, location, leads_7d, overdue)| (id, GmbPlaceDto { brand, location, leads_7d, overdue }))
+			.map(|(id, brand, location, leads_7d, overdue, ..)| (id, GmbPlaceDto { brand, location, leads_7d, overdue }))
 			.collect(),
 	))
 }

@@ -253,3 +253,39 @@ async fn the_conductor_sees_which_internal_reads_a_brand_made_since_boot() {
 	let (status, _) = read(&As::Nobody, "/api/conductor/internal-reads").await;
 	assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn the_conductor_reads_which_place_each_gmb_is_the_landing_of() {
+	let db = TestDb::create().await;
+	let conductor = Conductor::new("k1");
+	let app = app(panel(&db).await, &conductor);
+	let admin = As::user(panel::testing::admin());
+	for (slug, gmb) in [("royat", Some(7)), ("vichy", None), ("thiers", Some(8))] {
+		let (status, body) = send(&app, &conductor, &admin, Method::POST, "/api/v1/places", Some(json!({"brand": "aquafix", "slug": slug})), &[]).await;
+		assert_eq!(status, StatusCode::CREATED, "{body}");
+		if let Some(gmb) = gmb {
+			let (status, body) = send(
+				&app,
+				&conductor,
+				&admin,
+				Method::PUT,
+				&format!("/api/v1/places/aquafix/{slug}/gmb"),
+				Some(json!({"gmb_id": gmb})),
+				&[],
+			)
+			.await;
+			assert_eq!(status, StatusCode::OK, "{body}");
+		}
+	}
+	let (status, body) = send(&app, &conductor, &admin, Method::POST, "/api/v1/places/aquafix/thiers/withdraw", None, &[]).await;
+	assert_eq!(status, StatusCode::OK, "{body}");
+
+	let (status, body) = send(&app, &conductor, &As::Conductor, Method::GET, "/api/conductor/places", None, &[]).await;
+	assert_eq!(
+		(status, body),
+		(StatusCode::OK, json!({"places": [{"gmb_id": 7, "brand": "aquafix", "slug": "royat"}]})),
+		"without a gmb_id, or withdrawn: not listed"
+	);
+	let (status, _) = send(&app, &conductor, &As::Nobody, Method::GET, "/api/conductor/places", None, &[]).await;
+	assert_eq!(status, StatusCode::UNAUTHORIZED);
+}

@@ -222,8 +222,8 @@ impl Panel {
 		Ok(view(brand, slug, stored))
 	}
 
-	/// Every place with a GMB: `(gmb_id, brand, slug, leads in the last 7 days, overdue leads)`.
-	pub async fn gmbs(&self, now: Timestamp) -> eyre::Result<Vec<(i64, String, String, u32, u32)>> {
+	/// Every place with a GMB: `(gmb_id, brand, slug, leads in the last 7 days, overdue leads, withdrawn)`.
+	pub async fn gmbs(&self, now: Timestamp) -> eyre::Result<Vec<(i64, String, String, u32, u32, bool)>> {
 		let mut conn = self.store.pool().acquire().await.wrap_err("a connection")?;
 		places::gmbs(&mut conn, now - SignedDuration::from_hours(7 * 24), now - funnel::CONTACT_SLA).await
 	}
