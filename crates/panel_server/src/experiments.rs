@@ -13,22 +13,21 @@ use axum::{
 	extract::{Path, State},
 	http::Method,
 };
-use ev_lib::api::JsonSchema;
+use ev_lib::api::{Body, Ids, JsonSchema, Params, Refusal, Refuses};
 use jiff::Timestamp;
 use panel::{
 	Panel,
 	experiment::{ExperimentError, ExperimentView, LiveExperiments},
 };
 use panel_core::experiment::{ExperimentKey, Patch, Variant};
-use sa_auth::Experiments;
+use sa_auth::{Analysis, Experiments, Gate};
 use sa_core::{Invalid, ids::BrandId};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-	api::{ApiError, ApiResult, Body, Ids, Params, present},
+	api::{ApiResult, Caller, Code, present},
 	conductor::{InternalEndpoint, InternalReads},
-	gate::Caller,
-	http::{ApiRoute, Gate, Section},
+	http::ApiRoute,
 	places::editor,
 };
 
@@ -36,10 +35,10 @@ use crate::{
 const LIVE_WITHIN: Duration = Duration::from_millis(2500);
 
 pub(crate) fn routes() -> Vec<ApiRoute> {
-	let analysis = Gate::section(Section::Analysis);
+	let analysis = Gate::USER.needs(Analysis::Read);
 	vec![
 		ApiRoute::new(Method::GET, "/experiments", analysis, list_experiments),
-		ApiRoute::new(Method::PUT, "/experiments/{brand}/{key}", analysis.may(Experiments::Edit), configure_experiment),
+		ApiRoute::new(Method::PUT, "/experiments/{brand}/{key}", Gate::USER.needs(Experiments::Edit), configure_experiment),
 	]
 }
 
@@ -202,16 +201,21 @@ fn patch(key: &str, b: ConfigureBody) -> Result<Patch, Invalid> {
 /// journals nothing.
 async fn configure_experiment(
 	State(panel): State<Panel>,
-	Extension(caller): Extension<Caller>,
+	caller: Caller,
 	Ids(ExperimentPath { brand, key }): Ids<ExperimentPath>,
 	Body(b): Body<ConfigureBody>,
 ) -> ApiResult<Json<ExperimentDto>> {
 	let patch = patch(key.as_str(), b)?;
-	match panel.configure_experiment(&editor(&caller), &brand, patch, Timestamp::now()).await {
-		Ok(v) => Ok(Json(v.into())),
-		Err(ExperimentError::NotFound) => Err(ApiError::NotFound),
-		Err(ExperimentError::Invalid(e)) => Err(ApiError::BadRequest(e.0)),
-		Err(ExperimentError::Internal(e)) => Err(ApiError::Internal(e)),
+	Ok(Json(panel.configure_experiment(&editor(&caller), &brand, patch, Timestamp::now()).await?.into()))
+}
+
+impl Refuses<ExperimentError> for Code {
+	fn refusal(e: ExperimentError) -> Refusal<Self> {
+		match e {
+			ExperimentError::NotFound => Refusal::new(Self::NotFound, "not found"),
+			ExperimentError::Invalid(e) => Self::refusal(e),
+			ExperimentError::Internal(e) => Self::refusal(e),
+		}
 	}
 }
 

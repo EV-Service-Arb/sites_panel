@@ -81,7 +81,6 @@ async fn only_the_conductors_assertion_for_this_request_gets_in() {
 		&[event("lead.created", now, "site", json!({"brandId": "aquafix", "leadId": "L-1"}), json!({"channel": "form"}))],
 	);
 	let source = |c: &Conductor, body: &[u8]| c.source("aquafix-site", SourceKind::Site, &["aquafix"], "POST", INGEST, body);
-	let unauthenticated = json!({"error": "unauthenticated"});
 	let operator = panel_server::testing::alias("sa:operator");
 	let refused = [
 		("no assertion", Method::POST, INGEST, None, body.clone()),
@@ -163,11 +162,8 @@ async fn only_the_conductors_assertion_for_this_request_gets_in() {
 		),
 	];
 	for (why, method, path, assertion, body) in refused {
-		assert_eq!(
-			with_assertion(&app, method, path, assertion, body).await,
-			(StatusCode::UNAUTHORIZED, unauthenticated.clone()),
-			"{why}"
-		);
+		let (status, refused) = with_assertion(&app, method, path, assertion, body).await;
+		assert_eq!((status, &refused["code"]), (StatusCode::UNAUTHORIZED, &json!("unauthenticated")), "{why}");
 	}
 	let n: i64 = sqlx::query_scalar("SELECT count(*) FROM events").fetch_one(&db.pool().await).await.unwrap();
 	assert_eq!(n, 0, "nothing refused was journaled");

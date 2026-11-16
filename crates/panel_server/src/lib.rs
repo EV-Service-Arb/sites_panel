@@ -9,7 +9,6 @@ pub mod booking;
 pub mod capture;
 pub mod conductor;
 pub mod experiments;
-pub mod gate;
 pub mod google_calendar;
 pub mod http;
 pub mod invoices;

@@ -22,11 +22,12 @@ use std::{
 use axum::{
 	Json, Router,
 	body::{Body, Bytes},
-	extract::{Query, State},
+	extract::{FromRef, State},
 	http::{HeaderValue, header},
 	response::{IntoResponse, Response},
 	routing::get,
 };
+use ev_lib::api::{Params, Refusal};
 use jiff::Timestamp;
 use panel::{
 	Panel,
@@ -35,12 +36,13 @@ use panel::{
 };
 use panel_core::notify::{Button as SiteButton, Rendered};
 use sa_alerts::{Call, Note, NotePage, NoteText, Origin};
+use sa_auth::{Conductor, Verifier};
 use sa_core::{ids::BrandId, notify::Locale};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::broadcast::{Receiver, error::RecvError};
 
-use crate::api::{ApiError, ApiResult};
+use crate::api::{ApiResult, Code};
 
 /// A line at least this often, so the conductor tells a quiet feed from a dead one.
 const PING_EVERY: Duration = Duration::from_secs(25);
@@ -99,21 +101,40 @@ struct Reads {
 	panel: Panel,
 	locale: Locale,
 	internal: Arc<InternalReads>,
+	verifier: Verifier,
+}
+
+impl FromRef<Reads> for Verifier {
+	fn from_ref(r: &Reads) -> Self {
+		r.verifier.clone()
+	}
 }
 
 /// `/notifications`, `/sources/received`, `/places` and `/internal-reads`.
-pub(crate) fn reads(panel: Panel, locale: Locale, internal: Arc<InternalReads>) -> Router {
+pub(crate) fn reads(panel: Panel, locale: Locale, internal: Arc<InternalReads>, verifier: Verifier) -> Router {
 	Router::new()
 		.route("/notifications", get(notifications))
 		.route("/sources/received", get(received))
 		.route("/places", get(places))
 		.route("/internal-reads", get(internal_reads))
-		.with_state(Reads { panel, locale, internal })
+		.with_state(Reads { panel, locale, internal, verifier })
+}
+
+#[derive(Clone)]
+struct Feed {
+	panel: Panel,
+	verifier: Verifier,
+}
+
+impl FromRef<Feed> for Verifier {
+	fn from_ref(f: &Feed) -> Self {
+		f.verifier.clone()
+	}
 }
 
 /// `/changes`: unbounded in time, so outside the reads' timeout.
-pub(crate) fn changes(panel: Panel) -> Router {
-	Router::new().route("/changes", get(feed)).with_state(panel)
+pub(crate) fn changes(panel: Panel, verifier: Verifier) -> Router {
+	Router::new().route("/changes", get(feed)).with_state(Feed { panel, verifier })
 }
 
 fn line(v: &Value) -> Bytes {
@@ -150,7 +171,7 @@ async fn next_line(rx: &mut Receiver<Signal>, ping: &mut tokio::time::Interval) 
 	}
 }
 
-async fn feed(State(panel): State<Panel>) -> Response {
+async fn feed(_: Conductor, State(Feed { panel, .. }): State<Feed>) -> Response {
 	// Subscribed before the first line: whatever commits after the resync is in the stream.
 	let rx = panel.bus().subscribe();
 	let mut ping = tokio::time::interval_at(tokio::time::Instant::now() + PING_EVERY, PING_EVERY);
@@ -205,7 +226,7 @@ fn note(n: &Notification, locale: Locale) -> ApiResult<Note> {
 	let buttons = match (&n.lead, n.buttons.as_slice()) {
 		(_, []) => Vec::new(),
 		(Some(lead), buttons) => buttons.iter().map(|button| self::button(*button, lead, locale)).collect(),
-		(None, _) => return Err(ApiError::Internal(eyre::eyre!("note {} has buttons and no lead", n.seq))),
+		(None, _) => return Err(Refusal::from(eyre::eyre!("note {} has buttons and no lead", n.seq))),
 	};
 	let note = Note {
 		seq: n.seq,
@@ -219,14 +240,13 @@ fn note(n: &Notification, locale: Locale) -> ApiResult<Note> {
 		gmbs: Vec::new(),
 		photo: None,
 	};
-	note.check(Origin::Sites).map_err(|error| ApiError::Internal(error.into()))?;
+	note.check(Origin::Sites).map_err(|error| Refusal::from(eyre::Report::from(error)))?;
 	Ok(note)
 }
 
-async fn notifications(State(r): State<Reads>, q: Result<Query<NotesQuery>, axum::extract::rejection::QueryRejection>) -> ApiResult<Json<NotePage>> {
-	let Query(q) = q.map_err(|e| ApiError::BadRequest(e.body_text()))?;
+async fn notifications(_: Conductor, State(r): State<Reads>, Params(q): Params<NotesQuery>) -> ApiResult<Json<NotePage>> {
 	if !(1..=MAX_NOTES).contains(&q.limit) || q.after < 0 {
-		return Err(ApiError::BadRequest(format!("limit is 1–{MAX_NOTES}, after ≥ 0")));
+		return Err(Refusal::new(Code::BadRequest, format!("limit is 1–{MAX_NOTES}, after ≥ 0")));
 	}
 	let notes = r.panel.notifications(q.after, q.limit).await?;
 	let next = notes.last().map_or(q.after, |note| note.seq);
@@ -234,12 +254,12 @@ async fn notifications(State(r): State<Reads>, q: Result<Query<NotesQuery>, axum
 	Ok(Json(NotePage { notes, next }))
 }
 
-async fn received(State(r): State<Reads>) -> ApiResult<Json<Value>> {
+async fn received(_: Conductor, State(r): State<Reads>) -> ApiResult<Json<Value>> {
 	let by_key: serde_json::Map<String, Value> = r.panel.received_by_key().await?.into_iter().map(|(k, at)| (k, at.to_string().into())).collect();
 	Ok(Json(Value::Object(by_key)))
 }
 
-async fn places(State(r): State<Reads>) -> ApiResult<Json<Value>> {
+async fn places(_: Conductor, State(r): State<Reads>) -> ApiResult<Json<Value>> {
 	let places: Vec<Value> = r
 		.panel
 		.gmbs(Timestamp::now())
@@ -251,7 +271,7 @@ async fn places(State(r): State<Reads>) -> ApiResult<Json<Value>> {
 	Ok(Json(json!({ "places": places })))
 }
 
-async fn internal_reads(State(r): State<Reads>) -> Json<Value> {
+async fn internal_reads(_: Conductor, State(r): State<Reads>) -> Json<Value> {
 	let last = r.internal.last.lock().expect("no panic while held");
 	let reads: BTreeMap<&str, BTreeMap<&str, String>> = last
 		.iter()

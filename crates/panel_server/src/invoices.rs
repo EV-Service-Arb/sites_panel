@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use axum::{Extension, Json, extract::State, http::Method};
-use ev_lib::api::{JsonSchema, Upserted};
+use ev_lib::api::{Body, Ids, JsonSchema, Refusal, Refuses, Upserted};
 use jiff::Timestamp;
 use panel::{
 	Panel,
@@ -13,14 +13,13 @@ use panel::{
 	operator::Actor,
 };
 use panel_core::invoice::{CURRENCY, InvoiceState};
-use sa_auth::Invoices;
+use sa_auth::{Gate, Invoices, Work};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-	api::{ApiError, ApiResult, Body, Ids, RequiredIdempotencyKey, recorded},
-	gate::Caller,
-	http::{ApiRoute, Gate, Section},
+	api::{ApiResult, Caller, Code, RequiredIdempotencyKey, recorded},
+	http::ApiRoute,
 	scope_ledger::ScopeLedger,
 };
 
@@ -29,45 +28,57 @@ type MaybeLedger = Option<Extension<Arc<ScopeLedger>>>;
 
 pub(crate) fn routes() -> Vec<ApiRoute> {
 	use Method as M;
-	let work = Gate::section(Section::Work);
+	let work = Gate::USER.needs(Work::Read);
 	vec![
 		ApiRoute::new(M::GET, "/invoices", work, list_invoices),
 		ApiRoute::new(M::GET, "/invoices/{id}", work, get_invoice),
-		ApiRoute::new(M::POST, "/invoices", work.may(Invoices::Create), create_invoice),
+		ApiRoute::new(M::POST, "/invoices", Gate::USER.needs(Invoices::Create), create_invoice),
 	]
 }
 
 fn ledger(l: MaybeLedger) -> ApiResult<Arc<ScopeLedger>> {
-	l.map(|Extension(l)| l).ok_or_else(|| ApiError::Unavailable("invoices_unavailable".into()))
+	l.map(|Extension(l)| l)
+		.ok_or_else(|| Refusal::new(Code::InvoicesUnavailable, "no banking ScopeLedger is configured"))
 }
 
-impl From<InvoiceError> for ApiError {
-	fn from(e: InvoiceError) -> Self {
+impl Refuses<InvoiceError> for Code {
+	fn refusal(e: InvoiceError) -> Refusal<Self> {
 		match e {
-			InvoiceError::Invalid(e) => Self::BadRequest(e.0),
-			InvoiceError::Conflict(m) => Self::Conflict(m.to_owned()),
-			InvoiceError::NotFound => Self::NotFound,
-			InvoiceError::Ledger(e) => e.into(),
-			InvoiceError::Internal(e) => Self::Internal(e),
+			InvoiceError::Invalid(e) => Self::refusal(e),
+			InvoiceError::KeyTaken => Refusal::new(Self::IdempotencyKeyTaken, e.to_string()),
+			InvoiceError::NotFound => Refusal::new(Self::NotFound, "not found"),
+			InvoiceError::Ledger(e) => Self::refusal(e),
+			InvoiceError::Internal(e) => Self::refusal(e),
 		}
 	}
 }
 
-impl From<LedgerError> for ApiError {
-	fn from(e: LedgerError) -> Self {
+impl Refuses<LedgerError> for Code {
+	fn refusal(e: LedgerError) -> Refusal<Self> {
 		match e {
-			// A grant banking has not given the panel is configuration, not the operator's doing.
-			LedgerError::Refused(reason) if reason == "not_granted" => Self::Unavailable(reason),
-			LedgerError::Refused(reason) | LedgerError::Conflict(reason) => Self::Conflict(reason),
-			LedgerError::Invalid(said) => Self::BadRequest(said),
+			// Banking's machine reasons: the ones the panel acts on are words of its own; the rest
+			// are banking's vocabulary, which grows without the panel.
+			LedgerError::Refused(reason) | LedgerError::Conflict(reason) => {
+				let code = match reason.as_str() {
+					// A grant banking has not given the panel is configuration, not the operator's doing.
+					"not_granted" => Self::NotGranted,
+					"invoice_not_open" => Self::InvoiceNotOpen,
+					"invoice_processing" => Self::InvoiceProcessing,
+					"scope_frozen" => Self::ScopeFrozen,
+					"idempotency_conflict" => Self::IdempotencyConflict,
+					_ => Self::LedgerRefused,
+				};
+				Refusal::new(code, reason)
+			}
+			LedgerError::Invalid(said) => Refusal::new(Self::BadRequest, said),
 			// Every invoice the panel asks of banking is one it stored: banking not knowing it
 			// is banking's state gone wrong, not the caller's 404.
-			LedgerError::NotFound => Self::Internal(eyre::eyre!("the ledger does not know an invoice the panel stored")),
+			LedgerError::NotFound => Self::refusal(eyre::eyre!("the ledger does not know an invoice the panel stored")),
 			LedgerError::Unavailable(said) => {
 				tracing::warn!(reason = said, "the ScopeLedger could not be reached");
-				Self::Unavailable("ledger_unavailable".into())
+				Refusal::new(Self::LedgerUnavailable, "banking could not be reached")
 			}
-			LedgerError::Protocol(said) => Self::Internal(eyre::eyre!("the ScopeLedger broke its contract: {said}")),
+			LedgerError::Protocol(said) => Self::refusal(eyre::eyre!("the ScopeLedger broke its contract: {said}")),
 		}
 	}
 }
@@ -140,7 +151,7 @@ struct CreateBody {
 /// a ledger configured, banking's `not_granted`, or `ledger_unavailable`.
 async fn create_invoice(
 	State(panel): State<Panel>,
-	Extension(caller): Extension<Caller>,
+	caller: Caller,
 	l: MaybeLedger,
 	RequiredIdempotencyKey(key): RequiredIdempotencyKey,
 	Body(b): Body<CreateBody>,
@@ -182,19 +193,24 @@ async fn get_invoice(State(panel): State<Panel>, l: MaybeLedger, Ids(InvoicePath
 
 #[cfg(test)]
 mod tests {
+	use serde_json::{Value, json};
+
 	use super::*;
 
-	fn status(e: impl Into<ApiError>) -> u16 {
-		axum::response::IntoResponse::into_response(e.into()).status().as_u16()
+	fn answer(e: impl Into<Refusal<Code>>) -> (u16, Value) {
+		let refusal: Refusal<Code> = e.into();
+		let body = serde_json::to_value(&refusal).unwrap();
+		(axum::response::IntoResponse::into_response(refusal).status().as_u16(), body["code"].clone())
 	}
 
 	#[test]
 	fn banking_s_answers_map_to_the_contract() {
-		assert_eq!(status(LedgerError::Refused("not_granted".into())), 503);
-		assert_eq!(status(LedgerError::Refused("scope_frozen".into())), 409);
-		assert_eq!(status(LedgerError::Conflict("idempotency_conflict".into())), 409);
-		assert_eq!(status(LedgerError::Invalid("memo has a link".into())), 400);
-		assert_eq!(status(LedgerError::Unavailable("down".into())), 503);
-		assert_eq!(status(InvoiceError::NotFound), 404);
+		assert_eq!(answer(LedgerError::Refused("not_granted".into())), (503, json!("not_granted")));
+		assert_eq!(answer(LedgerError::Refused("scope_frozen".into())), (409, json!("scope_frozen")));
+		assert_eq!(answer(LedgerError::Refused("a_new_reason".into())), (409, json!("ledger_refused")));
+		assert_eq!(answer(LedgerError::Conflict("idempotency_conflict".into())), (409, json!("idempotency_conflict")));
+		assert_eq!(answer(LedgerError::Invalid("memo has a link".into())), (400, json!("bad_request")));
+		assert_eq!(answer(LedgerError::Unavailable("down".into())), (503, json!("ledger_unavailable")));
+		assert_eq!(answer(InvoiceError::NotFound), (404, json!("not_found")));
 	}
 }

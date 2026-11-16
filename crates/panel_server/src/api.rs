@@ -4,25 +4,22 @@
 //!
 //! Timestamps are RFC 3339 strings, money is minor units of its currency.
 
-use std::{borrow::Cow, collections::BTreeMap};
+use std::collections::BTreeMap;
 
 use axum::{
-	Extension, Json,
-	body::Bytes,
-	extract::{FromRequest, FromRequestParts, OptionalFromRequest, Path, Query, Request, State},
-	http::{HeaderMap, HeaderValue, StatusCode, header, request::Parts},
-	response::{IntoResponse, Response},
+	Json,
+	extract::{FromRequestParts, State},
+	http::{StatusCode, request::Parts},
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use ev_lib::api::{
-	Created, GenContext, JsonSchema, OperationInput, OperationOutput, Upserted,
-	openapi::{HeaderStyle, Operation, Parameter, ParameterData, ParameterSchemaOrContent, ReferenceOr, Response as Answer, SchemaObject, StatusCode as Status},
-	schemars::{Schema, SchemaGenerator, json_schema},
+	Body, Created, ErrorCode, GenContext, Ids, JsonSchema, OperationInput, Params, Refusal, Refuses, Upserted,
+	openapi::{HeaderStyle, Operation, Parameter, ParameterData, ParameterSchemaOrContent, ReferenceOr, SchemaObject},
 };
 use jiff::{SignedDuration, Timestamp, civil::Date, tz::TimeZone};
 use panel::{
 	Panel,
-	operator::{ActionError, Actor, CallOutcome, Done, EventView, FunnelBy, FunnelSlice, LeadQuery, LeadView, NewLead, Payment, Pii, StageMove, SuspectFilter},
+	operator::{ActionError, Actor, CallOutcome, Conflict, Done, EventView, FunnelBy, FunnelSlice, LeadQuery, LeadView, NewLead, Payment, Pii, StageMove, SuspectFilter},
 };
 use panel_core::{
 	booking::{BookingMatch, BookingStatus, DayPart, Provider},
@@ -31,18 +28,14 @@ use panel_core::{
 	ids::{JobId, LeadId, LocationId},
 	lead::Stage,
 };
-use sa_auth::{Leads, Pii as SeesPii, SourceKind};
+use sa_auth::{Analysis, Denied, Gate, Leads, PermissionSet, Pii as SeesPii, SourceKind, User, Work};
 use sa_core::{Invalid, ids::BrandId};
-use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use ts_rs::TS;
 use uuid::Uuid;
 
-use crate::{
-	gate::Caller,
-	http::{ApiRoute, Gate, Section, api_routes},
-};
+use crate::http::ApiRoute;
 
 /// The longest span the funnel sums over.
 const MAX_FUNNEL_DAYS: i32 = 366;
@@ -60,25 +53,24 @@ pub const IDEMPOTENCY_KEY: &str = "idempotency-key";
 
 fn amount(what: &str, v: i64) -> ApiResult<i64> {
 	if v.unsigned_abs() > MAX_MINOR.unsigned_abs() {
-		return Err(ApiError::BadRequest(format!("{what} is more than {MAX_MINOR} minor units")));
+		return Err(Refusal::new(Code::BadRequest, format!("{what} is more than {MAX_MINOR} minor units")));
 	}
 	Ok(v)
 }
 
 fn currency(v: &str) -> ApiResult<String> {
 	if !CURRENCIES.contains(&v) {
-		return Err(ApiError::BadRequest(format!("currency is one of {}", CURRENCIES.join(", "))));
+		return Err(Refusal::new(Code::BadRequest, format!("currency is one of {}", CURRENCIES.join(", "))));
 	}
 	Ok(v.to_owned())
 }
 
 pub(crate) fn routes() -> Vec<ApiRoute> {
 	use axum::http::Method as M;
-	let work = Gate::section(Section::Work);
-	let edit = work.may(Leads::Edit);
+	let work = Gate::USER.needs(Work::Read);
+	let edit = Gate::USER.needs(Leads::Edit);
 	vec![
 		ApiRoute::new(M::GET, "/me", Gate::USER, me),
-		ApiRoute::new(M::GET, "/openapi.json", Gate::USER.or_conductor(), openapi),
 		ApiRoute::new(M::GET, "/leads", work, list_leads),
 		ApiRoute::new(M::POST, "/leads", edit, create_lead),
 		ApiRoute::new(M::GET, "/leads/counts", work, lead_counts),
@@ -89,155 +81,137 @@ pub(crate) fn routes() -> Vec<ApiRoute> {
 		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/calls/attempt", edit, attempt_call),
 		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/calls/{attempt}/outcome", edit, call_outcome),
 		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/payments", edit, record_payment),
-		ApiRoute::new(M::GET, "/funnel", Gate::section(Section::Analysis), funnel),
+		ApiRoute::new(M::GET, "/funnel", Gate::USER.needs(Analysis::Read), funnel),
 		ApiRoute::new(M::GET, "/places", work, list_places),
 	]
 }
 
-/// Why a request failed, as the front end is told.
-#[derive(Debug)]
-pub enum ApiError {
-	BadRequest(String),
-	Forbidden,
+/// Why an `/api/v1` operation refuses, beside its gate's (`sa_auth::Denied`) and its extractors'
+/// (`ev_lib::api::Malformed`): a word the front end and an agent act on, `error` for a person.
+#[derive(Clone, Copy, Debug, Serialize, strum::VariantArray)]
+#[serde(rename_all = "snake_case")]
+pub enum Code {
+	/// What was sent does not pass a check; `error` names the field.
+	BadRequest,
 	NotFound,
-	Conflict(String),
-	/// A service the request needs is not configured or not answering; the message is a
-	/// machine reason, e.g. `invoices_unavailable`.
-	Unavailable(String),
-	Internal(eyre::Report),
+	/// `expected_updated_at` is not what the place or the pricing stands at: read it again.
+	Stale,
+	PlaceExists,
+	/// Another place is the landing of that GMB.
+	GmbTaken,
+	/// A place's settings refused; `error` names each field and why.
+	InvalidSettings,
+	/// A price list refused; `error` names its first problem by its path from the model's root.
+	InvalidPricing,
+	NoWonJob,
+	/// An `Idempotency-Key` used for another action, or another invoice.
+	IdempotencyKeyTaken,
+	BookingDone,
+	NoBooking,
+	NotBooked,
+	AlreadyAttached,
+	/// No banking ScopeLedger is configured.
+	InvoicesUnavailable,
+	/// Banking has not granted the panel its scope.
+	NotGranted,
+	/// Banking could not be reached; the same request may be sent again.
+	LedgerUnavailable,
+	InvoiceNotOpen,
+	InvoiceProcessing,
+	ScopeFrozen,
+	/// Banking's own idempotency refused the request.
+	IdempotencyConflict,
+	/// Banking refused for a reason of its own, which `error` carries.
+	LedgerRefused,
+	Internal,
 }
 
-/// What every failed operation answers, its status saying which failure.
-#[derive(JsonSchema, Serialize)]
-#[schemars(rename = "Error")]
-pub struct ErrorDto {
-	pub error: String,
-}
-
-impl IntoResponse for ApiError {
-	fn into_response(self) -> Response {
-		let (status, msg) = match self {
-			Self::BadRequest(m) => (StatusCode::BAD_REQUEST, m),
-			Self::Forbidden => (StatusCode::FORBIDDEN, "your permissions do not allow this".to_owned()),
-			Self::NotFound => (StatusCode::NOT_FOUND, "not found".to_owned()),
-			Self::Conflict(m) => (StatusCode::CONFLICT, m),
-			Self::Unavailable(m) => (StatusCode::SERVICE_UNAVAILABLE, m),
-			Self::Internal(e) => {
-				crate::report(&e, "operator API");
-				(StatusCode::INTERNAL_SERVER_ERROR, "internal error".to_owned())
-			}
-		};
-		(status, Json(ErrorDto { error: msg })).into_response()
+impl ErrorCode for Code {
+	fn status(self) -> StatusCode {
+		match self {
+			Self::BadRequest => StatusCode::BAD_REQUEST,
+			Self::NotFound => StatusCode::NOT_FOUND,
+			Self::InvalidSettings | Self::InvalidPricing => StatusCode::UNPROCESSABLE_ENTITY,
+			Self::Stale
+			| Self::PlaceExists
+			| Self::GmbTaken
+			| Self::NoWonJob
+			| Self::IdempotencyKeyTaken
+			| Self::BookingDone
+			| Self::NoBooking
+			| Self::NotBooked
+			| Self::AlreadyAttached
+			| Self::InvoiceNotOpen
+			| Self::InvoiceProcessing
+			| Self::ScopeFrozen
+			| Self::IdempotencyConflict
+			| Self::LedgerRefused => StatusCode::CONFLICT,
+			Self::InvoicesUnavailable | Self::NotGranted | Self::LedgerUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+			Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+		}
 	}
 }
 
-impl OperationOutput for ApiError {
-	type Inner = ErrorDto;
+pub(crate) type ApiResult<T> = Result<T, Refusal<Code>>;
 
-	fn operation_response(ctx: &mut GenContext, op: &mut Operation) -> Option<Answer> {
-		Json::<ErrorDto>::operation_response(ctx, op)
-	}
-
-	fn inferred_responses(ctx: &mut GenContext, op: &mut Operation) -> Vec<(Option<Status>, Answer)> {
-		Self::operation_response(ctx, op).map(|r| (None, r)).into_iter().collect()
+impl Refuses<eyre::Report> for Code {
+	fn refusal(e: eyre::Report) -> Refusal<Self> {
+		crate::report(&e, "operator API");
+		Refusal::new(Self::Internal, "internal error")
 	}
 }
 
-impl From<eyre::Report> for ApiError {
-	fn from(e: eyre::Report) -> Self {
-		Self::Internal(e)
+impl Refuses<Invalid> for Code {
+	fn refusal(e: Invalid) -> Refusal<Self> {
+		Refusal::new(Self::BadRequest, e.0)
 	}
 }
 
-impl From<Invalid> for ApiError {
-	fn from(e: Invalid) -> Self {
-		Self::BadRequest(e.0)
-	}
-}
-
-impl From<ActionError> for ApiError {
-	fn from(e: ActionError) -> Self {
+impl Refuses<ActionError> for Code {
+	fn refusal(e: ActionError) -> Refusal<Self> {
 		match e {
-			ActionError::NotFound => Self::NotFound,
-			ActionError::Conflict(m) => Self::Conflict(m.to_owned()),
-			ActionError::Invalid(e) => Self::BadRequest(e.0),
-			ActionError::Internal(e) => Self::Internal(e),
+			ActionError::NotFound => Refusal::new(Self::NotFound, "not found"),
+			ActionError::Conflict(c) => Refusal::new(
+				match c {
+					Conflict::NoWonJob => Self::NoWonJob,
+					Conflict::IdempotencyKeyTaken => Self::IdempotencyKeyTaken,
+					Conflict::BookingDone => Self::BookingDone,
+					Conflict::NoBooking => Self::NoBooking,
+					Conflict::NotBooked => Self::NotBooked,
+					Conflict::AlreadyAttached => Self::AlreadyAttached,
+				},
+				c.to_string(),
+			),
+			ActionError::Invalid(e) => Self::refusal(e),
+			ActionError::Internal(e) => Self::refusal(e),
 		}
 	}
 }
 
-pub(crate) type ApiResult<T> = Result<T, ApiError>;
+/// The person an `/api/v1` route's gate admitted, their `sub` as the user id it is.
+#[derive(Clone, Debug)]
+pub(crate) struct Caller {
+	pub user_id: Uuid,
+	pub email: String,
+	/// Their `sa:sites:*` permissions, and no others.
+	pub permissions: PermissionSet,
+}
 
-/// A JSON body, refused in the shape every failure has. Optional (`Option<Body<T>>`), an empty
-/// body or `null` is none, and the content type is not asked for.
-pub(crate) struct Body<T>(pub T);
+impl<S: Send + Sync> FromRequestParts<S> for Caller {
+	type Rejection = Refusal<Denied>;
 
-impl<T: DeserializeOwned, S: Send + Sync> FromRequest<S> for Body<T> {
-	type Rejection = ApiError;
-
-	async fn from_request(req: Request, state: &S) -> Result<Self, ApiError> {
-		<Json<T> as FromRequest<S>>::from_request(req, state)
-			.await
-			.map(|Json(v)| Self(v))
-			.map_err(|e| ApiError::BadRequest(e.body_text()))
+	async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Refusal<Denied>> {
+		let Ok(user) = User::from_request_parts(parts, state).await;
+		let user_id = Uuid::parse_str(&user.sub).map_err(|_| Refusal::new(Denied::Unauthenticated, format!("the assertion's sub {:?} is not a user id", user.sub)))?;
+		Ok(Self {
+			user_id,
+			email: user.email,
+			permissions: user.permissions,
+		})
 	}
 }
 
-impl<T: DeserializeOwned, S: Send + Sync> OptionalFromRequest<S> for Body<T> {
-	type Rejection = ApiError;
-
-	async fn from_request(req: Request, state: &S) -> Result<Option<Self>, ApiError> {
-		let raw = <Bytes as FromRequest<S>>::from_request(req, state).await.map_err(|e| ApiError::BadRequest(e.body_text()))?;
-		if raw.iter().all(u8::is_ascii_whitespace) {
-			return Ok(None);
-		}
-		let v: Option<T> = serde_json::from_slice(&raw).map_err(|e| ApiError::BadRequest(format!("the body: {e}")))?;
-		Ok(v.map(Self))
-	}
-}
-
-impl<T: JsonSchema> OperationInput for Body<T> {
-	fn operation_input(ctx: &mut GenContext, op: &mut Operation) {
-		Json::<T>::operation_input(ctx, op);
-	}
-}
-
-/// A query string, refused in the shape every failure has.
-pub(crate) struct Params<T>(pub T);
-
-impl<T: DeserializeOwned, S: Send + Sync> FromRequestParts<S> for Params<T> {
-	type Rejection = ApiError;
-
-	async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, ApiError> {
-		Query::<T>::from_request_parts(parts, state)
-			.await
-			.map(|Query(v)| Self(v))
-			.map_err(|e| ApiError::BadRequest(e.body_text()))
-	}
-}
-
-impl<T: JsonSchema> OperationInput for Params<T> {
-	fn operation_input(ctx: &mut GenContext, op: &mut Operation) {
-		Query::<T>::operation_input(ctx, op);
-	}
-}
-
-/// The ids in a path, by their names in it; one that is not an id at all names nothing: a 404.
-pub(crate) struct Ids<T>(pub T);
-
-impl<T: DeserializeOwned + Send, S: Send + Sync> FromRequestParts<S> for Ids<T> {
-	type Rejection = ApiError;
-
-	async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, ApiError> {
-		Path::<T>::from_request_parts(parts, state).await.map(|Path(v)| Self(v)).map_err(|_| ApiError::NotFound)
-	}
-}
-
-impl<T: JsonSchema> OperationInput for Ids<T> {
-	fn operation_input(ctx: &mut GenContext, op: &mut Operation) {
-		Path::<T>::operation_input(ctx, op);
-	}
-}
+impl OperationInput for Caller {}
 
 /// With `#[serde(default)]`: a field that is there, `null` included, apart from one left out.
 pub(crate) fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<T>, D::Error> {
@@ -261,22 +235,22 @@ fn idempotency_key(parts: &Parts) -> ApiResult<Option<String>> {
 	let Some(v) = parts.headers.get(IDEMPOTENCY_KEY) else { return Ok(None) };
 	let v = v.to_str().ok().filter(|v| (1..=128).contains(&v.len()) && v.bytes().all(|b| b.is_ascii_graphic()));
 	v.map(|v| Some(v.to_owned()))
-		.ok_or_else(|| ApiError::BadRequest("Idempotency-Key is 1–128 visible ASCII characters".into()))
+		.ok_or_else(|| Refusal::new(Code::BadRequest, "Idempotency-Key is 1–128 visible ASCII characters"))
 }
 
 impl<S: Send + Sync> FromRequestParts<S> for IdempotencyKey {
-	type Rejection = ApiError;
+	type Rejection = Refusal<Code>;
 
-	async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, ApiError> {
+	async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Refusal<Code>> {
 		idempotency_key(parts).map(Self)
 	}
 }
 
 impl<S: Send + Sync> FromRequestParts<S> for RequiredIdempotencyKey {
-	type Rejection = ApiError;
+	type Rejection = Refusal<Code>;
 
-	async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, ApiError> {
-		idempotency_key(parts)?.map(Self).ok_or_else(|| ApiError::BadRequest("Idempotency-Key is required".into()))
+	async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Refusal<Code>> {
+		idempotency_key(parts)?.map(Self).ok_or_else(|| Refusal::new(Code::BadRequest, "Idempotency-Key is required"))
 	}
 }
 
@@ -342,20 +316,20 @@ fn window(from: Option<Date>, to: Option<Date>) -> ApiResult<(Date, Date)> {
 	let to = to.unwrap_or_else(|| Timestamp::now().to_zoned(TimeZone::UTC).date());
 	let from = match from {
 		Some(d) => d,
-		None => to.checked_sub(SignedDuration::from_hours(24 * 29)).map_err(|e| ApiError::Internal(e.into()))?,
+		None => to.checked_sub(SignedDuration::from_hours(24 * 29)).map_err(|e| Refusal::from(eyre::Report::from(e)))?,
 	};
 	if from > to {
-		return Err(ApiError::BadRequest("from is after to".into()));
+		return Err(Refusal::new(Code::BadRequest, "from is after to"));
 	}
 	if (to - from).get_days() >= MAX_FUNNEL_DAYS {
-		return Err(ApiError::BadRequest(format!("at most {MAX_FUNNEL_DAYS} days at once")));
+		return Err(Refusal::new(Code::BadRequest, format!("at most {MAX_FUNNEL_DAYS} days at once")));
 	}
 	Ok((from, to))
 }
 
 /// The first instant of a UTC day.
 fn day_start(d: Date) -> ApiResult<Timestamp> {
-	Ok(d.to_zoned(TimeZone::UTC).map_err(|e| ApiError::Internal(e.into()))?.timestamp())
+	Ok(d.to_zoned(TimeZone::UTC).map_err(|e| Refusal::from(eyre::Report::from(e)))?.timestamp())
 }
 
 // ── /me ─────────────────────────────────────────────────────────────────────────────────
@@ -371,86 +345,11 @@ pub struct Me {
 }
 
 /// The caller, as the conductor vouched for them: their user id and `sa:sites:*` permissions.
-async fn me(Extension(caller): Extension<Caller>) -> Json<Me> {
+async fn me(caller: Caller) -> Json<Me> {
 	Json(Me {
 		sub: caller.user_id,
 		permissions: caller.permissions.iter().map(str::to_owned).collect(),
 	})
-}
-
-/// The `/api/v1` document as built at boot, and its ETag.
-#[derive(Clone)]
-pub(crate) struct Catalog {
-	json: Bytes,
-	etag: HeaderValue,
-}
-
-impl Catalog {
-	pub(crate) fn new() -> Self {
-		let doc = ev_lib::api::document("Service-Arb sites", env!("CARGO_PKG_VERSION"), "/api/v1", &api_routes(), ev_lib::api_docs!());
-		let json = serde_json::to_vec(&doc).expect("a document serializes");
-		let digest: String = Sha256::digest(&json).iter().take(8).map(|b| format!("{b:02x}")).collect();
-		Self {
-			json: json.into(),
-			etag: HeaderValue::from_str(&format!("\"{digest}\"")).expect("hex in quotes"),
-		}
-	}
-}
-
-/// The document, or the word that the caller's copy is it.
-pub(crate) enum Served {
-	Document(Catalog),
-	Unchanged(Catalog),
-}
-
-/// An OpenAPI 3.1 document.
-struct OpenApiDocument;
-
-impl JsonSchema for OpenApiDocument {
-	fn schema_name() -> Cow<'static, str> {
-		"OpenApi".into()
-	}
-
-	fn json_schema(_: &mut SchemaGenerator) -> Schema {
-		json_schema!({ "type": "object", "description": "An OpenAPI 3.1 document." })
-	}
-}
-
-impl IntoResponse for Served {
-	fn into_response(self) -> Response {
-		match self {
-			Self::Document(c) => ([(header::CONTENT_TYPE, HeaderValue::from_static("application/json")), (header::ETAG, c.etag)], c.json).into_response(),
-			Self::Unchanged(c) => (StatusCode::NOT_MODIFIED, [(header::ETAG, c.etag)]).into_response(),
-		}
-	}
-}
-
-impl OperationOutput for Served {
-	type Inner = ();
-
-	fn inferred_responses(ctx: &mut GenContext, op: &mut Operation) -> Vec<(Option<Status>, Answer)> {
-		let unchanged = Answer {
-			description: "The copy `If-None-Match` named is the document.".into(),
-			..Answer::default()
-		};
-		Json::<OpenApiDocument>::operation_response(ctx, op)
-			.map(|r| (Some(Status::Code(200)), r))
-			.into_iter()
-			.chain([(Some(Status::Code(304)), unchanged)])
-			.collect()
-	}
-}
-
-/// The OpenAPI document of every `/api/v1` operation, each with the permission that opens it
-/// (`x-permission`).
-///
-/// The whole of it, whoever asks; built at boot. It carries an ETag, and an `If-None-Match`
-/// naming it is answered 304. The conductor pulls it under its own assertion.
-async fn openapi(Extension(catalog): Extension<Catalog>, headers: HeaderMap) -> Served {
-	match headers.get(header::IF_NONE_MATCH) == Some(&catalog.etag) {
-		true => Served::Unchanged(catalog),
-		false => Served::Document(catalog),
-	}
 }
 
 // ── leads ───────────────────────────────────────────────────────────────────────────────
@@ -623,7 +522,7 @@ fn gmbs(raw: Option<&str>) -> ApiResult<Option<Vec<i64>>> {
 		return Ok(Some(Vec::new()));
 	}
 	raw.split(',')
-		.map(|id| id.parse().map_err(|_| ApiError::BadRequest(format!("gmb is GMB ids split by commas, not {raw}"))))
+		.map(|id| id.parse().map_err(|_| Refusal::new(Code::BadRequest, format!("gmb is GMB ids split by commas, not {raw}"))))
 		.collect::<ApiResult<_>>()
 		.map(Some)
 }
@@ -633,7 +532,7 @@ fn cursor_encode((at, brand, lead): &(Timestamp, String, String)) -> String {
 }
 
 fn cursor_decode(raw: &str) -> ApiResult<(Timestamp, String, String)> {
-	let bad = || ApiError::BadRequest("cursor is not one this API gave".into());
+	let bad = || Refusal::new(Code::BadRequest, "cursor is not one this API gave");
 	let text = String::from_utf8(URL_SAFE_NO_PAD.decode(raw).map_err(|_| bad())?).map_err(|_| bad())?;
 	let mut parts = text.splitn(3, '|');
 	let (Some(at), Some(brand), Some(lead)) = (parts.next(), parts.next(), parts.next()) else {
@@ -653,13 +552,13 @@ struct LeadPageDto {
 /// The leads, newest created first, a page at a time.
 ///
 /// Each filter narrows; `created_*` are UTC days, both included.
-async fn list_leads(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Params(q): Params<LeadsQuery>) -> ApiResult<Json<LeadPageDto>> {
+async fn list_leads(State(panel): State<Panel>, caller: Caller, Params(q): Params<LeadsQuery>) -> ApiResult<Json<LeadPageDto>> {
 	if let (Some(f), Some(t)) = (q.created_from, q.created_to)
 		&& f > t
 	{
-		return Err(ApiError::BadRequest("created_from is after created_to".into()));
+		return Err(Refusal::new(Code::BadRequest, "created_from is after created_to"));
 	}
-	let next_day = |d: Date| d.tomorrow().map_err(|e| ApiError::Internal(e.into())).and_then(day_start);
+	let next_day = |d: Date| d.tomorrow().map_err(|e| Refusal::from(eyre::Report::from(e))).and_then(day_start);
 	let query = LeadQuery {
 		stage: q.stage,
 		brand: q.brand,
@@ -678,7 +577,7 @@ async fn list_leads(State(panel): State<Panel>, Extension(caller): Extension<Cal
 		message_ref: q
 			.message_ref
 			.as_deref()
-			.map(|r| MessageRef::from_typed(r).map_err(|_| ApiError::BadRequest("message_ref is not like AQ-7K3F".into())))
+			.map(|r| MessageRef::from_typed(r).map_err(|_| Refusal::new(Code::BadRequest, "message_ref is not like AQ-7K3F")))
 			.transpose()?,
 		after: q.cursor.as_deref().map(cursor_decode).transpose()?,
 		limit: q.limit.unwrap_or(50),
@@ -742,9 +641,9 @@ struct LeadCardDto {
 }
 
 /// A lead's card: the lead and every event about it.
-async fn get_lead(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Ids(LeadPath { brand, lead }): Ids<LeadPath>) -> ApiResult<Json<LeadCardDto>> {
+async fn get_lead(State(panel): State<Panel>, caller: Caller, Ids(LeadPath { brand, lead }): Ids<LeadPath>) -> ApiResult<Json<LeadCardDto>> {
 	let now = Timestamp::now();
-	let (view, events) = panel.lead_card(&brand, &lead, pii(&caller), now).await?.ok_or(ApiError::NotFound)?;
+	let (view, events) = panel.lead_card(&brand, &lead, pii(&caller), now).await?.ok_or(Refusal::new(Code::NotFound, "not found"))?;
 	Ok(Json(LeadCardDto {
 		lead: lead_dto(view, now),
 		events: events.into_iter().map(event_dto).collect(),
@@ -774,7 +673,7 @@ struct NewLeadDto {
 }
 
 /// Creates a lead by hand (`lead.created`, kind `panel`).
-async fn create_lead(State(panel): State<Panel>, Extension(caller): Extension<Caller>, IdempotencyKey(key): IdempotencyKey, Body(b): Body<CreateLead>) -> ApiResult<Upserted<NewLeadDto>> {
+async fn create_lead(State(panel): State<Panel>, caller: Caller, IdempotencyKey(key): IdempotencyKey, Body(b): Body<CreateLead>) -> ApiResult<Upserted<NewLeadDto>> {
 	let new = NewLead {
 		brand: b.brand,
 		location: b.location,
@@ -783,7 +682,7 @@ async fn create_lead(State(panel): State<Panel>, Extension(caller): Extension<Ca
 		channel: match b.channel {
 			None => LeadChannel::PhoneInbound,
 			Some(c) if LeadChannel::MANUAL.contains(&c) => c,
-			Some(_) => return Err(ApiError::BadRequest("channel is one of phone_inbound, whatsapp, telegram".into())),
+			Some(_) => return Err(Refusal::new(Code::BadRequest, "channel is one of phone_inbound, whatsapp, telegram")),
 		},
 	};
 	let brand = new.brand.clone();
@@ -826,7 +725,7 @@ enum StageBody {
 /// the move is not from where the lead stands.
 async fn move_lead(
 	State(panel): State<Panel>,
-	Extension(caller): Extension<Caller>,
+	caller: Caller,
 	Ids(LeadPath { brand, lead }): Ids<LeadPath>,
 	IdempotencyKey(key): IdempotencyKey,
 	Body(b): Body<StageBody>,
@@ -857,7 +756,7 @@ struct MessagedBody {
 /// The customer wrote on a messenger, as the operator saw it (`lead.messaged`).
 async fn mark_messaged(
 	State(panel): State<Panel>,
-	Extension(caller): Extension<Caller>,
+	caller: Caller,
 	Ids(LeadPath { brand, lead }): Ids<LeadPath>,
 	IdempotencyKey(key): IdempotencyKey,
 	Body(b): Body<MessagedBody>,
@@ -873,7 +772,7 @@ async fn mark_messaged(
 /// A note's button: its Idempotency-Key is required, so a press repeated records nothing twice.
 async fn no_answer(
 	State(panel): State<Panel>,
-	Extension(caller): Extension<Caller>,
+	caller: Caller,
 	Ids(LeadPath { brand, lead }): Ids<LeadPath>,
 	RequiredIdempotencyKey(key): RequiredIdempotencyKey,
 ) -> ApiResult<Upserted<Journaled>> {
@@ -888,7 +787,7 @@ struct AttemptDto {
 }
 
 /// Starts a call to the customer (`call.attempted`); its outcome is logged against the attempt.
-async fn attempt_call(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Ids(LeadPath { brand, lead }): Ids<LeadPath>) -> ApiResult<Created<AttemptDto>> {
+async fn attempt_call(State(panel): State<Panel>, caller: Caller, Ids(LeadPath { brand, lead }): Ids<LeadPath>) -> ApiResult<Created<AttemptDto>> {
 	let attempt = panel.attempt_call(Actor(caller.user_id), &brand, &lead, Timestamp::now()).await?;
 	Ok(Created(AttemptDto { attempt_id: attempt.raw() }))
 }
@@ -910,12 +809,7 @@ struct OutcomeBody {
 }
 
 /// How an attempted call went (`call.logged`).
-async fn call_outcome(
-	State(panel): State<Panel>,
-	Extension(caller): Extension<Caller>,
-	Ids(AttemptPath { brand, lead, attempt }): Ids<AttemptPath>,
-	Body(b): Body<OutcomeBody>,
-) -> ApiResult<Created<Journaled>> {
+async fn call_outcome(State(panel): State<Panel>, caller: Caller, Ids(AttemptPath { brand, lead, attempt }): Ids<AttemptPath>, Body(b): Body<OutcomeBody>) -> ApiResult<Created<Journaled>> {
 	let call = CallOutcome { attempt, outcome: b.outcome };
 	let event = panel.log_call(Actor(caller.user_id), &brand, &lead, call, Timestamp::now()).await?;
 	Ok(Created(Journaled { event_id: event.raw() }))
@@ -936,7 +830,7 @@ struct PaymentBody {
 /// Records a payment for a lead's job, entered by hand (`payment.received`).
 async fn record_payment(
 	State(panel): State<Panel>,
-	Extension(caller): Extension<Caller>,
+	caller: Caller,
 	Ids(LeadPath { brand, lead }): Ids<LeadPath>,
 	IdempotencyKey(key): IdempotencyKey,
 	Body(b): Body<PaymentBody>,
@@ -1100,13 +994,7 @@ async fn funnel(State(panel): State<Panel>, Params(q): Params<FunnelQuery>) -> A
 	let selected = gmbs(q.gmb.as_deref())?;
 	let slices = panel.funnel_slices(from, to, q.brand.as_ref(), selected.as_deref(), by).await?;
 	let slices = match by {
-		FunnelBy::All => Slices::Whole(
-			slices
-				.into_iter()
-				.next()
-				.ok_or_else(|| ApiError::Internal(eyre::eyre!("the whole funnel came back empty")))?
-				.into(),
-		),
+		FunnelBy::All => Slices::Whole(slices.into_iter().next().ok_or_else(|| Refusal::from(eyre::eyre!("the whole funnel came back empty")))?.into()),
 		FunnelBy::Location => Slices::ByLocation {
 			by: By::Location,
 			locations: slices

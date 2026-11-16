@@ -50,7 +50,8 @@ async fn an_operator_reads_and_previews_but_changes_nothing() {
 	assert_eq!(b.get("/api/v1/pricing/Vifnet").await.0, StatusCode::NOT_FOUND, "not a brand id: names nothing");
 
 	let nobody = Client { who: As::Nobody, ..b };
-	assert_eq!(nobody.get(ITEM).await, (StatusCode::UNAUTHORIZED, json!({"error": "unauthenticated"})));
+	let (status, refused) = nobody.get(ITEM).await;
+	assert_eq!((status, &refused["code"]), (StatusCode::UNAUTHORIZED, &json!("unauthenticated")));
 }
 
 #[tokio::test]
@@ -82,7 +83,7 @@ async fn an_admin_saves_a_model_and_the_sites_read_it() {
 		(status, body),
 		(
 			StatusCode::UNPROCESSABLE_ENTITY,
-			json!({"error": "no input \"pets\"", "code": "noInput", "path": "needs.standard.inputs[2]"})
+			json!({"code": "invalid_pricing", "error": "needs.standard.inputs[2]: no input \"pets\""})
 		)
 	);
 	let mut unlabelled = cleaning.clone();
@@ -92,11 +93,14 @@ async fn an_admin_saves_a_model_and_the_sites_read_it() {
 		(status, body),
 		(
 			StatusCode::UNPROCESSABLE_ENTITY,
-			json!({"error": "no \"en\" label", "code": "labelMissing", "path": "inputs[1].options[0].labels.en"})
+			json!({"code": "invalid_pricing", "error": "inputs[1].options[0].labels.en: no \"en\" label"})
 		)
 	);
 	let (status, body) = b.put(ITEM, json!({"model": [], "expected_updated_at": null})).await;
-	assert_eq!((status, body), (StatusCode::UNPROCESSABLE_ENTITY, json!({"error": "an object", "code": "object", "path": ""})));
+	assert_eq!(
+		(status, body),
+		(StatusCode::UNPROCESSABLE_ENTITY, json!({"code": "invalid_pricing", "error": "model: an object"}))
+	);
 
 	let (status, saved) = b.put(ITEM, put.clone()).await;
 	assert_eq!(status, StatusCode::OK, "{saved}");
@@ -110,7 +114,10 @@ async fn an_admin_saves_a_model_and_the_sites_read_it() {
 	assert_eq!(b.get("/api/v1/pricing").await.1, json!({"items": [saved.clone()]}));
 
 	let (status, stale) = b.put(ITEM, put).await;
-	assert_eq!((status, stale), (StatusCode::CONFLICT, json!({"error": "stale", "current": saved})));
+	assert_eq!(
+		(status, stale),
+		(StatusCode::CONFLICT, json!({"code": "stale", "error": "the pricing changed since it was read"}))
+	);
 
 	let mut cheaper = cleaning.clone();
 	cheaper["minimumCents"] = json!(3900);
@@ -168,7 +175,7 @@ async fn the_preview_prices_the_vectors_cases() {
 		(status, answer),
 		(
 			StatusCode::UNPROCESSABLE_ENTITY,
-			json!({"error": "an integer from 1 to 100000000", "code": "int", "path": "roundToCents"})
+			json!({"code": "invalid_pricing", "error": "roundToCents: an integer from 1 to 100000000"})
 		)
 	);
 }

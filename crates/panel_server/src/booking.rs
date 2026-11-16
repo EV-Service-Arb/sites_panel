@@ -10,7 +10,7 @@
 use std::{sync::Arc, time::Duration};
 
 use axum::{
-	Extension, Json, Router,
+	Json, Router,
 	body::{Body as Raw, to_bytes},
 	error_handling::HandleErrorLayer,
 	extract::{Path, State},
@@ -18,7 +18,7 @@ use axum::{
 	response::{IntoResponse, Response},
 	routing::post,
 };
-use ev_lib::api::{Created, JsonSchema, Upserted};
+use ev_lib::api::{Body, Created, Ids, JsonSchema, Params, Upserted};
 use jiff::Timestamp;
 use panel::{
 	Panel,
@@ -26,7 +26,7 @@ use panel::{
 	operator::Actor,
 };
 use panel_core::{booking::BookingMatch, ids::LeadId};
-use sa_auth::Leads;
+use sa_auth::{Gate, Leads, Work};
 use sa_core::ids::BrandId;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -36,16 +36,15 @@ use tower_http::timeout::TimeoutLayer;
 use uuid::Uuid;
 
 use crate::{
-	api::{ApiResult, Body, IdempotencyKey, Ids, Journaled, LeadPath, Params, recorded},
-	gate::Caller,
-	http::{ApiRoute, Gate, Section},
+	api::{ApiResult, Caller, IdempotencyKey, Journaled, LeadPath, recorded},
+	http::ApiRoute,
 };
 
 /// The operator's booking routes.
 pub(crate) fn routes() -> Vec<ApiRoute> {
 	use Method as M;
-	let work = Gate::section(Section::Work);
-	let edit = work.may(Leads::Edit);
+	let work = Gate::USER.needs(Work::Read);
+	let edit = Gate::USER.needs(Leads::Edit);
 	vec![
 		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/booking", edit, book_lead),
 		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/booking/status", edit, close_booking),
@@ -147,7 +146,7 @@ enum SlotBody {
 /// 400 for an instant that is not one; 409 when the booking is not where the action starts from.
 async fn book_lead(
 	State(panel): State<Panel>,
-	Extension(caller): Extension<Caller>,
+	caller: Caller,
 	Ids(LeadPath { brand, lead }): Ids<LeadPath>,
 	IdempotencyKey(key): IdempotencyKey,
 	Body(b): Body<SlotBody>,
@@ -173,7 +172,7 @@ struct CloseBody {
 /// 409 unless the lead is booked.
 async fn close_booking(
 	State(panel): State<Panel>,
-	Extension(caller): Extension<Caller>,
+	caller: Caller,
 	Ids(LeadPath { brand, lead }): Ids<LeadPath>,
 	IdempotencyKey(key): IdempotencyKey,
 	Body(b): Body<CloseBody>,
@@ -243,7 +242,7 @@ struct BookingsDto {
 }
 
 /// The providers' bookings no lead was found for, the next slot first; at most 200.
-async fn unmatched_bookings(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Params(q): Params<UnmatchedQuery>) -> ApiResult<Json<BookingsDto>> {
+async fn unmatched_bookings(State(panel): State<Panel>, caller: Caller, Params(q): Params<UnmatchedQuery>) -> ApiResult<Json<BookingsDto>> {
 	let rows = panel.unmatched_bookings(q.brand.as_ref(), crate::api::pii(&caller), q.limit.unwrap_or(100)).await?;
 	Ok(Json(BookingsDto {
 		bookings: rows.into_iter().map(ProviderBookingDto::from).collect(),
@@ -267,12 +266,7 @@ struct AttachBody {
 ///
 /// 404 for a booking not known, or no such lead of its brand; 409 when it was joined by hand
 /// already.
-async fn attach_booking(
-	State(panel): State<Panel>,
-	Extension(caller): Extension<Caller>,
-	Ids(BookingPath { id }): Ids<BookingPath>,
-	Body(b): Body<AttachBody>,
-) -> ApiResult<Created<Journaled>> {
+async fn attach_booking(State(panel): State<Panel>, caller: Caller, Ids(BookingPath { id }): Ids<BookingPath>, Body(b): Body<AttachBody>) -> ApiResult<Created<Journaled>> {
 	let event = panel.attach_booking(Actor(caller.user_id), id, &b.lead, Timestamp::now()).await?;
 	Ok(Created(Journaled { event_id: event.raw() }))
 }

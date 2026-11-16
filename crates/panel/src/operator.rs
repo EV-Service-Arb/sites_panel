@@ -32,14 +32,32 @@ pub enum ActionError {
 	/// No such lead, or no such call attempt of it.
 	#[error("not found")]
 	NotFound,
-	/// The lead is not where the action needs it: completing a job never won.
-	#[error("{0}")]
-	Conflict(&'static str),
+	/// The lead is not where the action needs it.
+	#[error(transparent)]
+	Conflict(#[from] Conflict),
 	/// What was entered does not pass the registry; the reason names the field.
 	#[error("{0}")]
 	Invalid(Invalid),
 	#[error(transparent)]
 	Internal(#[from] eyre::Report),
+}
+
+/// Where a lead stands that an action does not fit.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
+pub enum Conflict {
+	#[error("the lead has no won job to complete")]
+	NoWonJob,
+	/// A retry's key that another action of another caller took.
+	#[error("this idempotency key is taken")]
+	IdempotencyKeyTaken,
+	#[error("the lead's booking is done: it is neither booked again nor cleared")]
+	BookingDone,
+	#[error("the lead has no booking to clear")]
+	NoBooking,
+	#[error("only a booked slot is closed")]
+	NotBooked,
+	#[error("the booking is attached to this lead already")]
+	AlreadyAttached,
 }
 
 /// Who acts: the concierge user id of the signed-in operator or admin.
@@ -314,7 +332,7 @@ impl Panel {
 			StageMove::Lost { reason, note } => ("lead.lost", optional(&[("reason", Some(Value::from(reason))), ("note", note.map(Value::from))])),
 			StageMove::Completed => {
 				if current.job_id.is_none() {
-					return Err(ActionError::Conflict("the lead has no won job to complete"));
+					return Err(Conflict::NoWonJob.into());
 				}
 				("job.completed", json!({}))
 			}
@@ -406,7 +424,7 @@ impl Panel {
 			return Ok(None);
 		};
 		if kind != "panel" || source != by.0.to_string() {
-			return Err(ActionError::Conflict("this idempotency key is taken"));
+			return Err(Conflict::IdempotencyKeyTaken.into());
 		}
 		let lead = LeadId::parse(lead.as_deref().unwrap_or_default()).map_err(|e| eyre::eyre!("a journaled lead id: {e}"))?;
 		Ok(Some(Done {

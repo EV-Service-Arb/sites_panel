@@ -295,13 +295,15 @@ async fn without_a_ledger_or_a_grant_the_answer_is_503() {
 	let conductor = Conductor::new("k1");
 	let unconfigured = app(panel(&db).await, &conductor, None);
 	let b = user(&unconfigured, &conductor, "sa:admin");
-	assert_eq!(issue(&b, Some("k-1"), terms()).await, (StatusCode::SERVICE_UNAVAILABLE, json!({"error": "invoices_unavailable"})));
+	let (status, refused) = issue(&b, Some("k-1"), terms()).await;
+	assert_eq!((status, &refused["code"]), (StatusCode::SERVICE_UNAVAILABLE, &json!("invoices_unavailable")));
 	assert_eq!(b.get("/api/v1/invoices").await, (StatusCode::OK, json!({"invoices": []})), "the list needs no banking");
 
 	let fake = Fake::default();
 	let ungranted = app(panel(&db).await, &conductor, Some(serve_fake(fake.clone()).await));
 	let b = user(&ungranted, &conductor, "sa:admin");
-	assert_eq!(issue(&b, Some("k-1"), terms()).await, (StatusCode::SERVICE_UNAVAILABLE, json!({"error": "not_granted"})));
+	let (status, refused) = issue(&b, Some("k-1"), terms()).await;
+	assert_eq!((status, &refused["code"]), (StatusCode::SERVICE_UNAVAILABLE, &json!("not_granted")));
 	assert_eq!(b.get("/api/v1/invoices").await, (StatusCode::OK, json!({"invoices": []})), "a refusal leaves no row");
 
 	fake.bank().granted = true;
@@ -317,7 +319,8 @@ async fn a_lost_answer_is_repaired_by_the_retry_or_the_next_read() {
 	let b = user(&app, &conductor, "sa:admin");
 
 	fake.bank().lose_next_answer = true;
-	assert_eq!(issue(&b, Some("k-1"), terms()).await, (StatusCode::SERVICE_UNAVAILABLE, json!({"error": "ledger_unavailable"})));
+	let (status, refused) = issue(&b, Some("k-1"), terms()).await;
+	assert_eq!((status, &refused["code"]), (StatusCode::SERVICE_UNAVAILABLE, &json!("ledger_unavailable")));
 	let (_, list) = b.get("/api/v1/invoices").await;
 	let row = &list["invoices"][0];
 	assert_eq!((row["state"].as_str(), row["invoice_id"].clone()), (Some("creating"), Value::Null));

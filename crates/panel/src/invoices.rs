@@ -125,9 +125,8 @@ pub trait Ledger: Sync {
 pub enum InvoiceError {
 	#[error(transparent)]
 	Invalid(#[from] Invalid),
-	/// The idempotency key was used for another invoice.
-	#[error("{0}")]
-	Conflict(&'static str),
+	#[error("this Idempotency-Key was used for another invoice")]
+	KeyTaken,
 	#[error("no such invoice")]
 	NotFound,
 	#[error("the ledger: {0}")]
@@ -165,7 +164,7 @@ impl Panel {
 			Some(row) => {
 				let same = row.amount == amount && row.memo == new.memo && row.expires_at.duration_since(row.created_at) == lifetime;
 				if !same {
-					return Err(InvoiceError::Conflict("this Idempotency-Key was used for another invoice"));
+					return Err(InvoiceError::KeyTaken);
 				}
 				(row, true)
 			}

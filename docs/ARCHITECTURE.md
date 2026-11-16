@@ -80,10 +80,10 @@ crates/panel/                        the engine
                                      per change, each with its `down`
 crates/panel_server/                 the `sites_panel` binary: CLI and HTTP, thin over `Panel`
   src/http.rs                        the router: what each path takes, its bounds; the /api/v1
-                                     route table (`ev_lib::api::Route`) and each route's `Gate`
-  src/gate.rs                        the conductor's assertion, verified, per kind of route
+                                     route table (`ev_lib::api::Route`, each row's `sa_auth::Gate`)
+                                     and its document; ingest's source assertion
   src/api.rs                         the operator API: JSON over the engine's `operator` module;
-                                     the extractors every route shares; the OpenAPI document
+                                     the refusal codes (`Code`) and the caller (`Caller`)
   src/conductor.rs                   /api/conductor/*: the change feed, the notes, the receipts;
                                      the fan-out's schedule
   src/places.rs                      a place's settings: the editor's routes, and the sites'
@@ -192,20 +192,22 @@ Conductor                             /api/conductor/*, GET /api/v1/openapi.json
 ```
 
 Anything else on those routes — none, another key, another service, request or body, an
-expired one, another principal — is `401 {"error": "unauthenticated"}`, its reason logged.
-`/api/internal/*`, `/api/hooks/*`, `/mfe/*` and `/health` take none. Each `/api/v1` route sits
-under a section — Work (`sa:sites:work:read`), Analysis (`sa:sites:analysis:read`) — or none
-(`/me`); outside it, `403`. Actions ask their own permission on top (`sa:sites:work:leads:edit`,
-`sa:sites:work:pii:see`, `sa:sites:work:places:edit`, `sa:sites:work:pricing:edit`,
-`sa:sites:work:invoices:create`, `sa:sites:analysis:experiments:edit`), checked by the gate
-with the section's (`http::Gate`). How fresh a permission is, CSRF, and the session are the
-conductor's. `http::api_routes` is the table the router and the document are built from.
+expired one, another principal — is `401 {"code": "unauthenticated", "error": …}`, its reason
+logged. `/api/internal/*`, `/api/hooks/*`, `/mfe/*` and `/health` take none. Each `/api/v1` row
+names the one permission its gate checks (`sa_auth::Gate`, the operation's `x-permission`): a
+read `sa:sites:work:read` or `sa:sites:analysis:read`, a write the action's own
+(`sa:sites:work:leads:edit`, `…:places:edit`, `…:pricing:edit`, `…:invoices:create`,
+`sa:sites:analysis:experiments:edit`), `/me` none; without it, `403 forbidden`.
+`sa:sites:work:pii:see` decides what a lead read shows. How fresh a permission is, CSRF, and the
+session are the conductor's. `http::api_routes` is the table the router and the document are
+built from.
 
 ## The operator API, `/api/v1`
 
 JSON; timestamps RFC 3339, money in minor units (|amount| ≤ 10^10, currency one of EUR,
 USD, GBP, AUD — checked here, not in the registry, so a rebuild never re-judges old events),
-errors `{"error": "…"}` with 400 / 403 / 404 / 409 / 503. Writes journal an event of kind
+refusals `{code, error}`: `code` one of the operation's `x-errors` (its gate's, its extractors'
+and `api::Code`, one status per word), `error` for a person. Writes journal an event of kind
 `panel` (manual), so they go through the same registry and projections as ingest.
 
 `POST /leads`, `…/stage` and `…/payments` take an optional `Idempotency-Key` header (1–128
@@ -217,13 +219,14 @@ every request is a new event (`201`).
 What each operation takes and answers, and why it refuses, is its handler's: its signature is
 the schema and its `///` the description of `GET /openapi.json`, the OpenAPI document built at
 boot from `http::api_routes` (`ev_lib::api`), each operation's `x-permission` the permission that
-opens it. The conductor pulls it under its own assertion (`ETag`, 304 to `If-None-Match`). An id
+opens it and `x-errors` the codes it refuses with. It is served beside the table, not in it
+(`ev_lib::api::serve`, to a user or the conductor's own assertion, `ETag`, 304 to
+`If-None-Match`). An id
 in a path that is not one names nothing: 404. The operations, held to the table by
 `tests/operations.rs`:
 
 ```text
 GET    /me
-GET    /openapi.json
 GET    /leads
 POST   /leads
 GET    /leads/counts
@@ -552,7 +555,7 @@ GET    /api/internal/brands/{brand}/pricing?locale   no assertion; with the loca
 
 Under `/api/v1` (Work, saving and removing `sa:sites:work:pricing:edit`): every brand's
 pricing, one brand's, its changes, a save or a removal (`expected_updated_at` checked: 409
-`stale` with the current one), and the preview of a draft.
+`stale`, the editor reads the brand again), and the preview of a draft.
 
 - **A change is one write transaction**, as a place's: the current model and the brand's
   locales read under the write lock, `expected_updated_at` compared, the model checked and

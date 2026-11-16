@@ -38,7 +38,7 @@ use uuid::Uuid;
 
 use crate::{
 	Outcome, Panel,
-	operator::{ActionError, Actor, Done, Pii, idempotent_id, subject_of},
+	operator::{ActionError, Actor, Conflict, Done, Pii, idempotent_id, subject_of},
 	store::{
 		bookings::{self, BookingRow},
 		reads::Sealed,
@@ -188,10 +188,9 @@ pub enum SlotAction {
 
 fn conflict(status: BookingStatus, action: OperatorAction) -> ActionError {
 	ActionError::Conflict(match (action, status) {
-		(OperatorAction::Set, _) => "the lead's booking is done: a done booking is not booked again",
-		(OperatorAction::Clear, BookingStatus::None) => "the lead has no booking to clear",
-		(OperatorAction::Clear, _) => "a done booking is not cleared",
-		(OperatorAction::Close(_), _) => "only a booked slot is closed",
+		(OperatorAction::Clear, BookingStatus::None) => Conflict::NoBooking,
+		(OperatorAction::Set | OperatorAction::Clear, _) => Conflict::BookingDone,
+		(OperatorAction::Close(_), _) => Conflict::NotBooked,
 	})
 }
 
@@ -436,7 +435,7 @@ impl Panel {
 		};
 		let current = self.lead_row(&row.brand_id, lead).await?.ok_or(ActionError::NotFound)?;
 		if row.lead.as_ref().is_some_and(|(l, m)| l == lead && *m == BookingMatch::Manual) {
-			return Err(ActionError::Conflict("the booking is attached to this lead already"));
+			return Err(Conflict::AlreadyAttached.into());
 		}
 		let properties = json!({ "provider": row.provider.as_str(), "externalRef": row.external_ref });
 		Ok(self.act(by, None, "booking.attached", subject_of(&current), properties, None, now).await?.value.1)
