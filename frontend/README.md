@@ -48,7 +48,7 @@ After a change under `src/`, `npm run build` and reload. Checks: `npm run typech
 
 ## How it is served
 
-sites serves `dist/` at `/mfe/*` (`PANEL_MFE_DIR`), the conductor forwards it as `/sites/mfe/*`: the entry
+sites serves `dist/` at `/mfe/*` (`PANEL_MFE_DIR`), the conductor forwards it as `/mfe/sites/*`: the entry
 `mfe-sites.js` and `mfe-sites.css` under stable names (`no-cache`), the chunks content-hashed (`immutable`). The
 entry adds `mfe-sites.css` as a `<link>` beside itself; the host moves it under its own layers. Utilities are
 `important` and scoped to the two tags (`scripts/scope-css.mjs`): the host's preflight must not beat them, and they

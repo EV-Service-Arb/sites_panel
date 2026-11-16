@@ -194,7 +194,7 @@
             "SCOPE_LEDGER_TLS_CERT_PEM_FILE"
             "SCOPE_LEDGER_TLS_KEY_PEM_FILE"
           ];
-          # No public route: the conductor forwards /api/sites/*, ingest, /api/hooks and /sites/mfe/*
+          # No public route: the conductor forwards /api/sites/*, ingest, /api/hooks and /mfe/sites/*
           # here by service DNS; the landings read /api/internal the same way.
           egress = {
             # banking's ScopeLedger

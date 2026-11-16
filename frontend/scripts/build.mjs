@@ -1,6 +1,6 @@
 // Builds dist/: `mfe-sites.js` (defines <mfe-sites-panel> and <mfe-sites-nav>) and `mfe-sites.css` under
 // stable names, the screens as hashed chunks under dist/chunks/. sites serves dist/ at /mfe/*, the conductor
-// forwards it as /sites/mfe/*.
+// forwards it as /mfe/sites/*.
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";

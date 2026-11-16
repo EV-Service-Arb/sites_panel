@@ -1,7 +1,7 @@
 /**
  * A stand-in for the conductor and sites together, for working on the bundle without Rust: the harness page
  * (dev/index.html, the conductor's part: it mounts both elements and relays the live socket), the bundle from
- * dist/ at /sites/mfe/, sites' operator API at /api/sites over an in-memory set of leads, the conductor's live
+ * dist/ at /mfe/sites/, sites' operator API at /api/sites over an in-memory set of leads, the conductor's live
  * socket at /api/v1/live and a sign-in that is instant. Same gate as the conductor: 401 without a session, CSRF
  * on writes.
  *
@@ -413,8 +413,8 @@ const server = createServer((req, res) => {
     api(req, res, url).catch((e: unknown) => send(res, 500, { error: String(e) }));
     return;
   }
-  if (url.pathname.startsWith("/sites/mfe/")) {
-    serveFile(res, join(DIST, url.pathname.slice("/sites/mfe/".length))).catch(() => send(res, 404, { error: "not found" }));
+  if (url.pathname.startsWith("/mfe/sites/")) {
+    serveFile(res, join(DIST, url.pathname.slice("/mfe/sites/".length))).catch(() => send(res, 404, { error: "not found" }));
     return;
   }
   if (url.pathname === "/" || url.pathname.startsWith("/sites")) {

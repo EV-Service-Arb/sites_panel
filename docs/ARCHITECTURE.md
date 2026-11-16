@@ -12,7 +12,7 @@ landings, bots ─HMAC─▶ conductor ──Source assertion + body─▶ /api/
 conductor's hubs ──Conductor assertion─────────────────▶ /api/conductor/*      (live, Telegram)
 landings ─────────────────────────────── no assertion ─▶ /api/internal/*
 providers ────────────────────────────── no assertion ─▶ /api/hooks/booking/*
-browser ─────────────────── through the conductor ─────▶ /mfe/*                (its /sites/mfe/*)
+browser ─────────────────── through the conductor ─────▶ /mfe/*                (its /mfe/sites/*)
 ```
 
 A cargo workspace of four crates; dependencies point inwards only.
@@ -856,7 +856,7 @@ filters by where the booking stands; `Lead.booking` is the lead's booking folded
 - **One image, no public route.** The image carries the binary and the front end's bundle
   (`PANEL_MFE_DIR`; `mfe-sites.js` / `mfe-sites.css` `no-cache`, the hashed chunks `immutable`).
   The conductor reaches it by service DNS for `/api/sites/*` (→ `/api/v1/*`), ingest,
-  `/api/hooks` and `/sites/mfe/*` (→ `/mfe/*`), and reads `/api/conductor/*`.
+  `/api/hooks` and `/mfe/sites/*` (→ `/mfe/*`), and reads `/api/conductor/*`.
 - **The contract** (`nix eval .#containers.<system>.sites_panel.contract`) names the port
   (59121), `/health`, `APP_ENV=production`, the variables required, secret and optional,
   `PANEL_DB_PATH`, the volume (`mounts = [ "/data" ]`) and the SQLite file on it to replicate
