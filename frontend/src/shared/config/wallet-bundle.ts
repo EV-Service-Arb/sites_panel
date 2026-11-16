@@ -20,7 +20,7 @@ export const WALLET_SCRIPT = `${WALLET_ORIGIN}/mfe/banking/wallet.js`;
  * wallet` (`wallet.js=<hex>`) as SRI. banking's registry carries no integrity, so a release that
  * changes wallet.js turns the wallet and the pay buttons "unavailable" until this is updated.
  */
-export const WALLET_SCRIPT_INTEGRITY = "sha256-zadW4JcniiNqexYM9sDrnZYhH06zTT5b2yWTitX30Dw= sha256-dTHZ9KONZftLYVv+aqUdkS0o8kCqt7O/d2MPeHxvQ0U=";
+export const WALLET_SCRIPT_INTEGRITY = "sha256-aZpra0jH4g10DnChOpbn+xtkhw+S2VSNlUl/7p7J0c0= sha256-zadW4JcniiNqexYM9sDrnZYhH06zTT5b2yWTitX30Dw=";
 
 /** The lowest `static apiVersion` of the bundle's elements that speaks this contract. */
 export const WALLET_API_VERSION = 2;
