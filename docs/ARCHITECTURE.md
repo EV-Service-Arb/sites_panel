@@ -250,6 +250,7 @@ GET    /gmbs
 GET    /pricing
 GET    /pricing/{brand}
 PUT    /pricing/{brand}
+PUT    /pricing/{brand}/locales
 DELETE /pricing/{brand}
 POST   /pricing/{brand}/preview
 GET    /pricing/{brand}/changes
@@ -525,9 +526,9 @@ intermediate product rounded half up to the cent, the total to `roundToCents`, t
 
 - **A brand's locales.** Every input's and option's label must be in each locale the brand's
   sites speak, or a site refuses the whole model; the panel refuses to save one
-  (`labelMissing`, `contracts/vectors/pricing/locales.json`). The locales are `fr,en` unless set by `sites_panel pricing locales <brand>
-  fr,en` (`brand_locales`); a model saved before a locale was added is kept for the editor but
-  not served (`{}`) until saved with the labels.
+  (`labelMissing`, `contracts/vectors/pricing/locales.json`). The locales are `fr,en` unless set
+  (`PUT /api/v1/pricing/{brand}/locales`, `brand_locales`); a model saved before a locale was
+  added is kept for the editor but not served (`{}`) until saved with the labels.
 - **Problems.** A refusal names the first problem by its path from the model's root and its
   code (`PRICING_CODES`): `needs.standard.inputs[2]` `noInput`, `inputs[0].options[1].labels.en`
   `labelMissing`. JSON objects are read sorted here and in insertion order in TS, so with

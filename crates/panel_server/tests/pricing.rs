@@ -151,6 +151,35 @@ async fn an_admin_saves_a_model_and_the_sites_read_it() {
 
 /// The editor's preview is what the site shows: the vectors' cases, priced over HTTP, to the cent.
 #[tokio::test]
+async fn an_admin_sets_the_locales_a_model_must_label_and_the_sites_stop_on_a_missing_one() {
+	let db = TestDb::create().await;
+	let conductor = Conductor::new("k1");
+	let app = app(panel(&db).await, &conductor);
+	let admin = Client {
+		app: &app,
+		conductor: &conductor,
+		who: As::user(alias("sa:admin")),
+	};
+	let locales = format!("{ITEM}/locales");
+	let (status, saved) = admin.put(ITEM, json!({"model": fixture("valid/cleaning.json"), "expected_updated_at": null})).await;
+	assert_eq!(status, StatusCode::OK, "{saved}");
+
+	let (status, item) = admin.put(&locales, json!({"locales": ["fr", "en", "de"]})).await;
+	assert_eq!((status, &item["locales"]), (StatusCode::OK, &json!(["fr", "en", "de"])), "{item}");
+	assert_eq!(admin.get(LIVE).await, (StatusCode::OK, json!({})), "a model without the new locale's labels is not served");
+
+	for refused in [json!({"locales": []}), json!({"locales": ["fr", "fr"]}), json!({"locales": ["FR"]})] {
+		let (status, body) = admin.put(&locales, refused.clone()).await;
+		assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}: {body}");
+	}
+	let operator = Client {
+		who: As::user(alias("sa:operator")),
+		..admin
+	};
+	assert_eq!(operator.put(&locales, json!({"locales": ["fr"]})).await.0, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn the_preview_prices_the_vectors_cases() {
 	let db = TestDb::create().await;
 	let conductor = Conductor::new("k1");

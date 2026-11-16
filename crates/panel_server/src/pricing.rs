@@ -19,7 +19,7 @@ use panel::{
 	place::Expected,
 	pricing::{ChangeKind, PricingError, PricingView},
 };
-use panel_core::pricing::{ModelPart, PricingModel};
+use panel_core::pricing::{LocaleTag, ModelPart, PricingModel, parse_locales};
 use sa_auth::{Gate, Pricing, Work};
 use sa_core::ids::BrandId;
 use serde::{Deserialize, Serialize};
@@ -47,6 +47,7 @@ pub(crate) fn routes() -> Vec<ApiRoute> {
 		ApiRoute::new(M::POST, "/pricing/{brand}/preview", work, preview_price),
 		ApiRoute::new(M::PUT, "/pricing/{brand}", edit, set_pricing),
 		ApiRoute::new(M::DELETE, "/pricing/{brand}", edit, remove_pricing),
+		ApiRoute::new(M::PUT, "/pricing/{brand}/locales", edit, set_locales),
 	]
 }
 
@@ -193,6 +194,21 @@ struct RemoveBody {
 	#[serde(deserialize_with = "Option::deserialize")]
 	#[schemars(required)]
 	expected_updated_at: Option<Timestamp>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(rename = "SetLocales")]
+struct LocalesBody {
+	/// 1 to 8, each once: every label of the brand's model must be in each.
+	locales: Vec<LocaleTag>,
+}
+
+/// Sets the locales a brand's sites speak. The saved model is not checked again: one missing a
+/// new locale's labels is kept for the editor and not served until saved with them.
+async fn set_locales(State(panel): State<Panel>, caller: Caller, Ids(BrandPath { brand }): Ids<BrandPath>, Body(b): Body<LocalesBody>) -> ApiResult<Json<ItemDto>> {
+	let locales = parse_locales(b.locales.iter().map(LocaleTag::as_str))?;
+	Ok(Json(panel.set_brand_locales(&editor(&caller), &brand, &locales, Timestamp::now()).await?.into()))
 }
 
 /// Takes a brand's price list off its sites: they keep their baked one.
