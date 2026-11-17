@@ -35,10 +35,11 @@
         # `@evinvest/sites-contract`'s — committed.
         gen = pkgs.writeShellApplication {
           name = "gen";
-          runtimeInputs = [ rust pkgs.git ];
+          runtimeInputs = [ rust pkgs.git pkgs.nodejs ];
           text = ''
             cd "$(git rev-parse --show-toplevel)"
-            exec cargo run -q -p panel_gen "$@"
+            cargo run -q -p panel_gen "$@"
+            cd frontend && npm run -s gen:api
           '';
         };
 
@@ -51,7 +52,7 @@
               generated = {
                 enable = true;
                 name = "regenerate derived files";
-                entry = "bash -c '${gen}/bin/gen && git add -A frontend/src/entities/lead/model/generated.ts frontend/src/shared/config/generated.ts frontend/src/shared/api/generated.ts ts/sites-contract/src/generated'";
+                entry = "bash -c '${gen}/bin/gen && git add -A frontend/src/entities/lead/model/generated.ts frontend/src/shared/config/generated.ts frontend/src/shared/api/generated.ts frontend/src/shared/api/openapi.json frontend/src/shared/api/schema.ts ts/sites-contract/src/generated'";
                 pass_filenames = false;
                 require_serial = true;
               };
@@ -133,7 +134,7 @@
               && (under "frontend" || under "ts/sites-contract/src" || (type == "directory" && builtins.elem rel [ "ts" "ts/sites-contract" ]));
           };
           sourceRoot = "source/frontend";
-          npmDepsHash = "sha256-j+Ggy09/vwhIzGnJCTLfDb3v+MmYEDs+WE4XhNJqFgs=";
+          npmDepsHash = "sha256-h6VsIcxY6/DJxGqGeB8PhdHtlHi8Fe7Lpr3gaF7vXTc=";
           installPhase = ''
             runHook preInstall
             cp -r dist "$out"
