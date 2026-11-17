@@ -187,12 +187,11 @@ async fn set_pricing(State(panel): State<Panel>, caller: Caller, Ids(BrandPath {
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[schemars(rename = "RemovePricing")]
+#[schemars(rename = "RemovePricing", extend("required" = ["expected_updated_at"]))] // `#[schemars(required)]` on an Option drops its null
 struct RemoveBody {
 	/// Required: taking a brand's prices off its sites over a version the editor did not see is
 	/// not something to do by default. Null for pricing never set.
 	#[serde(deserialize_with = "Option::deserialize")]
-	#[schemars(required)]
 	expected_updated_at: Option<Timestamp>,
 }
 

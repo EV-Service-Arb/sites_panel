@@ -273,11 +273,10 @@ async fn restore_place(State(panel): State<Panel>, caller: Caller, Ids(PlacePath
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[schemars(rename = "GmbLink")]
+#[schemars(rename = "GmbLink", extend("required" = ["gmb_id"]))] // `#[schemars(required)]` on an Option drops its null
 struct GmbBody {
 	/// Required: `null` unlinks.
 	#[serde(deserialize_with = "Option::deserialize")]
-	#[schemars(required)]
 	gmb_id: Option<i64>,
 }
 

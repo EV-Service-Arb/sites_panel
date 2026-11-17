@@ -919,7 +919,7 @@ export interface components {
              * Format: int64
              * @description Required: `null` unlinks.
              */
-            gmb_id: number;
+            gmb_id: number | null;
         };
         /** @description A GMB's place and how its leads stand. */
         GmbPlace: {
@@ -1604,7 +1604,7 @@ export interface components {
              * @description Required: taking a brand's prices off its sites over a version the editor did not see is
              *     not something to do by default. Null for pricing never set.
              */
-            expected_updated_at: string;
+            expected_updated_at: string | null;
         };
         RevertPlaceSettings: {
             /**

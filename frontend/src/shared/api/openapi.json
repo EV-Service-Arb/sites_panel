@@ -793,7 +793,10 @@
           "gmb_id": {
             "description": "Required: `null` unlinks.",
             "format": "int64",
-            "type": "integer"
+            "type": [
+              "integer",
+              "null"
+            ]
           }
         },
         "required": [
@@ -2659,7 +2662,10 @@
           "expected_updated_at": {
             "description": "Required: taking a brand's prices off its sites over a version the editor did not see is\nnot something to do by default. Null for pricing never set.",
             "format": "date-time",
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
