@@ -31,7 +31,7 @@ fn admin() -> Editor {
 
 /// The vectors' `valid/cleaning.json`: labelled in fr and en.
 fn cleaning() -> Value {
-	let raw = include_str!("../../../contracts/vectors/pricing/valid/cleaning.json");
+	let raw = include_str!("../../../../contracts/vectors/pricing/valid/cleaning.json");
 	serde_json::from_str(raw).unwrap()
 }
 
@@ -101,7 +101,7 @@ async fn every_label_must_be_in_the_brands_locales() {
 	let panel = panel(&db).await;
 	let brand = brand();
 	// Labelled in English only.
-	let raw = include_str!("../../../contracts/vectors/pricing/valid/at-the-cap.json");
+	let raw = include_str!("../../../../contracts/vectors/pricing/valid/at-the-cap.json");
 	let english: Value = serde_json::from_str(raw).unwrap();
 
 	let PricingError::Invalid(problems) = panel.set_pricing(&admin(), &brand, &english, Expected::Any, now()).await.unwrap_err() else {
