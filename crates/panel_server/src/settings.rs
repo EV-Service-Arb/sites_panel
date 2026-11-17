@@ -1,5 +1,6 @@
 //! The environment: secrets and the deployment profile. Where to listen is a flag.
 
+use eyre::WrapErr;
 use panel::seal::DataKey;
 use sa_core::notify::Locale;
 
@@ -41,14 +42,14 @@ ev_lib::settings! {
 		posthog_project_id: Option<String>,
 		/// The PostHog app's origin, for those links (not the capture host).
 		posthog_app_host: String = "https://us.posthog.com",
-		/// The Google OAuth client (Desktop kind), for the `google_calendar` booking adapter and
-		/// `sites_panel booking google-authorize`. Unset, with the secret below: no Google
-		/// Calendar pull. Each brand's calendar is `GOOGLE_CALENDAR_REFRESH_TOKEN_<BRAND>`
-		/// (secret) and `GOOGLE_CALENDAR_ID_<BRAND>` (optional, `primary`), read apart: their
-		/// names follow the brands.
+		/// The Google OAuth client (Web kind), for the `google_calendar` booking adapter and the
+		/// owners' consents in the editor. Unset, with the two below: no Google Calendar.
 		google_oauth_client_id: Option<String>,
 		#[secret]
 		google_oauth_client_secret: Option<String>,
+		/// Where Google sends an owner back after their consent, as the client registers it: the
+		/// conductor's path to `/api/v1/bookings/google_calendar/callback`.
+		google_oauth_redirect_uri: Option<String>,
 		/// How often each brand's calendar is pulled, in minutes.
 		google_calendar_sync_minutes: u32 = "5",
 		/// banking's ScopeLedger listener, from inside the cluster, e.g.
@@ -151,80 +152,45 @@ fn origin(var: &str, raw: &str, app_env: &str) -> eyre::Result<String> {
 	Ok(raw.to_owned())
 }
 
-/// The prefix of a brand's Google Calendar refresh token: `…_VIFNET`.
-pub const GOOGLE_REFRESH_PREFIX: &str = "GOOGLE_CALENDAR_REFRESH_TOKEN_";
-/// The prefix of a brand's calendar id.
-pub const GOOGLE_CALENDAR_ID_PREFIX: &str = "GOOGLE_CALENDAR_ID_";
-
 /// The Google Calendar adapter, when it is configured.
 pub struct GoogleSettings {
 	pub client_id: String,
 	pub client_secret: String,
+	pub redirect_uri: url::Url,
 	pub every_minutes: u32,
-	/// Each brand with a refresh token, and its calendar.
-	pub calendars: std::collections::BTreeMap<sa_core::ids::BrandId, panel_server::google_calendar::BrandCalendar>,
 }
 
 impl std::fmt::Debug for GoogleSettings {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		f.debug_struct("GoogleSettings")
 			.field("client_id", &self.client_id)
+			.field("redirect_uri", &self.redirect_uri.as_str())
 			.field("every_minutes", &self.every_minutes)
-			.field("calendars", &self.calendars)
 			.finish_non_exhaustive()
 	}
 }
 
-/// A brand from the end of a variable's name: `VIFNET` → `vifnet`. A brand whose id has a `-`
-/// cannot be named so (none has).
-fn brand_of_suffix(suffix: &str) -> eyre::Result<sa_core::ids::BrandId> {
-	sa_core::ids::BrandId::parse(&suffix.to_ascii_lowercase()).map_err(|_| eyre::eyre!("{GOOGLE_REFRESH_PREFIX}{suffix}: {suffix} does not name a brand"))
-}
-
 impl Settings {
-	/// The OAuth client alone, for the CLI's consent: both or neither.
-	pub fn google_client(&self) -> eyre::Result<Option<(String, String)>> {
+	/// `None` without the OAuth client; its three variables are set together or not at all.
+	pub fn google(&self) -> eyre::Result<Option<GoogleSettings>> {
 		let set = |v: &Option<String>| v.as_deref().map(str::trim).filter(|v| !v.is_empty()).map(str::to_owned);
-		match (set(&self.google_oauth_client_id), set(&self.google_oauth_client_secret)) {
-			(None, None) => Ok(None),
-			(Some(id), Some(secret)) => Ok(Some((id, secret))),
-			(Some(_), None) => eyre::bail!("GOOGLE_OAUTH_CLIENT_ID needs GOOGLE_OAUTH_CLIENT_SECRET too"),
-			(None, Some(_)) => eyre::bail!("GOOGLE_OAUTH_CLIENT_SECRET needs GOOGLE_OAUTH_CLIENT_ID too"),
-		}
-	}
-
-	/// `None` without the OAuth client or without any brand's token: the pull is off. `vars`:
-	/// the environment's variables (the brands' are read from their names).
-	pub fn google(&self, vars: impl IntoIterator<Item = (String, String)>) -> eyre::Result<Option<GoogleSettings>> {
-		let vars: Vec<(String, String)> = vars.into_iter().filter(|(_, v)| !v.trim().is_empty()).collect();
-		let mut calendars = std::collections::BTreeMap::new();
-		for (name, token) in &vars {
-			let Some(suffix) = name.strip_prefix(GOOGLE_REFRESH_PREFIX) else { continue };
-			let brand = brand_of_suffix(suffix)?;
-			let id_var = format!("{GOOGLE_CALENDAR_ID_PREFIX}{suffix}");
-			let calendar_id = vars.iter().find(|(k, _)| *k == id_var).map_or_else(|| "primary".to_owned(), |(_, v)| v.trim().to_owned());
-			calendars.insert(
-				brand,
-				panel_server::google_calendar::BrandCalendar {
-					refresh_token: zeroize::Zeroizing::new(token.trim().to_owned()),
-					calendar_id,
-				},
-			);
-		}
-		let client = self.google_client()?;
-		match (client, calendars.is_empty()) {
-			(None, true) => Ok(None),
-			(None, false) => eyre::bail!("a {GOOGLE_REFRESH_PREFIX}<BRAND> is set: GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET are needed too"),
-			(Some(_), true) => Ok(None),
-			(Some((client_id, client_secret)), false) => {
+		match (set(&self.google_oauth_client_id), set(&self.google_oauth_client_secret), set(&self.google_oauth_redirect_uri)) {
+			(None, None, None) => Ok(None),
+			(Some(client_id), Some(client_secret), Some(redirect_uri)) => {
+				let redirect_uri = url::Url::parse(&redirect_uri).wrap_err("GOOGLE_OAUTH_REDIRECT_URI is not a URL")?;
+				eyre::ensure!(
+					redirect_uri.scheme() == "https" || redirect_uri.host_str() == Some("localhost"),
+					"GOOGLE_OAUTH_REDIRECT_URI is https"
+				);
 				eyre::ensure!(self.google_calendar_sync_minutes >= 1, "GOOGLE_CALENDAR_SYNC_MINUTES is 1 or more");
 				Ok(Some(GoogleSettings {
 					client_id,
 					client_secret,
+					redirect_uri,
 					every_minutes: self.google_calendar_sync_minutes,
-					calendars,
 				}))
 			}
+			_ => eyre::bail!("GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET and GOOGLE_OAUTH_REDIRECT_URI are set together"),
 		}
 	}
 }
@@ -311,6 +277,7 @@ mod tests {
 				"POSTHOG_APP_HOST",
 				"GOOGLE_OAUTH_CLIENT_ID",
 				"GOOGLE_OAUTH_CLIENT_SECRET",
+				"GOOGLE_OAUTH_REDIRECT_URI",
 				"GOOGLE_CALENDAR_SYNC_MINUTES",
 				"SCOPE_LEDGER_ADDR",
 				"SCOPE_LEDGER_TLS_CA_PEM_FILE",
@@ -370,32 +337,18 @@ mod tests {
 	}
 
 	#[test]
-	fn google_calendar_is_off_without_a_client_or_a_token() {
-		let vars = |v: &[(&str, &str)]| v.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect::<Vec<_>>();
-		let token = "1//refresh-secret";
-		assert!(from(&[]).unwrap().google(vars(&[])).unwrap().is_none());
-		let client = from(&[("GOOGLE_OAUTH_CLIENT_ID", "cid"), ("GOOGLE_OAUTH_CLIENT_SECRET", "csecret")]).unwrap();
-		assert!(client.google(vars(&[])).unwrap().is_none(), "no brand: off");
-		let on = client
-			.google(vars(&[
-				("GOOGLE_CALENDAR_REFRESH_TOKEN_VIFNET", token),
-				("GOOGLE_CALENDAR_ID_VIFNET", "bookings@group.calendar.google.com"),
-				("GOOGLE_CALENDAR_REFRESH_TOKEN_AQUAFIX", token),
-			]))
-			.unwrap()
-			.unwrap();
-		let brands: Vec<&str> = on.calendars.keys().map(|b| b.as_str()).collect();
-		assert_eq!(brands, ["aquafix", "vifnet"]);
-		assert_eq!(
-			on.calendars.values().map(|c| c.calendar_id.as_str()).collect::<Vec<_>>(),
-			["primary", "bookings@group.calendar.google.com"]
-		);
+	fn google_calendar_is_its_client_or_nothing() {
+		assert!(from(&[]).unwrap().google().unwrap().is_none());
+		let client = [
+			("GOOGLE_OAUTH_CLIENT_ID", "cid"),
+			("GOOGLE_OAUTH_CLIENT_SECRET", "csecret"),
+			("GOOGLE_OAUTH_REDIRECT_URI", "https://panel.example/api/sites/bookings/google_calendar/callback"),
+		];
+		let on = from(&client).unwrap().google().unwrap().unwrap();
 		assert_eq!(on.every_minutes, 5);
-		assert!(!format!("{on:?} {client:?}").contains(token) && !format!("{client:?}").contains("csecret"), "secrets never print");
-		let e = from(&[]).unwrap().google(vars(&[("GOOGLE_CALENDAR_REFRESH_TOKEN_VIFNET", token)])).unwrap_err();
-		assert!(format!("{e}").contains("GOOGLE_OAUTH_CLIENT_ID"), "{e}");
-		assert!(from(&[("GOOGLE_OAUTH_CLIENT_ID", "cid")]).unwrap().google_client().is_err());
-		assert!(client.google(vars(&[("GOOGLE_CALENDAR_REFRESH_TOKEN_VIF NET", token)])).is_err());
+		assert!(!format!("{on:?}").contains("csecret"), "secrets never print");
+		assert!(from(&client[..2]).unwrap().google().is_err(), "a client without its redirect");
+		assert!(from(&[client[0], client[1], ("GOOGLE_OAUTH_REDIRECT_URI", "http://panel.example/cb")]).unwrap().google().is_err());
 	}
 
 	#[test]

@@ -13,6 +13,7 @@
 pub mod bookings;
 pub mod events;
 pub mod experiments;
+pub mod google;
 pub mod invoices;
 pub mod notifications;
 pub mod places;

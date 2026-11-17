@@ -62,32 +62,8 @@ enum Cmd {
 	/// A brand's pricing, what the sites price estimates and fixed jobs by.
 	#[command(subcommand)]
 	Pricing(PricingCmd),
-	/// Booking: a provider's calendar, pulled.
-	#[command(subcommand)]
-	Booking(BookingCmd),
 	/// Print a fresh PANEL_DATA_KEY.
 	GenDataKey,
-}
-
-#[derive(Subcommand)]
-enum BookingCmd {
-	/// The brand owner's consent to read their Google Calendar, on this machine: prints the
-	/// URL to open, waits for Google's redirect on 127.0.0.1, and prints the refresh token
-	/// once — for the brand's `GOOGLE_CALENDAR_REFRESH_TOKEN_<BRAND>` secret.
-	GoogleAuthorize {
-		brand: String,
-		/// The loopback port Google redirects to (a Desktop OAuth client takes any).
-		#[arg(long, default_value_t = 8765)]
-		port: u16,
-	},
-	/// Pull the brand's Google Calendar now and journal its bookings — what `serve` does every
-	/// GOOGLE_CALENDAR_SYNC_MINUTES.
-	GoogleSync {
-		brand: String,
-		/// From nothing (the last 7 days), whatever the sync token.
-		#[arg(long)]
-		full: bool,
-	},
 }
 
 #[derive(Subcommand)]
@@ -229,45 +205,6 @@ async fn run(cli: Cli, settings: Settings) -> eyre::Result<()> {
 		}
 		Cmd::Place(cmd) => place(&connect().await?, cmd).await,
 		Cmd::Pricing(cmd) => pricing(&connect().await?, cmd).await,
-		Cmd::Booking(BookingCmd::GoogleAuthorize { brand, port }) => {
-			let brand = BrandId::parse(&brand)?;
-			let (id, secret) = settings
-				.google_client()?
-				.ok_or_else(|| eyre::eyre!("GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET must be set"))?;
-			let consent = google_calendar::authorize(&id, &secret, port, google_calendar::TOKEN_URL).await?;
-			let var = format!("{}{}", settings::GOOGLE_REFRESH_PREFIX, brand.as_str().to_ascii_uppercase());
-			// Shown once, here only: it goes into the brand's secret (devops add-secrets).
-			println!("{var}={}", *consent.refresh_token);
-			Ok(())
-		}
-		Cmd::Booking(BookingCmd::GoogleSync { brand, full }) => {
-			let brand = BrandId::parse(&brand)?;
-			let (api, every) = google(&settings)?.ok_or_else(|| eyre::eyre!("no Google calendar is configured: GOOGLE_OAUTH_CLIENT_* and a GOOGLE_CALENDAR_REFRESH_TOKEN_<BRAND>"))?;
-			eyre::ensure!(
-				api.brands().contains(&brand),
-				"{brand} has no {}{}",
-				settings::GOOGLE_REFRESH_PREFIX,
-				brand.as_str().to_ascii_uppercase()
-			);
-			let done = connect()
-				.await?
-				.sync_bookings(&api, &brand, uuid::Uuid::now_v7(), jiff::Timestamp::now(), every, true, full)
-				.await?
-				.ok_or_else(|| eyre::eyre!("the sync was not leased"))?;
-			let i = done.ingested;
-			println!(
-				"{}: {} written ({} matched, {} without a lead), {} duplicate, {} unchanged, {} ignored, {} refused",
-				if done.full { "full pull" } else { "since the last pull" },
-				i.written,
-				i.matched,
-				i.unmatched,
-				i.duplicate,
-				i.unchanged,
-				i.ignored,
-				i.refused
-			);
-			Ok(())
-		}
 		Cmd::GenDataKey => {
 			println!("{}", DataKey::generate_hex()?);
 			Ok(())
@@ -433,20 +370,29 @@ async fn pricing(panel: &Panel, cmd: PricingCmd) -> eyre::Result<()> {
 	print_pricing(&view)
 }
 
-/// The Google Calendar adapter and how often it pulls, when configured.
-fn google(settings: &Settings) -> eyre::Result<Option<(google_calendar::GoogleCalendar, jiff::SignedDuration)>> {
-	let Some(g) = settings.google(std::env::vars())? else { return Ok(None) };
-	let every = jiff::SignedDuration::from_mins(i64::from(g.every_minutes));
-	let api = google_calendar::GoogleCalendar::new(google_calendar::TOKEN_URL, google_calendar::API_BASE, &g.client_id, &g.client_secret, g.calendars)?;
-	Ok(Some((api, every)))
+/// The Google Calendar adapter, how often it pulls, and the owners' consents, when configured.
+fn google(settings: &Settings) -> eyre::Result<Option<Google>> {
+	let Some(g) = settings.google()? else { return Ok(None) };
+	let api = google_calendar::GoogleCalendar::new(google_calendar::TOKEN_URL, google_calendar::API_BASE, &g.client_id, &g.client_secret, Default::default())?;
+	Ok(Some(Google {
+		consents: Arc::new(google_calendar::Consents::new(api.clone(), g.redirect_uri)),
+		api,
+		every: jiff::SignedDuration::from_mins(i64::from(g.every_minutes)),
+	}))
+}
+
+struct Google {
+	api: google_calendar::GoogleCalendar,
+	every: jiff::SignedDuration,
+	consents: Arc<google_calendar::Consents>,
 }
 
 /// The services `serve` calls out to, each when configured.
 struct Peers {
 	/// PostHog (`POSTHOG_*`).
 	capture: Option<CaptureApi>,
-	/// Google Calendar (`GOOGLE_*`), and how often it is pulled.
-	google: Option<(google_calendar::GoogleCalendar, jiff::SignedDuration)>,
+	/// Google Calendar (`GOOGLE_*`).
+	google: Option<Google>,
 	/// banking's ScopeLedger (`SCOPE_LEDGER_*`): the invoices.
 	ledger: Option<Arc<ScopeLedger>>,
 }
@@ -466,13 +412,12 @@ async fn serve(panel: Panel, keys: sa_auth::Keys, locale: sa_core::notify::Local
 		}
 	};
 	let booking_work = async {
-		match peers.google {
-			Some((api, every)) => {
-				let brands: Vec<String> = api.brands().iter().map(|b| b.as_str().to_owned()).collect();
-				tracing::info!(?brands, minutes = every.as_mins(), "google calendar booking pull on; brands without a refresh token are off");
-				google_calendar::run(panel.clone(), api, every, stopped.clone()).await;
+		match &peers.google {
+			Some(g) => {
+				tracing::info!(minutes = g.every.as_mins(), "google calendar booking pull on, for every brand whose owner consented");
+				google_calendar::run(panel.clone(), g.api.clone(), g.every, stopped.clone()).await;
 			}
-			None => tracing::warn!("GOOGLE_OAUTH_CLIENT_* or every GOOGLE_CALENDAR_REFRESH_TOKEN_<BRAND> unset: no Google Calendar bookings pulled"),
+			None => tracing::warn!("GOOGLE_OAUTH_* unset: no Google Calendar bookings pulled, no consent asked"),
 		}
 	};
 	let invoice_work = async {
@@ -499,6 +444,11 @@ async fn serve(panel: Panel, keys: sa_auth::Keys, locale: sa_core::notify::Local
 	// The invoice routes find the ledger here; without it they answer 503.
 	let app = match peers.ledger.clone() {
 		Some(ledger) => app.layer(axum::Extension(ledger)),
+		None => app,
+	};
+	// The consent routes find the owners' consents here; without them they answer 503.
+	let app = match &peers.google {
+		Some(g) => app.layer(axum::Extension(g.consents.clone())),
 		None => app,
 	};
 	let listener = tokio::net::TcpListener::bind(bind).await.wrap_err_with(|| format!("binding {bind}"))?;

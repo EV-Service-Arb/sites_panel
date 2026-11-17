@@ -30,7 +30,6 @@ use panel_server::{
 use sa_auth::SourceKind;
 use sa_core::ids::BrandId;
 use serde_json::{Value, json};
-use tokio::sync::broadcast;
 use tower::ServiceExt;
 use uuid::Uuid;
 use zeroize::Zeroizing;
@@ -175,6 +174,18 @@ impl FakeGoogle {
 
 async fn token(State(g): State<FakeGoogle>, body: String) -> (StatusCode, Json<Value>) {
 	let form: HashMap<String, String> = url::form_urlencoded::parse(body.as_bytes()).into_owned().collect();
+	if form.get("grant_type").map(String::as_str) == Some("authorization_code") {
+		let traded = form.get("code").map(String::as_str) == Some("c0de")
+			&& form.get("code_verifier").is_some_and(|v| v.len() > 40)
+			&& form.get("client_secret").map(String::as_str) == Some("csecret");
+		return match traded {
+			true => (
+				StatusCode::OK,
+				Json(json!({"access_token": "ya29.fake", "expires_in": 3599, "refresh_token": "1//vifnet-refresh"})),
+			),
+			false => (StatusCode::BAD_REQUEST, Json(json!({"error": "invalid_grant"}))),
+		};
+	}
 	if form.get("refresh_token").map(String::as_str) != Some("1//vifnet-refresh") || form.get("client_secret").map(String::as_str) != Some("csecret") {
 		return (StatusCode::BAD_REQUEST, Json(json!({"error": "invalid_grant"})));
 	}
@@ -534,4 +545,63 @@ async fn a_request_before_its_lead_is_answered_409_to_retry() {
 	let b = operator(&served, &conductor);
 	let got = lead_booking(&b, "lead-8-0000000a").await;
 	assert_eq!((got["status"].as_str(), got["provider"].as_str()), (Some("requested"), Some("google_calendar")));
+}
+
+#[tokio::test]
+async fn an_owner_consents_from_the_editor_and_the_pull_reads_their_calendar() {
+	let db = TestDb::create().await;
+	let panel = panel(&db).await;
+	let conductor = Conductor::new("k1");
+	let (g, api) = fake_google().await;
+	let redirect = url::Url::parse("https://panel.example/api/sites/bookings/google_calendar/callback").unwrap();
+	let consents = std::sync::Arc::new(panel_server::google_calendar::Consents::new(api.clone(), redirect));
+	let app = app(panel.clone(), &conductor).layer(axum::Extension(consents));
+	let admin = As::user(alias("sa:admin"));
+	let ask = |return_to: &str| json!({"return_to": return_to});
+	let consent = "/api/v1/bookings/google_calendar/vifnet/consent";
+
+	let (status, e) = send(&app, &conductor, &admin, Method::POST, consent, Some(ask("https://evil.example/sites/places")), &[]).await;
+	assert_eq!((status, &e["code"]), (StatusCode::BAD_REQUEST, &json!("bad_request")), "back to another site: {e}");
+	let operator = As::user(alias("sa:operator"));
+	assert_eq!(
+		send(&app, &conductor, &operator, Method::POST, consent, Some(ask("https://panel.example/sites/places")), &[])
+			.await
+			.0,
+		StatusCode::FORBIDDEN
+	);
+
+	let (status, asked) = send(&app, &conductor, &admin, Method::POST, consent, Some(ask("https://panel.example/sites/places?brand=vifnet")), &[]).await;
+	assert_eq!(status, StatusCode::OK, "{asked}");
+	let url = url::Url::parse(asked["url"].as_str().unwrap()).unwrap();
+	let state = url.query_pairs().find(|(k, _)| k == "state").unwrap().1.into_owned();
+	assert_eq!(
+		url.query_pairs().find(|(k, _)| k == "redirect_uri").unwrap().1,
+		"https://panel.example/api/sites/bookings/google_calendar/callback"
+	);
+
+	let callback = |state: &str, code: &str| format!("/api/v1/bookings/google_calendar/callback?state={state}&code={code}");
+	let (status, page) = raw(&app, &conductor, &admin, Method::GET, &callback(&state, "c0de"), &[], Vec::new()).await;
+	assert_eq!(status, StatusCode::OK);
+	assert!(
+		String::from_utf8(page).unwrap().contains("url=https://panel.example/sites/places?brand=vifnet\""),
+		"back to the page it was asked from"
+	);
+	let kept = panel.google_calendars().await.unwrap();
+	assert_eq!(
+		kept.iter().map(|c| (c.brand.as_str(), c.calendar_id.as_str(), c.refresh_token.as_str())).collect::<Vec<_>>(),
+		[("vifnet", "primary", "1//vifnet-refresh")]
+	);
+	let sealed: Vec<u8> = sqlx::query_scalar("SELECT refresh_sealed FROM google_calendars").fetch_one(&db.pool().await).await.unwrap();
+	assert!(!sealed.windows(7).any(|w| w == b"vifnet-"), "sealed, never in the clear");
+
+	let (status, again) = send(&app, &conductor, &admin, Method::GET, &callback(&state, "c0de"), None, &[]).await;
+	assert_eq!((status, &again["code"]), (StatusCode::CONFLICT, &json!("consent_expired")), "a state is taken once");
+
+	let google = api.of(kept);
+	assert_eq!(google.brands(), [vifnet()]);
+	panel
+		.sync_bookings(&google, &vifnet(), Uuid::now_v7(), Timestamp::now(), SignedDuration::from_mins(5), true, true)
+		.await
+		.unwrap();
+	assert_eq!(g.asked().len(), 1, "the pull read the consented calendar");
 }

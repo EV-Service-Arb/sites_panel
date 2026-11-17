@@ -10,15 +10,15 @@
 use std::{sync::Arc, time::Duration};
 
 use axum::{
-	Json, Router,
+	Extension, Json, Router,
 	body::{Body as Raw, to_bytes},
 	error_handling::HandleErrorLayer,
 	extract::{Path, State},
 	http::{HeaderMap, Method, StatusCode},
-	response::{IntoResponse, Response},
+	response::{Html, IntoResponse, Response},
 	routing::post,
 };
-use ev_lib::api::{Body, Created, Ids, JsonSchema, Params, Upserted};
+use ev_lib::api::{Body, Created, Ids, JsonSchema, Params, Refusal, Refuses, Upserted};
 use jiff::Timestamp;
 use panel::{
 	Panel,
@@ -26,7 +26,7 @@ use panel::{
 	operator::Actor,
 };
 use panel_core::{booking::BookingMatch, ids::LeadId};
-use sa_auth::{Gate, Leads, Work};
+use sa_auth::{Gate, Leads, Places, Work};
 use sa_core::ids::BrandId;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -36,8 +36,10 @@ use tower_http::timeout::TimeoutLayer;
 use uuid::Uuid;
 
 use crate::{
-	api::{ApiResult, Caller, IdempotencyKey, Journaled, LeadPath, recorded},
+	api::{ApiResult, Caller, Code, IdempotencyKey, Journaled, LeadPath, recorded},
+	google_calendar::{ConsentError, Consents},
 	http::ApiRoute,
+	places::editor,
 };
 
 /// The operator's booking routes.
@@ -50,7 +52,87 @@ pub(crate) fn routes() -> Vec<ApiRoute> {
 		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/booking/status", edit, close_booking),
 		ApiRoute::new(M::GET, "/bookings/unmatched", work, unmatched_bookings),
 		ApiRoute::new(M::POST, "/bookings/{id}/attach", edit, attach_booking),
+		ApiRoute::new(M::POST, "/bookings/google_calendar/{brand}/consent", Gate::USER.needs(Places::Edit), google_consent),
+		ApiRoute::new(M::GET, "/bookings/google_calendar/callback", Gate::USER.needs(Places::Edit), google_callback),
 	]
+}
+
+/// The owners' consent flow, when the Google OAuth client is configured.
+type MaybeConsents = Option<Extension<Arc<Consents>>>;
+
+fn consents(c: MaybeConsents) -> ApiResult<Arc<Consents>> {
+	c.map(|Extension(c)| c)
+		.ok_or_else(|| Refusal::new(Code::GoogleUnavailable, "no Google OAuth client is configured"))
+}
+
+impl Refuses<ConsentError> for Code {
+	fn refusal(e: ConsentError) -> Refusal<Self> {
+		match e {
+			ConsentError::Elsewhere(_) => Refusal::new(Self::BadRequest, e.to_string()),
+			ConsentError::Unknown => Refusal::new(Self::ConsentExpired, e.to_string()),
+			ConsentError::Refused(_) => Refusal::new(Self::GoogleRefused, e.to_string()),
+			ConsentError::Internal(e) => Self::refusal(e),
+		}
+	}
+}
+
+/// `{brand}`.
+#[derive(Deserialize, JsonSchema)]
+struct BrandPath {
+	brand: BrandId,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(rename = "GoogleConsentAsked")]
+struct ConsentBody {
+	/// The calendar to read; the owner's own (`primary`) when absent.
+	calendar_id: Option<String>,
+	/// The page to come back to once Google answered: one of the conductor's.
+	#[schemars(with = "String", url)]
+	return_to: url::Url,
+}
+
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "GoogleConsentUrl")]
+struct ConsentDto {
+	/// Google's consent page, for the brand's calendar owner to open.
+	url: String,
+}
+
+/// Asks the brand's calendar owner to let the panel read it: Google's consent page, which sends
+/// them back through the callback to `return_to`.
+async fn google_consent(caller: Caller, c: MaybeConsents, Ids(BrandPath { brand }): Ids<BrandPath>, Body(b): Body<ConsentBody>) -> ApiResult<Json<ConsentDto>> {
+	let calendar_id = b.calendar_id.unwrap_or_else(|| "primary".to_owned());
+	if !(1..=1024).contains(&calendar_id.len()) {
+		return Err(Refusal::new(Code::BadRequest, "calendar_id is 1 to 1024 characters"));
+	}
+	let url = consents(c)?.ask(brand, calendar_id, b.return_to, editor(&caller), Timestamp::now())?;
+	Ok(Json(ConsentDto { url }))
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[schemars(rename = "GoogleConsentAnswer")]
+struct CallbackQuery {
+	state: String,
+	code: Option<String>,
+	/// Google's word when the owner said no.
+	error: Option<String>,
+}
+
+/// Google's redirect after the owner's consent: the brand's refresh token kept, sealed, and a
+/// page that sends the owner back to the one the consent was asked from. 409 `consent_expired` for a consent
+/// asked more than 10 minutes ago, or never.
+async fn google_callback(State(panel): State<Panel>, c: MaybeConsents, Params(q): Params<CallbackQuery>) -> ApiResult<Html<String>> {
+	let code = q.code.as_deref().ok_or(q.error.as_deref().unwrap_or("no code"));
+	let now = Timestamp::now();
+	let (consent, by, back) = consents(c)?.answer(&q.state, code, now).await?;
+	panel.connect_google_calendar(&by, &consent, now).await?;
+	// A page that goes on to `back`: the table's answers are 2xx, so not a 303.
+	let back = back.as_str().replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;");
+	Ok(Html(format!(
+		"<!doctype html><meta charset=utf-8><meta http-equiv=refresh content=\"0;url={back}\"><title>Google Calendar connected</title><a href=\"{back}\">Google Calendar connected: back to the panel</a>"
+	)))
 }
 
 /// A webhook's body at most: a booking is a few KiB.

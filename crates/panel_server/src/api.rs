@@ -127,6 +127,12 @@ pub enum Code {
 	IdempotencyConflict,
 	/// Banking refused for a reason of its own, which `error` carries.
 	LedgerRefused,
+	/// No Google OAuth client is configured.
+	GoogleUnavailable,
+	/// No consent waits under this state (asked more than 10 minutes ago, or never): ask again.
+	ConsentExpired,
+	/// Google refused the consent, or gave no refresh token; `error` says which.
+	GoogleRefused,
 	Internal,
 }
 
@@ -149,8 +155,10 @@ impl ErrorCode for Code {
 			| Self::InvoiceProcessing
 			| Self::ScopeFrozen
 			| Self::IdempotencyConflict
-			| Self::LedgerRefused => StatusCode::CONFLICT,
-			Self::InvoicesUnavailable | Self::NotGranted | Self::LedgerUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+			| Self::LedgerRefused
+			| Self::ConsentExpired
+			| Self::GoogleRefused => StatusCode::CONFLICT,
+			Self::InvoicesUnavailable | Self::NotGranted | Self::LedgerUnavailable | Self::GoogleUnavailable => StatusCode::SERVICE_UNAVAILABLE,
 			Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
 		}
 	}

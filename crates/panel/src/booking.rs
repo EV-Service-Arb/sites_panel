@@ -470,3 +470,63 @@ fn contact_pii(c: &Contact) -> Map<String, Value> {
 	}
 	m
 }
+
+/// A brand's Google Calendar, as its owner consented to it: which calendar, and the refresh
+/// token that reads it.
+pub struct GoogleConsent {
+	pub brand: BrandId,
+	/// `primary`, or a calendar the owner shares.
+	pub calendar_id: String,
+	pub refresh_token: zeroize::Zeroizing<String>,
+}
+
+impl std::fmt::Debug for GoogleConsent {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("GoogleConsent")
+			.field("brand", &self.brand)
+			.field("calendar_id", &self.calendar_id)
+			.finish_non_exhaustive()
+	}
+}
+
+impl Panel {
+	/// Keeps a brand's consent, its token sealed under the data key at once; it replaces the one
+	/// before, and the next pull reads with it.
+	pub async fn connect_google_calendar(&self, by: &panel_core::place::Editor, consent: &GoogleConsent, now: Timestamp) -> eyre::Result<()> {
+		let aad = crate::seal::google_aad(consent.brand.as_str());
+		let stored = crate::store::google::Stored {
+			brand: consent.brand.clone(),
+			calendar_id: consent.calendar_id.clone(),
+			refresh_sealed: self.key.seal(&aad, consent.refresh_token.as_bytes())?,
+			data_key_fp: self.key.fingerprint().to_vec(),
+			connected_at: now,
+			connected_by: by.label().to_owned(),
+		};
+		let mut conn = self.store.pool().acquire().await.wrap_err("a connection for a Google Calendar")?;
+		crate::store::google::put(&mut conn, &stored).await?;
+		tracing::info!(by = by.label(), brand = %consent.brand, "google calendar connected");
+		Ok(())
+	}
+
+	/// Every brand's consent, its token opened.
+	pub async fn google_calendars(&self) -> eyre::Result<Vec<GoogleConsent>> {
+		let mut conn = self.store.pool().acquire().await.wrap_err("a connection for the Google Calendars")?;
+		crate::store::google::all(&mut conn)
+			.await?
+			.into_iter()
+			.map(|s| {
+				eyre::ensure!(s.data_key_fp == self.key.fingerprint(), "{}'s Google Calendar was sealed under another PANEL_DATA_KEY", s.brand);
+				let plain = self
+					.key
+					.open(&crate::seal::google_aad(s.brand.as_str()), &s.refresh_sealed)
+					.wrap_err_with(|| format!("opening {}'s Google Calendar", s.brand))?;
+				let token = String::from_utf8(plain.to_vec()).wrap_err("a refresh token is text")?;
+				Ok(GoogleConsent {
+					brand: s.brand,
+					calendar_id: s.calendar_id,
+					refresh_token: zeroize::Zeroizing::new(token),
+				})
+			})
+			.collect()
+	}
+}

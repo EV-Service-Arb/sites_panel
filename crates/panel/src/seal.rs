@@ -123,6 +123,11 @@ pub fn pii_aad(event_id: uuid::Uuid) -> Vec<u8> {
 	[b"sa-panel/pii/v1/".as_slice(), event_id.as_bytes()].concat()
 }
 
+/// Associated data of a brand's Google Calendar refresh token.
+pub fn google_aad(brand: &str) -> Vec<u8> {
+	[b"sa-panel/google-calendar/v1/".as_slice(), brand.as_bytes()].concat()
+}
+
 /// Associated data of a note's texts.
 pub fn note_aad(rule: &str, event_id: uuid::Uuid) -> Vec<u8> {
 	[b"sa-panel/note/v1/".as_slice(), rule.as_bytes(), b"/", event_id.as_bytes()].concat()

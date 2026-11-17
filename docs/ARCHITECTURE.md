@@ -237,6 +237,8 @@ POST   /leads/{brand}/{lead}/calls/{attempt}/outcome
 POST   /leads/{brand}/{lead}/booking/status
 GET    /bookings/unmatched
 POST   /bookings/{id}/attach
+POST   /bookings/google_calendar/{brand}/consent
+GET    /bookings/google_calendar/callback
 GET    /funnel
 GET    /places
 POST   /places
@@ -749,8 +751,8 @@ the `phone` / `email` of the creation PII of the brand's leads created from 14 d
 booking to 10 minutes after; one lead → `contact`, none or several → unmatched. The leads' PII
 is opened under `PANEL_DATA_KEY` only to compare.
 
-**google_calendar, pulled** (`panel_server::google_calendar`). Every minute, each brand with a
-refresh token whose sync is due (`GOOGLE_CALENDAR_SYNC_MINUTES`, 5): the refresh token → an
+**google_calendar, pulled** (`panel_server::google_calendar`). Every minute, each brand whose
+owner consented and whose sync is due (`GOOGLE_CALENDAR_SYNC_MINUTES`, 5): the refresh token → an
 access token (`oauth2.googleapis.com/token`, cached until a minute before it expires) →
 `GET www.googleapis.com/calendar/v3/calendars/{id}/events?singleEvents=true&showDeleted=true`,
 first `timeMin` = now − 7 days, then `syncToken`; pages followed (≤ 40 of 250); 410 → full
@@ -762,14 +764,16 @@ description — "Booked by" / "Réservé par", a schedule link, or a phone label
 beside) its label. Version: the event's `etag`; moved: the same id with a new start; a
 `cancelled` item is passed on by id (a sync gives its id alone).
 
-**Secrets and CLI.** `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` (one client,
-Desktop kind; both or neither), `GOOGLE_CALENDAR_REFRESH_TOKEN_<BRAND>` (secret, scope
-`calendar.events.readonly`) and `GOOGLE_CALENDAR_ID_<BRAND>` (optional, `primary`); a brand
-without a token is not pulled; a token without the client fails the boot. `sites_panel booking
-google-authorize <brand> [--port 8765]`: prints Google's consent URL (offline, prompt=consent,
-PKCE, state), waits on `127.0.0.1:<port>` for the redirect, prints
-`GOOGLE_CALENDAR_REFRESH_TOKEN_<BRAND>=…` once, for add-secrets. `sites_panel booking google-sync
-<brand> [--full]`: one pull now.
+**Consent, from the editor.** `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` (one
+client, Web kind) and `GOOGLE_OAUTH_REDIRECT_URI` (the conductor's path to the callback, as the
+client registers it), all three or none. `POST /api/v1/bookings/google_calendar/{brand}/consent`
+(`sa:sites:work:places:edit`, `{calendar_id?, return_to}`) answers Google's consent URL
+(offline, prompt=consent, PKCE, a state kept in memory 10 minutes; `return_to` on the redirect's
+origin); Google sends the owner to `GET …/callback?state&code`, which trades the code for the
+refresh token, keeps it sealed (`google_calendars`: the calendar, `primary` unless named, the
+token under `PANEL_DATA_KEY` with the brand as associated data, the key's fingerprint, who and
+when), and answers a page that goes on to `return_to`. A new consent replaces the brand's; scope
+`calendar.events.readonly`.
 
 **API** (`/api/v1`, Work, writes `sa:sites:work:leads:edit`): a lead's slot set or cleared by
 hand and its end, the providers' unmatched bookings and a hand attach; `GET /leads?booking=`
@@ -841,9 +845,11 @@ filters by where the booking stands; `Lead.booking` is the lead's booking folded
   the build is let be: that is a rollback onto a schema moved on. Timestamps are INTEGER
   microseconds since the epoch, days `YYYY-MM-DD` text, UUIDs 16-byte blobs, JSON text that
   must parse.
-- **Secrets come from the environment only** (`PANEL_DATA_KEY`, `SENTRY_DSN`,
-  `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_CALENDAR_REFRESH_TOKEN_<BRAND>`), through
-  `ev_lib::settings`; with `APP_ENV=production`, `PANEL_DB_PATH`, `PANEL_DATA_KEY` and
+- **Secrets come from the environment, or through the API and sealed at once.** The process's
+  own (`PANEL_DATA_KEY`, `SENTRY_DSN`, `GOOGLE_OAUTH_CLIENT_SECRET`) through `ev_lib::settings`;
+  a brand's Google Calendar refresh token through its owner's consent, sealed
+  (XChaCha20-Poly1305 under `PANEL_DATA_KEY`, the brand as associated data, the key's
+  fingerprint beside it) before it is stored, and opened only by the pull. With `APP_ENV=production`, `PANEL_DB_PATH`, `PANEL_DATA_KEY` and
   `PANEL_ASSERTION_KEYS` are required at boot (`sites_panel --print-required-vars` lists them).
 
 ## Deploy requirements

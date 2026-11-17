@@ -159,18 +159,15 @@
             "PANEL_DATA_KEY"
             "SENTRY_DSN"
             "GOOGLE_OAUTH_CLIENT_SECRET"
-            "GOOGLE_CALENDAR_REFRESH_TOKEN_AQUAFIX"
-            "GOOGLE_CALENDAR_REFRESH_TOKEN_VIFNET"
           ];
           # PANEL_ASSERTION_KEYS: the conductor's public keys (not secret), `<kid>:<base64>`, comma-separated.
           # POSTHOG_PROJECT_API_KEY (phc_, public like the landings', not a secret; + POSTHOG_HOST):
           # serve sends the leads' life to PostHog; unset, nothing is sent (serve warns).
           # POSTHOG_PROJECT_ID (+ POSTHOG_APP_HOST): the experiments link to their funnels in
           # PostHog; unset, no links. Links are opened by the browser: no egress for them.
-          # Google Calendar booking pull (docs/ARCHITECTURE.md, Booking): the OAuth client both or
-          # neither; a brand's calendar is pulled only with its refresh token
-          # (`sites_panel booking google-authorize <brand>` makes one); its calendar id defaults to
-          # `primary`. A token without the client fails the boot.
+          # Google Calendar booking pull (docs/ARCHITECTURE.md, Booking): the OAuth client (Web kind)
+          # and its redirect, all three or none; a brand's calendar is pulled once its owner
+          # consented from the editor (the token is kept sealed in the database).
           # SCOPE_LEDGER_* (docs/ARCHITECTURE.md, Invoices): banking's ScopeLedger over mTLS, the
           # address and the three *_PEM_FILE paths all or none; unset, /api/v1/invoices answers
           # 503. The *_PEM_FILE values are literal paths (`/etc/settings/<VAR>`) to files mounted
@@ -184,11 +181,8 @@
             "POSTHOG_APP_HOST"
             "GOOGLE_OAUTH_CLIENT_ID"
             "GOOGLE_OAUTH_CLIENT_SECRET"
+            "GOOGLE_OAUTH_REDIRECT_URI"
             "GOOGLE_CALENDAR_SYNC_MINUTES"
-            "GOOGLE_CALENDAR_REFRESH_TOKEN_AQUAFIX"
-            "GOOGLE_CALENDAR_ID_AQUAFIX"
-            "GOOGLE_CALENDAR_REFRESH_TOKEN_VIFNET"
-            "GOOGLE_CALENDAR_ID_VIFNET"
             "SCOPE_LEDGER_ADDR"
             "SCOPE_LEDGER_TLS_CA_PEM_FILE"
             "SCOPE_LEDGER_TLS_CERT_PEM_FILE"
