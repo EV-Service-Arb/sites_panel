@@ -7,7 +7,7 @@ import type { PricingItem } from "@/entities/pricing";
 import { api } from "@/shared/api";
 import { useT } from "@/shared/i18n";
 import { utcDay } from "@/shared/lib/format";
-import { replaceQuery, useQuery } from "@/shared/lib/router";
+import { openView, useViewParams } from "@/shared/lib/router";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { ErrorState } from "@/shared/ui/error-state";
 import { ScreenFrame } from "@/shared/ui/screen-frame";
@@ -23,7 +23,6 @@ import { BrandSelect } from "./brand-select";
  */
 export function PricingView() {
   const t = useT();
-  const params = useQuery();
   // Fixed for the page's life: a new empty draft's "valid from" must not move under it at midnight.
   const [today] = useState(() => utcDay(new Date()));
   const all = useResource(api(), "/pricing");
@@ -32,9 +31,9 @@ export function PricingView() {
   const selected = brands.status === "ok" ? brands.data : undefined;
   const ready = all.status === "ok" && selected !== undefined;
   const items: PricingItem[] = !ready ? [] : selected === null ? all.data.items : all.data.items.filter((i) => selected.has(i.brand_id));
-  const wanted = params.get("brand");
+  const wanted = useViewParams("pricing").brand;
   const brand = items.find((i) => i.brand_id === wanted)?.brand_id ?? items[0]?.brand_id ?? null;
-  const choose = (b: string) => replaceQuery(new URLSearchParams({ brand: b }));
+  const choose = (b: string) => openView({ view: "pricing", params: { brand: b } }, { replace: true });
 
   return (
     <ScreenFrame title={t("pricing.title")} actions={brand !== null ? <BrandSelect brands={items.map((i) => i.brand_id)} value={brand} onChange={choose} /> : undefined}>

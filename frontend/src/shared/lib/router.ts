@@ -1,20 +1,35 @@
 import { delegatedHref, dispatchNavigate } from "@evinvest/mfe";
+import { type At, ViewError, href, parse } from "@evinvest/views";
 import { useMemo, useSyncExternalStore } from "react";
 
 import { host } from "@/shared/config/host";
 
-const ROUTES = ["leads", "places", "pricing", "invoices", "overview", "experiments"] as const;
-export type Route = (typeof ROUTES)[number];
+import { VIEWS } from "./views.generated";
 
-/** Where a path is relative to `base`: its root, one of the routes, another path under it, or not under it at all. */
-export type Place = { kind: "start" } | { kind: "route"; route: Route } | { kind: "unknown" } | { kind: "outside" };
+export type ViewAt = At<typeof VIEWS>;
+export type ViewName = ViewAt["view"];
+export type ViewParams<N extends ViewName> = Extract<ViewAt, { view: N }>["params"];
 
-export function placeOf(pathname: string, base: string): Place {
-  if (pathname !== base && !pathname.startsWith(`${base}/`)) return { kind: "outside" };
-  const rest = pathname.slice(base.length).replace(/\/+$/, "");
-  if (rest === "") return { kind: "start" };
-  const route = ROUTES.find((r) => rest === `/${r}`);
-  return route === undefined ? { kind: "unknown" } : { kind: "route", route };
+/** Where an href is relative to `base`: one of the views, another href under it, or not under it at all. */
+export type Place = { kind: "view"; at: ViewAt } | { kind: "unknown" } | { kind: "outside" };
+
+const under = (pathname: string, base: string) => pathname === base || pathname.startsWith(`${base}/`);
+
+export function placeOf(pathname: string, search: string, base: string): Place {
+  if (!under(pathname, base)) return { kind: "outside" };
+  try {
+    return { kind: "view", at: parse(VIEWS, `${pathname.slice(base.length) || "/"}${search}`).at };
+  } catch (e) {
+    // An href that is no view is "nothing here", not a failure; anything else is.
+    if (e instanceof ViewError) return { kind: "unknown" };
+    throw e;
+  }
+}
+
+/** `at` under the host's base. */
+export function hrefOf(at: ViewAt): string {
+  const below = href(VIEWS, at);
+  return below === "/" ? host().base : `${host().base}${below}`;
 }
 
 // One location for both elements: a nav click must re-render a mounted panel. The host's own router pushes
@@ -40,12 +55,20 @@ export function usePathname(): string {
   return useSyncExternalStore(subscribe, () => window.location.pathname);
 }
 
-export function useQuery(): URLSearchParams {
+export function usePlace(): Place {
+  const pathname = usePathname();
   const search = useSyncExternalStore(subscribe, () => window.location.search);
-  return useMemo(() => new URLSearchParams(search), [search]);
+  return useMemo(() => placeOf(pathname, search, host().base), [pathname, search]);
 }
 
-export function navigate(href: string, { replace }: { replace: boolean }): void {
+/** The params of view `name`, under the screen that shows it: elsewhere, a broken route table. */
+export function useViewParams<N extends ViewName>(name: N): ViewParams<N> {
+  const place = usePlace();
+  if (place.kind !== "view" || place.at.view !== name) throw new Error(`${name}'s params asked off ${JSON.stringify(place)}`);
+  return place.at.params as ViewParams<N>;
+}
+
+function navigate(href: string, { replace }: { replace: boolean }): void {
   if (replace) window.history.replaceState(null, "", href);
   else {
     window.history.pushState(null, "", href);
@@ -54,10 +77,9 @@ export function navigate(href: string, { replace }: { replace: boolean }): void 
   notify();
 }
 
-/** The query of the page as it is, replaced: filters, the open card. */
-export function replaceQuery(next: URLSearchParams): void {
-  const query = next.toString();
-  navigate(query === "" ? window.location.pathname : `${window.location.pathname}?${query}`, { replace: true });
+/** To `at`: in place (`replace`, a filter, the open card), or as a new entry of the history. */
+export function openView(at: ViewAt, { replace }: { replace: boolean }): void {
+  navigate(hrefOf(at), { replace });
 }
 
 /** A panel connected; the returned function is its disconnect. */
@@ -72,7 +94,7 @@ export function panelMounted(): () => void {
 
 /** Routed here when a panel is on the page to show it, otherwise offered to the host's router (`ev:navigate` on window). Whether either took it. */
 function route(href: string): boolean {
-  if (panels > 0 && placeOf(new URL(href, window.location.origin).pathname, host().base).kind !== "outside") {
+  if (panels > 0 && under(new URL(href, window.location.origin).pathname, host().base)) {
     navigate(href, { replace: false });
     return true;
   }

@@ -6,11 +6,11 @@ import { byLocation } from "@/entities/funnel";
 import type { PlaceKey } from "@/entities/place";
 import { useMe } from "@/entities/session";
 import { AddPlaceButton } from "@/features/add-place";
-import { type Period, rangeOf } from "@/features/funnel-filters";
+import { rangeOf } from "@/features/funnel-filters";
 import { api } from "@/shared/api";
 import { useT } from "@/shared/i18n";
 import { gmbParam, useGmbs } from "@/shared/lib/gmbs";
-import { replaceQuery, useQuery } from "@/shared/lib/router";
+import { openView, useViewParams } from "@/shared/lib/router";
 import { useLastNonNull } from "@/shared/lib/use-last-non-null";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { ErrorState } from "@/shared/ui/error-state";
@@ -22,7 +22,8 @@ import { type PlaceRow, placeRows } from "../model/rows";
 import { PlaceCard } from "./place-card";
 import { PlaceSettingsPanel } from "./place-settings-panel";
 
-const WINDOW_DAYS: Period = 30;
+/** The cards' own window: the funnel of the last month, not a view key. */
+const WINDOW_DAYS = 30;
 
 /**
  * Locations with a mini funnel each, from the backend's per-location funnel,
@@ -34,11 +35,9 @@ export function PlacesView() {
   // Fixed when the screen opens: a range that moved mid-render would refetch in a loop.
   const [range] = useState(() => rangeOf(WINDOW_DAYS, new Date()));
   // The open place lives in the URL (`?brand=&location=`), so another service can link to it.
-  const params = useQuery();
-  const brand = params.get("brand");
-  const location = params.get("location");
-  const open = useMemo<PlaceKey | null>(() => (brand && location ? { brand, slug: location } : null), [brand, location]);
-  const setOpen = (key: PlaceKey | null) => replaceQuery(key ? new URLSearchParams({ brand: key.brand, location: key.slug }) : new URLSearchParams());
+  const { brand, location } = useViewParams("places");
+  const open = useMemo<PlaceKey | null>(() => (brand !== undefined && location !== undefined ? { brand, slug: location } : null), [brand, location]);
+  const setOpen = (key: PlaceKey | null) => openView({ view: "places", params: key ? { brand: key.brand, location: key.slug } : {} }, { replace: true });
   // Title and form stay put while the sheet slides away.
   const shown = useLastNonNull(open);
   const gmb = gmbParam(useGmbs());

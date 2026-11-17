@@ -3,9 +3,9 @@ import { Settled, Skeleton } from "@evinvest/uikit";
 
 import { brandsOf, usePlaces, useSelectedBrands } from "@/entities/place";
 import { useMe } from "@/entities/session";
-import { useFilterParams } from "@/features/funnel-filters";
 import { api } from "@/shared/api";
 import { useT } from "@/shared/i18n";
+import { openView, useViewParams } from "@/shared/lib/router";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { ErrorState } from "@/shared/ui/error-state";
 import { FilterSelect } from "@/shared/ui/filter-select";
@@ -23,7 +23,8 @@ import { BrandExperiments } from "./brand-experiments";
 export function ExperimentsView() {
   const t = useT();
   const me = useMe();
-  const { brand, update } = useFilterParams();
+  const brand = useViewParams("experiments").brand ?? null;
+  const update = ({ brand }: { brand: string | null }) => openView({ view: "experiments", params: brand === null ? {} : { brand } }, { replace: true });
   const places = usePlaces();
   const all = useResource(api(), "/experiments", { params: { query: { brand } } });
   const selection = useSelectedBrands();

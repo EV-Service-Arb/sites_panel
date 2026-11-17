@@ -1,7 +1,7 @@
 import { Button, Card, CardContent, Settled, Skeleton } from "@evinvest/uikit";
 import type { ReactNode } from "react";
 
-import { type LeadFilter, type LeadRef, encodeRef, refOf } from "@/entities/lead";
+import { type LeadFilter, type LeadRef, refOf } from "@/entities/lead";
 import { useT } from "@/shared/i18n";
 import type { Gmbs } from "@/shared/lib/gmbs";
 import { DESKTOP_QUERY, useMediaQuery } from "@/shared/lib/use-media-query";
@@ -36,7 +36,7 @@ export function LeadQueue({ filter, gmbs, version, selected, onOpen, empty }: Le
   const leads = list.status === "ok" ? list.leads : [];
   const open = (lead: (typeof leads)[number]) => onOpen(refOf(lead));
   // Same shape as `leadKey`: brand and lead id.
-  const selectedKey = selected ? encodeRef(selected) : null;
+  const selectedKey = selected ? `${selected.brand}/${selected.lead}` : null;
   return (
     <Settled loading={list.status === "loading"} skeleton={<Skeleton className="h-64 w-full" />} className="flex flex-col gap-4">
       <NewLeadsBanner count={pending.length} suspect={pending.filter((l) => l.suspect !== null).length} onShow={showPending} />

@@ -9,11 +9,11 @@ import { DESKTOP_QUERY, useMediaQuery } from "@/shared/lib/use-media-query";
 import { FilterSelect } from "@/shared/ui/filter-select";
 import { useButtonSize } from "@/shared/ui/touch";
 
-import { narrows } from "../model/params";
+import { type FilterPatch, narrows } from "../model/filter";
 import { RefSearch } from "./ref-search";
 import { StageSegments } from "./stage-segments";
 
-type Props = { filter: LeadFilter; brands: string[]; counts: LeadCounts | null; onChange: (patch: Partial<LeadFilter>) => void };
+type Props = { filter: LeadFilter; brands: string[]; counts: LeadCounts | null; onChange: (patch: FilterPatch) => void };
 
 /**
  * Stage, brand, channel, a messenger ref and "overdue only" — the questions the queue is sorted

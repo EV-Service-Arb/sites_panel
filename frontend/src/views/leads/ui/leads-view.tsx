@@ -2,15 +2,15 @@ import { useResource } from "@evinvest/api/react";
 import { Button } from "@evinvest/uikit";
 import { useCallback, useState } from "react";
 
-import { type LeadFilter, type LeadRef, decodeRef, encodeRef } from "@/entities/lead";
+import type { LeadRef } from "@/entities/lead";
 import { brandsOf, usePlaces } from "@/entities/place";
 import { CallFlowProvider, OutcomeSheet } from "@/features/call-lead";
 import { CreateLeadButton } from "@/features/create-lead";
-import { LeadFilters, leadFilterFrom, narrows, paramsWith } from "@/features/lead-filters";
+import { type FilterPatch, LeadFilters, leadsWith, narrows } from "@/features/lead-filters";
 import { api } from "@/shared/api";
 import { useT } from "@/shared/i18n";
 import { gmbParam, useGmbs } from "@/shared/lib/gmbs";
-import { replaceQuery, useQuery } from "@/shared/lib/router";
+import { openView, useViewParams } from "@/shared/lib/router";
 import { useLastNonNull } from "@/shared/lib/use-last-non-null";
 import { useRereadOn } from "@/shared/lib/use-reread-on";
 import { EmptyState } from "@/shared/ui/empty-state";
@@ -22,24 +22,23 @@ import { LeadCardPanel } from "./lead-card-panel";
 import { LeadQueue } from "./lead-queue";
 import { UnmatchedBookings } from "./unmatched-bookings";
 
+/** The open lead of the view's `lead=brand,lead`. */
+const refOf = (lead: [string, string] | undefined): LeadRef | null => (lead === undefined ? null : { brand: lead[0], lead: lead[1] });
+
 export function LeadsView() {
   const t = useT();
   const button = useButtonSize();
-  const params = useQuery();
+  const params = useViewParams("leads");
   const gmbs = useGmbs();
-  const filter = leadFilterFrom(params);
-  const open = decodeRef(params.get("lead"));
+  const { lead, ...filter } = params;
+  const open = refOf(lead);
   // The card stays filled while the sheet slides away; the param is already gone by then.
-  const shown = decodeRef(useLastNonNull(params.get("lead")));
+  const shown = refOf(useLastNonNull(lead ?? null) ?? undefined);
   const [version, setVersion] = useState(0);
 
-  const setFilter = (patch: Partial<LeadFilter>) => replaceQuery(paramsWith(params, patch));
-  const openLead = (ref: LeadRef | null) => {
-    const next = new URLSearchParams(params);
-    if (ref) next.set("lead", encodeRef(ref));
-    else next.delete("lead");
-    replaceQuery(next);
-  };
+  const show = (next: typeof params) => openView({ view: "leads", params: next }, { replace: true });
+  const setFilter = (patch: FilterPatch) => show(leadsWith(params, patch));
+  const openLead = (ref: LeadRef | null) => show(leadsWith(params, { lead: ref === null ? null : [ref.brand, ref.lead] }));
   const changed = useCallback(() => setVersion((v) => v + 1), []);
   const created = (ref: LeadRef) => {
     changed();
@@ -67,7 +66,7 @@ export function LeadsView() {
           empty={
             <EmptyState title={t("leads.empty")} description={t(filtered ? "leads.empty.filtered" : gmbs !== null ? "leads.empty.selection" : "leads.empty.none")}>
               {filtered && (
-                <Button variant="outline" size={button()} onClick={() => replaceQuery(new URLSearchParams())}>
+                <Button variant="outline" size={button()} onClick={() => show({})}>
                   {t("leads.resetFilters")}
                 </Button>
               )}
@@ -79,7 +78,7 @@ export function LeadsView() {
       <PanelOverlay open={open !== null} onOpenChange={(o) => !o && openLead(null)} title={t("card.title")} desktop="sheet">
         {/* Keyed by lead, not the overlay: another lead in the open sheet starts a fresh card (what it has
             seen of the last one is not "changed elsewhere"), and the sheet itself stays mounted. */}
-        {shown && <LeadCardPanel key={encodeRef(shown)} leadRef={shown} version={version} onChanged={changed} />}
+        {shown && <LeadCardPanel key={`${shown.brand}/${shown.lead}`} leadRef={shown} version={version} onChanged={changed} />}
       </PanelOverlay>
       <OutcomeSheet />
     </CallFlowProvider>

@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import { bookingWhen } from "@/entities/lead/lib/booking-text";
 import { rankCandidates, sameContact, typedId } from "@/features/attach-booking/model/candidates";
-import { leadFilterFrom, narrows, paramsWith } from "@/features/lead-filters/model/params";
 import { bookingRefusal } from "@/features/manage-booking/model/failure";
 import { slotBody, slotDraftOf, slotProblems } from "@/features/manage-booking/model/slot-draft";
 import { attemptFor } from "@/shared/api/idempotency";
@@ -91,21 +90,6 @@ describe("the Idempotency-Key", () => {
     const first = attemptFor(null, { status: "done" }, mint);
     expect(attemptFor(first, { status: "done" }, mint)).toBe(first);
     expect(attemptFor(first, { status: "no_show" }, mint).key).toBe("k2");
-  });
-});
-
-describe("the booking filter in the URL", () => {
-  it("takes a status the API takes and nothing else", () => {
-    expect(leadFilterFrom(new URLSearchParams("booking=booked")).booking).toBe("booked");
-    expect(leadFilterFrom(new URLSearchParams("booking=none")).booking).toBe("none");
-    expect(leadFilterFrom(new URLSearchParams("booking=pending")).booking).toBeNull();
-  });
-
-  it("goes into the URL and back, and narrows the list", () => {
-    const on = paramsWith(new URLSearchParams("stage=created"), { booking: "no_show" });
-    expect(on.toString()).toBe("stage=created&booking=no_show");
-    expect(narrows(leadFilterFrom(new URLSearchParams("booking=requested")))).toBe(true);
-    expect(paramsWith(on, { booking: null }).toString()).toBe("stage=created");
   });
 });
 

@@ -6,21 +6,21 @@ Design, `@evinvest/uikit`, React in the elements' light DOM (the org's MFE patte
 ```text
 <mfe-sites-nav  api="/api/sites" base="/sites" csrf-cookie="…">   the Sites dropdown: Work (Leads● Locations Pricing
                                                                     Invoices), Analysis (Overview Experiments), by /me
-<mfe-sites-panel api="/api/sites" base="/sites" csrf-cookie="…">  the page: one screen per route under `base`
+<mfe-sites-panel api="/api/sites" base="/sites" csrf-cookie="…">  the page: one screen per view under `base`
 
+the views are the document's x-views (VIEWS, panel_server::views::View): each one's path, query keys, needs and key;
+`parse`/`href` (@evinvest/views) read and write them, `mayOpen` gates each screen
 /sites               → /sites/leads?stage=created (Work), /sites/overview (Analysis only), or "no access"
-/sites/leads  /sites/places  /sites/pricing  /sites/invoices      sa:sites:work:read
-/sites/overview  /sites/experiments                              sa:sites:analysis:read
-anything else under /sites                                       "nothing here"
+an href no view takes (another path, a key or a word it does not know)                    "nothing here"
 
 window events (CONTRACT §9)
   in:  ev:live {server message}   ev:live-status {status}   sa:gmbs {ids: number[] | null}
   out: ev:live-status-request     sa:gmbs-request   sa:title-count {count} (nav only)   sa:unauthenticated   ev:navigate {href}
-  from the nav element: ev:keymap — a key per view it lists (l p r i o e), under the scope its host assigns it
+  from the nav element: ev:keymap — each listed view's own key, under the scope its host assigns it
 ```
 
 ```text
-src/app/             the two elements: defineElement, the /me gate, the page's routes (screens are lazy chunks)
+src/app/             the two elements: defineElement, the /me gate, a screen per view (lazy chunks)
 src/views/           one slice per screen, plus nav/ (the dropdown, its marks)
 src/features/        call-lead · move-stage · record-payment · create-lead · lead-filters · funnel-filters ·
                      edit-place-settings · revert-place-change · withdraw-place · add-place · configure-experiment ·

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import { quotedPrice } from "@/entities/lead/model/pricing";
-import { leadFilterFrom, narrows, paramsWith } from "@/features/lead-filters/model/params";
 import { formatCents, formatDay } from "@/shared/lib/format";
 
 describe("a lead's form variant", () => {
@@ -9,22 +8,6 @@ describe("a lead's form variant", () => {
     expect(quotedPrice({ flow: "fixed", quoted_cents: 8_900 })).toBe(8_900);
     expect(quotedPrice({ flow: "quote", quoted_cents: 8_900 })).toBeNull();
     expect(quotedPrice({ flow: null, quoted_cents: null })).toBeNull();
-  });
-});
-
-describe("the flow filter", () => {
-  it("takes only the API's words, and is every lead otherwise (the API answers 400 to the rest)", () => {
-    expect(leadFilterFrom(new URLSearchParams("flow=estimate")).flow).toBe("estimate");
-    expect(leadFilterFrom(new URLSearchParams("flow=Estimate")).flow).toBeNull();
-    expect(leadFilterFrom(new URLSearchParams("flow=auction")).flow).toBeNull();
-  });
-
-  it("goes into the URL and back out, and counts as a filter", () => {
-    const on = paramsWith(new URLSearchParams("stage=created"), { flow: "fixed" });
-    expect(on.toString()).toBe("stage=created&flow=fixed");
-    expect(narrows(leadFilterFrom(on), ["flow"])).toBe(true);
-    expect(paramsWith(on, { flow: null }).toString()).toBe("stage=created");
-    expect(narrows(leadFilterFrom(new URLSearchParams()))).toBe(false);
   });
 });
 

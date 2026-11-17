@@ -1,6 +1,7 @@
 import { MESSENGERS, type Messenger } from "@evinvest/sites-contract";
 
-import type { Lead, operations } from "@/shared/api/schema";
+import type { Lead } from "@/shared/api/schema";
+import type { ViewParams } from "@/shared/lib/router";
 
 import { CONTACT_SLA_SECONDS } from "./generated";
 
@@ -20,10 +21,10 @@ export function awaitingMessage(lead: Pick<Lead, "channel" | "messaged_at">): Me
   return MESSENGERS.find((m) => m === lead.channel) ?? null;
 }
 
-/** What narrows the queue, as `GET /leads` takes it; the GMBs are the host's selection, beside it. */
-export type LeadFilter = Omit<NonNullable<operations["list_leads"]["parameters"]["query"]>, "gmb" | "cursor" | "limit">;
+/** What narrows the queue: the leads view's own params, `GET /leads`' filter; the GMBs are the host's selection, beside it. */
+export type LeadFilter = Omit<ViewParams<"leads">, "lead">;
 
-/** A lead's address in the API and in the page URL: `brand/lead`. */
+/** A lead's address in the API: its brand and its id, the path's two parameters. */
 export interface LeadRef {
   brand: string;
   lead: string;
@@ -31,17 +32,6 @@ export interface LeadRef {
 
 export function refOf(lead: Pick<Lead, "brand" | "lead_id">): LeadRef {
   return { brand: lead.brand, lead: lead.lead_id };
-}
-
-export function encodeRef(ref: LeadRef): string {
-  return `${ref.brand}/${ref.lead}`;
-}
-
-export function decodeRef(raw: string | null): LeadRef | null {
-  if (!raw) return null;
-  const at = raw.indexOf("/");
-  if (at <= 0 || at === raw.length - 1) return null;
-  return { brand: raw.slice(0, at), lead: raw.slice(at + 1) };
 }
 
 /** What the customer left, the known fields picked out as text. */

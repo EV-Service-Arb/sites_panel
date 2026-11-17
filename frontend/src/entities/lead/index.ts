@@ -1,6 +1,6 @@
 export { bookingActions } from "./model/booking";
 export type { BookingAction } from "./model/booking";
-export { LABELLED_PII, awaitingMessage, contactOf, extrasOf, fieldsOf, dialable, slaAt, decodeRef, encodeRef, reached, refOf } from "./model/lead";
+export { LABELLED_PII, awaitingMessage, contactOf, extrasOf, fieldsOf, dialable, slaAt, reached, refOf } from "./model/lead";
 export type { Contact, LabelledPii, LeadFilter, LeadRef } from "./model/lead";
 export type { BookingSlot as SlotBody, BookingEnd as CloseBody, Lead, LeadBooking, LeadCard, LeadCounts, LeadEvent, LeadPage, ManualChannel, Stage, StageMove } from "@/shared/api/schema";
 export { quotedPrice } from "./model/pricing";

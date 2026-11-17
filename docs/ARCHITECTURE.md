@@ -118,12 +118,13 @@ frontend/                            the `mfe-sites` bundle: <mfe-sites-panel> (
                                      under `base`) and <mfe-sites-nav> (the conductor's Sites
                                      dropdown); `npm run build` → dist/ (PANEL_MFE_DIR); the
                                      element API (attributes, window events, routes) in its README
-  src/app/                           defineElement, the /me gate, the page's routes (a lazy chunk
+  src/app/                           defineElement, the /me gate, a screen per view (a lazy chunk
                                      per screen)
   src/shared/api/                    `api()`: @evinvest/api over the committed openapi.json; reads
                                      follow their `x-sa-reads` over the host's relayed socket
                                      (ev:live, ev:live-status)
-  src/shared/lib/router.ts           one location for both elements under `base`
+  src/shared/lib/router.ts           one location for both elements under `base`, read and
+                                     written as VIEWS' views (@evinvest/views)
 ```
 
 ## The contract with the sites
