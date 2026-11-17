@@ -103,10 +103,11 @@ crates/panel_server/                 the `sites_panel` binary: CLI and HTTP, thi
   src/settings.rs                    the environment (ev_lib `settings!`)
   src/testing.rs                     (feature `testing`) the router called as the conductor calls it
 crates/panel_gen/                    `nix run .#gen` (ev_lib `ts_gen`), committed, re-run by the
-                                     pre-commit hook: the front end's own mirror of Rust types
-                                     and tables (frontend/**/generated.ts), and the generated
-                                     half of ts/sites-contract (panel_core's shapes and the
-                                     protos as protojson)
+                                     pre-commit hook: /api/v1's openapi.json (and its schema.ts),
+                                     VIEWS, what no wire type says (frontend/**/generated.ts: the
+                                     contact SLA, the booking actions per status), and the
+                                     generated half of ts/sites-contract (panel_core's shapes and
+                                     the protos as protojson)
 ts/sites-contract/                   @evinvest/sites-contract (npm): the contract's one TS form
                                      — what the sites build against, the front end imports by
                                      path; released by an `@evinvest/sites-contract-v*` tag
@@ -119,8 +120,10 @@ frontend/                            the `mfe-sites` bundle: <mfe-sites-panel> (
                                      element API (attributes, window events, routes) in its README
   src/app/                           defineElement, the /me gate, the page's routes (a lazy chunk
                                      per screen)
+  src/shared/api/                    `api()`: @evinvest/api over the committed openapi.json; reads
+                                     follow their `x-sa-reads` over the host's relayed socket
+                                     (ev:live, ev:live-status)
   src/shared/lib/router.ts           one location for both elements under `base`
-  src/shared/lib/live/               the host's relayed socket (sa:live, sa:live-status)
 ```
 
 ## The contract with the sites

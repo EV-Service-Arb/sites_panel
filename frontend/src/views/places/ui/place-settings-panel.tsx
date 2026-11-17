@@ -1,13 +1,14 @@
+import { useResource } from "@evinvest/api/react";
 import { Alert, AlertDescription, Badge, Settled, Skeleton, Tabs, TabsContent, TabsList, TabsTrigger } from "@evinvest/uikit";
 import { useCallback, useState } from "react";
 
-import { type PlaceKey, type PlaceSettingsView, fetchPlaceSettings, followsPlace, savedSince } from "@/entities/place";
-import { may, useMe } from "@/entities/session";
+import { type PlaceKey, type PlaceSettingsView, savedSince } from "@/entities/place";
+import { useMe } from "@/entities/session";
 import { SettingsForm, SettingsSummary } from "@/features/edit-place-settings";
 import { WithdrawButton } from "@/features/withdraw-place";
+import { api } from "@/shared/api";
 import { useLocale, useT } from "@/shared/i18n";
 import { formatDateTime } from "@/shared/lib/format";
-import { useResource } from "@/shared/lib/use-resource";
 import { ErrorState } from "@/shared/ui/error-state";
 
 import { PlaceHistory } from "./place-history";
@@ -25,8 +26,7 @@ export function PlaceSettingsPanel({ place, onChanged }: { place: PlaceKey; onCh
   const [version, setVersion] = useState(0);
   const [saved, setSaved] = useState(false);
   const [pinned, setPinned] = useState<PlaceSettingsView | null>(null);
-  const id = `${place.brand}/${place.slug}`;
-  const settings = useResource(`settings:${id}:${version}`, () => fetchPlaceSettings(place), `settings:${id}`, { live: followsPlace(place) });
+  const settings = useResource(api(), "/places/{brand}/{slug}/settings", { params: { path: place } });
   const latest = settings.status === "ok" ? settings.data : null;
   if (latest !== null && pinned === null) setPinned(latest);
 
@@ -35,6 +35,7 @@ export function PlaceSettingsPanel({ place, onChanged }: { place: PlaceKey; onCh
     setSaved(note);
     setPinned(view ?? null);
     setVersion((v) => v + 1);
+    settings.reload();
     onChanged();
   };
   const takeFresh = useCallback(() => {
@@ -100,7 +101,7 @@ function PlacePanes({ base, latest, version, saved, onWritten, onReload, onTakeF
           <PlaceHistory view={base} version={version} onChanged={onWritten} onReload={() => onReload()} />
         </TabsContent>
       </Tabs>
-      {may(me, "sa:sites:work:places:edit") && (
+      {api().mayCall("post", "/places/{brand}/{slug}/withdraw", me.permissions) && (
         // Last and apart: taking a point off the site is rare and not part of editing it.
         <div className="flex flex-col items-start gap-2 border-t border-border pt-4">
           <WithdrawButton place={latest} onChanged={onReload} />

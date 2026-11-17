@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { type PricingItem, pricingSavedSince } from "@/entities/pricing";
 import { tryClear } from "@/features/clear-pricing/model/clear";
-import { type Resource, shownOf } from "@/shared/lib/use-resource";
 import { pinFrom } from "@/views/pricing/model/pin";
 
 const cleaning = JSON.parse(readFileSync(new URL("../../contracts/vectors/pricing/valid/cleaning.json", import.meta.url), "utf8")) as PricingModel;
@@ -16,22 +15,19 @@ const item = (updated_at: string, model: PricingModel | null = cleaning, by = "a
   updated_at,
   updated_by: by,
 });
-const ok = (data: PricingItem): Resource<PricingItem> => ({ status: "ok", data });
-const GROUP = "pricing:vifnet";
+const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 /**
  * The screen's loop around a write, as BrandPricing runs it: `written(item?)`
- * pins `item` (or nothing) and moves the read to the next version; a render
- * pins from the read only through `pinFrom`.
+ * pins `item` (or nothing) and reloads the read, whose last answer stays on
+ * screen, not fresh, until the next lands; a render pins from the read only through `pinFrom`.
  */
 function screen(first: PricingItem) {
-  let version = 0;
   let pinned: PricingItem | null = null;
-  let answered = { key: `${GROUP}:0`, group: GROUP, tick: 0, value: ok(first) };
+  let shown = { latest: first, fresh: true };
   const render = () => {
-    const shown = shownOf(answered, `${GROUP}:${version}`, GROUP, 0);
-    const latest = shown.value.status === "ok" ? shown.value.data : null;
-    pinned = pinFrom(pinned, latest, shown.fresh) ?? pinned;
+    const { latest, fresh } = shown;
+    pinned = pinFrom(pinned, latest, fresh) ?? pinned;
     const someoneElse = latest !== null && pinned !== null && pricingSavedSince(latest, pinned);
     return { pinned, latest, someoneElse };
   };
@@ -39,11 +35,11 @@ function screen(first: PricingItem) {
     render,
     written(next?: PricingItem) {
       pinned = next ?? null;
-      version += 1;
+      shown = { ...shown, fresh: false };
       return render();
     },
     land(read: PricingItem) {
-      answered = { key: `${GROUP}:${version}`, group: GROUP, tick: 0, value: ok(read) };
+      shown = { latest: read, fresh: true };
       return render();
     },
   };
@@ -51,24 +47,11 @@ function screen(first: PricingItem) {
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe("a read moved to a newer version", () => {
-  it("keeps the last answer on screen, marked not fresh, until its own lands", () => {
-    const before = { key: `${GROUP}:0`, group: GROUP, tick: 0, value: ok(item("2026-10-03T12:00:00Z")) };
-    expect(shownOf(before, `${GROUP}:1`, GROUP, 0)).toEqual({ value: before.value, fresh: false });
-    expect(shownOf({ ...before, key: `${GROUP}:1` }, `${GROUP}:1`, GROUP, 0).fresh).toBe(true);
-  });
-
-  it("is loading, not another record's answer, outside its group", () => {
-    const other = { key: "pricing:aquafix:0", group: "pricing:aquafix", tick: 0, value: ok(item("2026-10-03T12:00:00Z")) };
-    expect(shownOf(other, `${GROUP}:0`, GROUP, 0)).toEqual({ value: { status: "loading" }, fresh: false });
-  });
-});
-
 describe("one's own write is never someone else's", () => {
   it("taking the pricing off pins what the DELETE answered", async () => {
     const before = item("2026-10-03T12:00:00Z");
     const removed = item("2026-10-03T13:00:00Z", null);
-    vi.stubGlobal("fetch", async () => new Response(JSON.stringify(removed), { status: 200 }));
+    vi.stubGlobal("fetch", async () => json(200, removed));
     const outcome = await tryClear(before);
     expect(outcome).toEqual({ kind: "cleared", item: removed });
     if (outcome.kind !== "cleared") throw new Error("not cleared");
@@ -89,7 +72,7 @@ describe("one's own write is never someone else's", () => {
     expect(s.land(removed)).toMatchObject({ pinned: removed, someoneElse: false });
   });
 
-  it("'Load latest' after a 409 that named nothing loads the fresh pricing at once", () => {
+  it("'Load latest' after a stale write loads the fresh pricing at once", () => {
     const mine = item("2026-10-03T12:00:00Z");
     const theirs = item("2026-10-03T12:30:00Z", cleaning, "colleague@example.test");
     const s = screen(mine);
@@ -100,14 +83,14 @@ describe("one's own write is never someone else's", () => {
 });
 
 describe("taking the pricing off when someone wrote first", () => {
-  it("hands back what they wrote, so it is shown rather than removed unseen", async () => {
+  it("reads the brand again and hands back what they wrote, so it is shown rather than removed unseen", async () => {
     const theirs = item("2026-10-03T12:30:00Z", cleaning, "colleague@example.test");
-    vi.stubGlobal("fetch", async () => new Response(JSON.stringify({ error: "stale", current: theirs }), { status: 409 }));
+    const asked: string[] = [];
+    vi.stubGlobal("fetch", async (request: Request) => {
+      asked.push(`${request.method} ${new URL(request.url).pathname}`);
+      return request.method === "DELETE" ? json(409, { code: "stale", error: "someone saved first" }) : json(200, theirs);
+    });
     expect(await tryClear(item("2026-10-03T12:00:00Z"))).toEqual({ kind: "conflict", current: theirs });
-  });
-
-  it("has nothing to hand back when the 409 names nothing", async () => {
-    vi.stubGlobal("fetch", async () => new Response(JSON.stringify({ error: "stale" }), { status: 409 }));
-    expect(await tryClear(item("2026-10-03T12:00:00Z"))).toEqual({ kind: "conflict", current: null });
+    expect(asked).toEqual(["DELETE /api/sites/pricing/vifnet", "GET /api/sites/pricing/vifnet"]);
   });
 });

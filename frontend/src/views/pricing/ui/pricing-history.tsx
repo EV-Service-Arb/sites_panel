@@ -1,11 +1,13 @@
+import { useResource } from "@evinvest/api/react";
 import { Card, CardContent, CardHeader, CardTitle, Collapsible, CollapsibleContent, CollapsibleTrigger, Skeleton, buttonVariants, cn } from "@evinvest/uikit";
 import { ChevronDown } from "lucide-react";
 import { useState } from "react";
 
-import { type PricingChange, changedParts, fetchPricingChanges, followsPricing } from "@/entities/pricing";
+import type { PricingChange } from "@/entities/pricing";
+import { api } from "@/shared/api";
 import { useLocale, useT } from "@/shared/i18n";
 import { formatDay, formatMoment } from "@/shared/lib/format";
-import { useResource } from "@/shared/lib/use-resource";
+import { useRereadOn } from "@/shared/lib/use-reread-on";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { ErrorState } from "@/shared/ui/error-state";
 
@@ -32,24 +34,24 @@ export function PricingHistory({ brand, version }: { brand: string; version: num
 
 function ChangeList({ brand, version }: { brand: string; version: number }) {
   const t = useT();
-  const changes = useResource(`pricing-changes:${brand}:${version}`, () => fetchPricingChanges(brand), `pricing-changes:${brand}`, { live: followsPricing(brand) });
+  const changes = useResource(api(), "/pricing/{brand}/changes", { params: { path: { brand } } });
+  useRereadOn(version, changes.reload);
   if (changes.status === "loading") return <Skeleton className="h-24 w-full" />;
   if (changes.status === "error") return <ErrorState failure={changes.failure} onRetry={changes.reload} />;
-  if (changes.data.length === 0) return <EmptyState className="p-4" title={t("pricing.history.empty")} />;
+  if (changes.data.changes.length === 0) return <EmptyState className="p-4" title={t("pricing.history.empty")} />;
   return (
     <ul className="flex flex-col">
-      {/* Newest first: the change before a row is the next one in the list. */}
-      {changes.data.map((c, i) => (
-        <ChangeRow key={c.id} change={c} before={changes.data[i + 1]} />
+      {changes.data.changes.map((c) => (
+        <ChangeRow key={c.id} change={c} />
       ))}
     </ul>
   );
 }
 
-function ChangeRow({ change, before }: { change: PricingChange; before: PricingChange | undefined }) {
+function ChangeRow({ change }: { change: PricingChange }) {
   const t = useT();
   const locale = useLocale();
-  const parts = changedParts(change.model, before?.model);
+  const parts = change.changed;
   return (
     <li className="flex flex-col gap-0.5 border-b border-border py-2 text-sm last:border-b-0">
       <span className="text-ink-mid">{t("pricing.history.by", { at: formatMoment(change.at, locale), by: change.by })}</span>

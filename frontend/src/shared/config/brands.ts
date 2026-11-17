@@ -1,4 +1,8 @@
-/** Lowercase slug of 1–64 of [a-z0-9_-], as `panel_core::ids::is_slug` takes it. */
+import openapi from "@/shared/api/openapi.json";
+
+const SLUG = new RegExp(openapi.components.schemas.BrandId.pattern);
+
+/** A brand's slug as the document's `BrandId` takes it; a new place's slug, its landing's subdomain, is held to it too. */
 export function isSlug(s: string): boolean {
-  return /^[a-z0-9][a-z0-9_-]{0,63}$/.test(s);
+  return SLUG.test(s);
 }

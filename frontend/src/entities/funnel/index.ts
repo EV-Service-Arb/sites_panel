@@ -1,4 +1,3 @@
-export { fetchFunnel, fetchFunnelByLocation } from "./api/funnel";
-export type { FunnelFilter } from "./api/funnel";
-export { FUNNEL_STAGES, biggestLoss, funnelByLocationParser, funnelParser } from "./model/funnel";
-export type { Funnel, FunnelByLocation, FunnelStage, FunnelStep, LocationSlice, Paid } from "./model/funnel";
+export { biggestLoss, byLocation, wholeOf } from "./model/funnel";
+export type { WholeFunnel } from "./model/funnel";
+export type { FunnelStep, LocationFunnel as LocationSlice, Paid } from "@/shared/api/schema";

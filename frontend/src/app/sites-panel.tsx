@@ -1,8 +1,8 @@
 import { Skeleton, Toaster } from "@evinvest/uikit";
 import { type ComponentType, Suspense, lazy, useEffect } from "react";
 
-import { may, useMe } from "@/entities/session";
-import type { Me, Permission } from "@/shared/api";
+import { useMe } from "@/entities/session";
+import type { Me, Permission } from "@/shared/api/schema";
 import { host } from "@/shared/config/host";
 import { useT } from "@/shared/i18n";
 import { type Route, navigate, placeOf, usePathname } from "@/shared/lib/router";
@@ -21,8 +21,8 @@ const SCREENS: Record<Route, { view: ComponentType; needs: Permission }> = {
 
 /** Where `base` itself leads (spec §10): the queue of new leads for whoever works them, else the funnel. */
 function startOf(me: Me, base: string): string | null {
-  if (may(me, "sa:sites:work:read")) return `${base}/leads?stage=created`;
-  return may(me, "sa:sites:analysis:read") ? `${base}/overview` : null;
+  if (me.permissions.includes("sa:sites:work:read")) return `${base}/leads?stage=created`;
+  return me.permissions.includes("sa:sites:analysis:read") ? `${base}/overview` : null;
 }
 
 export const PageSkeleton = () => <Skeleton className="m-6 h-64" />;
@@ -54,7 +54,7 @@ export function SitesPanel() {
       break;
     case "route": {
       const { view: View, needs } = SCREENS[place.route];
-      page = may(me, needs) ? (
+      page = me.permissions.includes(needs) ? (
         <Suspense fallback={<PageSkeleton />}>
           <View />
         </Suspense>

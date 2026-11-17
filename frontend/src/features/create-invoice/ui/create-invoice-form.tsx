@@ -1,14 +1,14 @@
 import { Button, Field, FieldDescription, FieldError, FieldLabel, Input, toast } from "@evinvest/uikit";
 import { useId, useState } from "react";
 
-import { type Invoice, MAX_EXPIRES_IN_DAYS, MAX_MEMO_CHARS, MIN_EXPIRES_IN_DAYS, createInvoice } from "@/entities/invoice";
-import { ApiError } from "@/shared/api";
+import { type Invoice, MAX_EXPIRES_IN_DAYS, MAX_MEMO_CHARS, MIN_EXPIRES_IN_DAYS } from "@/entities/invoice";
+import { type Failure, api } from "@/shared/api";
 import { type T, useT } from "@/shared/i18n";
 import { useKeyedWrite } from "@/shared/lib/use-keyed-write";
 import { notifyFailure } from "@/shared/ui/notify";
 import { useButtonSize, useControlSize } from "@/shared/ui/touch";
 
-import { type DraftProblem, type InvoiceDraft, conflictReason, invoiceFrom, keepsKey } from "../model/draft";
+import { type DraftProblem, type InvoiceDraft, invoiceFrom, keepsKey } from "../model/draft";
 
 const EMPTY: InvoiceDraft = { amount: "", memo: "", days: "7" };
 
@@ -31,10 +31,12 @@ export function CreateInvoiceForm({ onCreated }: { onCreated: (invoice: Invoice)
     // A box, not a `let`: the compiler does not see the assignment inside the callback.
     const created: { invoice: Invoice | null } = { invoice: null };
     const result = await write.run(outcome.invoice, async (key) => {
-      created.invoice = await createInvoice(outcome.invoice, key);
+      const answer = await api().POST("/invoices", { params: { header: { "Idempotency-Key": key } }, body: outcome.invoice });
+      if (answer.error === undefined) created.invoice = answer.data;
+      return answer;
     });
     if (!result.ok) {
-      failed(result.error, t, write.forget);
+      failed(result.failure, t, write.forget);
       return;
     }
     toast.positive(t("invoices.created"));
@@ -75,14 +77,19 @@ export function CreateInvoiceForm({ onCreated }: { onCreated: (invoice: Invoice)
 }
 
 /** A refusal drops the key, so the next submit is a new request; anything else keeps it for the retry. */
-function failed(error: unknown, t: T, forget: () => void): void {
-  if (!(error instanceof ApiError)) {
-    notifyFailure(error, t);
-    return;
+function failed(failure: Failure, t: T, forget: () => void): void {
+  if (!keepsKey(failure)) forget();
+  switch (failure.code) {
+    case "invoice_not_open":
+    case "invoice_processing":
+    case "scope_frozen":
+    case "idempotency_conflict":
+      return void toast.error(t(`invoices.conflict.${failure.code}`));
+    case "invoices_unavailable":
+    case "ledger_unavailable":
+    case "not_granted":
+      return void toast.error(t("invoices.unavailable"));
+    default:
+      notifyFailure(failure, t);
   }
-  if (!keepsKey(error.failure)) forget();
-  const reason = conflictReason(error.failure);
-  if (reason) toast.error(t(`invoices.conflict.${reason}`));
-  else if (error.failure.kind === "unavailable") toast.error(t("invoices.unavailable"));
-  else notifyFailure(error, t);
 }

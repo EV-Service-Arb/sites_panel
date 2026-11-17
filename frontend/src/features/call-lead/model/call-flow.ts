@@ -1,12 +1,10 @@
 import type { LeadRef } from "@/entities/lead";
-
-/** What a person can know about a call without telephony (spec §10a). */
-export const CALL_OUTCOMES = ["answered", "no_answer", "wrong_number", "later"] as const;
-export type CallOutcome = (typeof CALL_OUTCOMES)[number];
+import type { Failure } from "@/shared/api";
+import type { CallOutcome } from "@/shared/api/schema";
 
 export interface CallApi {
-  attempt(ref: LeadRef): Promise<string>;
-  outcome(ref: LeadRef, attemptId: string, outcome: CallOutcome): Promise<void>;
+  attempt(ref: LeadRef): Promise<{ attemptId: string } | { failure: Failure }>;
+  outcome(ref: LeadRef, attemptId: string, outcome: CallOutcome): Promise<Failure | null>;
 }
 
 /** The page's visibility, as `document.visibilityState` and `visibilitychange` give it. */
@@ -30,7 +28,7 @@ export type CallState =
  */
 export class CallFlow {
   private state: CallState = { phase: "idle" };
-  private attempt: Promise<string> | null = null;
+  private attempt: ReturnType<CallApi["attempt"]> | null = null;
   private leftPage = false;
   private readonly unsubscribe: () => void;
 
@@ -46,18 +44,16 @@ export class CallFlow {
     return this.state;
   }
 
-  /** Records the attempt; rejects (and forgets the call) if the backend refused it. */
-  async start(ref: LeadRef): Promise<void> {
+  /** Records the attempt; a refusal forgets the call, and is what it answers. */
+  async start(ref: LeadRef): Promise<Failure | null> {
     this.leftPage = this.visibility.hidden();
     this.attempt = this.api.attempt(ref);
     this.set({ phase: "dialing", ref });
-    try {
-      await this.attempt;
-    } catch (e) {
-      this.attempt = null;
-      this.set({ phase: "idle" });
-      throw e;
-    }
+    const answered = await this.attempt;
+    if (!("failure" in answered)) return null;
+    this.attempt = null;
+    this.set({ phase: "idle" });
+    return answered.failure;
   }
 
   ask(): void {
@@ -72,13 +68,17 @@ export class CallFlow {
     }
   }
 
-  async answer(outcome: CallOutcome): Promise<void> {
-    if (this.state.phase !== "asking" || !this.attempt) return;
+  /** The refusal of the attempt or of the outcome, if either was refused. */
+  async answer(outcome: CallOutcome): Promise<Failure | null> {
+    if (this.state.phase !== "asking" || !this.attempt) return null;
     const { ref } = this.state;
-    const attemptId = await this.attempt;
-    await this.api.outcome(ref, attemptId, outcome);
+    const attempt = await this.attempt;
+    if ("failure" in attempt) return attempt.failure;
+    const refused = await this.api.outcome(ref, attempt.attemptId, outcome);
+    if (refused !== null) return refused;
     this.attempt = null;
     this.set({ phase: "idle" });
+    return null;
   }
 
   dispose(): void {

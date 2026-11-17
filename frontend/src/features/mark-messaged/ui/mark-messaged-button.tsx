@@ -1,7 +1,8 @@
 import type { Messenger } from "@evinvest/sites-contract";
 import { Button, toast } from "@evinvest/uikit";
 
-import { type Lead, markMessaged, refOf } from "@/entities/lead";
+import { type Lead, refOf } from "@/entities/lead";
+import { api } from "@/shared/api";
 import { useT } from "@/shared/i18n";
 import { useKeyedWrite } from "@/shared/lib/use-keyed-write";
 import { notifyFailure } from "@/shared/ui/notify";
@@ -18,8 +19,10 @@ export function MarkMessagedButton({ lead, channel, onMarked }: { lead: Lead; ch
   const { busy, run } = useKeyedWrite();
 
   const mark = async () => {
-    const outcome = await run({ brand: lead.brand, lead: lead.lead_id, channel }, (key) => markMessaged(refOf(lead), channel, key));
-    if (!outcome.ok) return notifyFailure(outcome.error, t);
+    const outcome = await run({ brand: lead.brand, lead: lead.lead_id, channel }, (key) =>
+      api().POST("/leads/{brand}/{lead}/messaged", { params: { path: refOf(lead), header: { "Idempotency-Key": key } }, body: { channel } }),
+    );
+    if (!outcome.ok) return notifyFailure(outcome.failure, t);
     toast.positive(t("move.saved"));
     onMarked();
   };

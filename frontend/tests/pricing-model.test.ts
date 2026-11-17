@@ -180,7 +180,7 @@ describe("a server path, onto the editor's field", () => {
   it("leaves what no field holds for the top of the form", () => {
     expect(fieldOfPath("format", draft)).toBeNull();
     expect(fieldOfPath("", draft)).toBeNull();
-    const errors = errorsOf([], false, { field: null, path: "currency", message: "EUR" });
+    const errors = errorsOf([], false, "currency: EUR");
     expect(errors.general).toEqual([{ text: "currency: EUR" }]);
   });
 });

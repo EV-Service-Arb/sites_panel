@@ -41,17 +41,6 @@ describe("what else the customer left", () => {
       { key: "extra", value: '{"floor":2}' },
       { key: "zone", value: "<b>east</b>" },
     ]);
-    expect(extrasOf(null)).toEqual({ labelled: [], other: [] });
-  });
-});
-
-describe("the suspect mark", () => {
-  it("is null, or one of the antispam's two words", async () => {
-    const { leadParser } = await import("@/entities/lead/model/lead");
-    const { parse } = await import("@/shared/lib/parse");
-    const row = { brand: "a", lead_id: "l", stage: "created", manual: false, last_event_at: "t" };
-    expect(parse(leadParser, row).suspect).toBeNull();
-    expect(parse(leadParser, { ...row, suspect: "too_fast" }).suspect).toBe("too_fast");
-    expect(() => parse(leadParser, { ...row, suspect: "maybe" })).toThrow(/suspect/);
+    expect(extrasOf(undefined)).toEqual({ labelled: [], other: [] });
   });
 });

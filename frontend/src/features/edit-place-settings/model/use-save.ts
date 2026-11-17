@@ -1,15 +1,15 @@
 import { useState } from "react";
 
-import { type PlaceKey, type PlaceSettings, type PlaceSettingsView, savePlaceSettings } from "@/entities/place";
-import { ApiError } from "@/shared/api";
+import { type PlaceKey, type PlaceSettings, type PlaceSettingsView, settingsToWire } from "@/entities/place";
+import { api } from "@/shared/api";
 import { useT } from "@/shared/i18n";
 import { notifyFailure } from "@/shared/ui/notify";
 
-/** `invalid`: the 422's `fields`, each path with the server's reason. */
-export type SaveState = { kind: "idle" } | { kind: "saving" } | { kind: "conflict" } | { kind: "invalid"; fields: Record<string, string> };
+/** `invalid`: the server's own words, the first problem it found (the form ran the same check before sending). */
+export type SaveState = { kind: "idle" } | { kind: "saving" } | { kind: "conflict" } | { kind: "invalid"; message: string };
 
 /**
- * A PUT against the `updated_at` the form was read at. A 409 and a 422 become
+ * A PUT against the `updated_at` the form was read at. A stale one and a refused one become
  * states the form shows in place; anything else is a toast.
  */
 export function useSave(key: PlaceKey, expectedUpdatedAt: string | null, onSaved: (view: PlaceSettingsView) => void) {
@@ -18,18 +18,16 @@ export function useSave(key: PlaceKey, expectedUpdatedAt: string | null, onSaved
 
   const save = async (settings: PlaceSettings) => {
     setState({ kind: "saving" });
-    try {
-      const view = await savePlaceSettings(key, settings, expectedUpdatedAt);
-      setState({ kind: "idle" });
-      onSaved(view);
-    } catch (e) {
-      if (e instanceof ApiError && e.failure.kind === "conflict") return setState({ kind: "conflict" });
-      if (e instanceof ApiError && e.failure.kind === "invalid_fields") return setState({ kind: "invalid", fields: e.failure.fields });
-      setState({ kind: "idle" });
-      notifyFailure(e, t);
-    }
+    const { data, error } = await api().PUT("/places/{brand}/{slug}/settings", {
+      params: { path: key },
+      body: { settings: settingsToWire(settings), expected_updated_at: expectedUpdatedAt },
+    });
+    if (error?.code === "stale") return setState({ kind: "conflict" });
+    if (error?.code === "invalid_settings") return setState({ kind: "invalid", message: error.error });
+    setState({ kind: "idle" });
+    if (error !== undefined) return notifyFailure(error, t);
+    onSaved(data);
   };
 
-  const refused = state.kind === "invalid" ? state.fields : {};
-  return { state, refused, save };
+  return { state, save };
 }

@@ -2246,7 +2246,6 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
- "ts-rs",
  "url",
  "uuid",
  "zeroize",

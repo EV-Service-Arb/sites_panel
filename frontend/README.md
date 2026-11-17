@@ -14,8 +14,8 @@ Design, `@evinvest/uikit`, React in the elements' light DOM (the org's MFE patte
 anything else under /sites                                       "nothing here"
 
 window events (CONTRACT §9)
-  in:  sa:live {server message}   sa:live-status {status}   sa:gmbs {ids: number[] | null}
-  out: sa:live-status-request     sa:gmbs-request   sa:title-count {count} (nav only)   sa:unauthenticated   ev:navigate {href}
+  in:  ev:live {server message}   ev:live-status {status}   sa:gmbs {ids: number[] | null}
+  out: ev:live-status-request     sa:gmbs-request   sa:title-count {count} (nav only)   sa:unauthenticated   ev:navigate {href}
   from the nav element: ev:keymap — a key per view it lists (l p r i o e), under the scope its host assigns it
 ```
 
@@ -26,8 +26,9 @@ src/features/        call-lead · move-stage · record-payment · create-lead ·
                      edit-place-settings · revert-place-change · withdraw-place · add-place · configure-experiment ·
                      edit-pricing · create-invoice · pay-invoice-element · …
 src/entities/        session (/me) · lead · funnel · experiment · place · pricing · booking · invoice
-src/shared/          api/ (fetch onto `api`, CSRF, the gate's answers), config/host.ts (the attributes, one set per
-                     page), lib/router.ts (one location for both elements), lib/live/ (the host's relayed socket), i18n/, ui/
+src/shared/          api/ (`api()`: @evinvest/api over the committed openapi.json, its schema.ts; CSRF on writes),
+                     config/host.ts (the attributes, one set per page), lib/router.ts (one location for both elements),
+                     i18n/, ui/
 messages/            en.json (the source of keys) and ru.json
 scripts/build.mjs    esbuild + Tailwind → dist/mfe-sites.{js,css} and dist/chunks/*-[hash].js
 tests/               vitest, in Node: the rules the screens obey live in plain modules
@@ -64,24 +65,28 @@ the nav's marks to both. Invoices name no place. The element never sets the sele
 
 ## Live updates
 
-The conductor owns the one socket and relays it on `window` (`sa:live`, `sa:live-status`); each element asks for the
-status as it mounts (`sa:live-status-request`), since the socket was up before it. A status back at `live` after a
-drop re-reads every mounted screen (events may have been missed), and so does every minute `offline`.
+The conductor owns the one socket and relays it on `window` (`ev:live`, `ev:live-status`); `@evinvest/api/react`
+asks for the status once per page (`ev:live-status-request`), since the socket was up before it. A status back at
+`live` after a drop re-reads every mounted read (events may have been missed), and so does every minute `offline`.
 
-Reads follow topics through `useResource(…, { live })`, debounced (a batch import sends one `changed` per event). What
-the screens do with it:
+Every read follows the tables its answer says it read (`x-sa-reads`): `useResource(api(), path, init)`, or `useLive` on
+an answer (the leads queue's first page), debounced (a batch import sends one change per row). What the screens do
+with it:
 
 - **Leads**: arrivals wait in a "New leads: N — Show" banner rather than moving
   the rows; rows on screen update in place and glow; a row that left the filter
   is re-read and kept. The open card follows its lead and notes a change made
-  elsewhere (the event names no person, so the note says when and what).
+  elsewhere (the change names no lead, so any write to the leads re-reads it;
+  the note says when and what).
 - **Locations**: an open form is never overwritten — with no edits it takes the
   newer data, with edits it says who saved and offers to load it (saving would
-  be refused with 409 anyway).
+  be refused as `stale` anyway).
 - **Nav**: Leads counts new leads since the screen was last in front of you (the
-  baseline kept in localStorage per `sub`), Locations the places changed,
-  Experiments a dot; opening the screen clears it. While the tab is not focused
-  the nav sends the count of new leads (`sa:title-count`) for the host's title.
+  baseline kept in localStorage per `sub`), Locations the places changed since,
+  Experiments a dot, each read off the times its list answers with (`changed_at`,
+  an experiment's declaration and override); opening the screen clears it. While
+  the tab is not focused the nav sends the count of new leads (`sa:title-count`)
+  for the host's title.
 
 ## Place settings
 
@@ -89,8 +94,9 @@ A location card opens its live site data (`SA-PANEL-PLACE-SETTINGS-SPEC.md`):
 phone, WhatsApp, opening hours and service area, which the site merges over its
 baked config within its 600 s fetch TTL. The form edits only those four; any
 other live field (address, geo, photo, landmark, rating) goes back as it came,
-since a save is a full replace guarded by `expected_updated_at` (409 → reload).
-A 422 names its fields and the form shows each reason on its field. The history
+since a save is a full replace guarded by `expected_updated_at` (`stale` → reload).
+The form runs the contract's own checks before saving; a refusal still shows the
+server's own words above it. The history
 reads each change as before → after, with a revert guarded the same way; an admin can withdraw a
 point (the site then answers 404 for it) and add one by hand, under a brand some place or price list already names.
 An operator reads.
@@ -107,5 +113,5 @@ The preview of the contact channels assumes the places' hours are Paris time
   Experiments screen is config: what each landing declared, the split it runs,
   and for an admin the kill switch, the weights and the holdout, with a link to
   the experiment's funnel in PostHog when the backend has a project configured.
-- **Lost reasons** are a slug the backend takes freely; the panel offers a fixed
-  list (`features/move-stage/model/moves.ts`) so the reports can group by it.
+- **Lost reasons** are the document's `LostReason` words, kept few so the reports compare;
+  a lead lost before them shows its slug as it came.

@@ -750,7 +750,15 @@
             "type": "integer"
           },
           "stage": {
-            "$ref": "#/components/schemas/Stage"
+            "enum": [
+              "created",
+              "contacted",
+              "quoted",
+              "won",
+              "completed",
+              "paid"
+            ],
+            "type": "string"
           }
         },
         "required": [
@@ -1370,6 +1378,15 @@
                 "type": "integer"
               }
             },
+            "required": [
+              "completed",
+              "contacted",
+              "created",
+              "lost",
+              "paid",
+              "quoted",
+              "won"
+            ],
             "type": "object"
           },
           "total": {
@@ -1554,10 +1571,7 @@
         "description": "A slice's funnel: its steps, the lost and manual shares, and its payments.",
         "properties": {
           "brand": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "location": {
             "type": [

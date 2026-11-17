@@ -904,7 +904,8 @@ export interface components {
             of_previous: components["schemas"]["Share"] | null;
             /** Format: uint64 */
             reached: number;
-            stage: components["schemas"]["Stage"];
+            /** @enum {string} */
+            stage: "created" | "contacted" | "quoted" | "won" | "completed" | "paid";
         };
         /** @description Degrees, on the globe. */
         Geo: {
@@ -1109,19 +1110,19 @@ export interface components {
             /** @description Every stage, 0 included. */
             stages: {
                 /** Format: uint64 */
-                completed?: number;
+                completed: number;
                 /** Format: uint64 */
-                contacted?: number;
+                contacted: number;
                 /** Format: uint64 */
-                created?: number;
+                created: number;
                 /** Format: uint64 */
-                lost?: number;
+                lost: number;
                 /** Format: uint64 */
-                paid?: number;
+                paid: number;
                 /** Format: uint64 */
-                quoted?: number;
+                quoted: number;
                 /** Format: uint64 */
-                won?: number;
+                won: number;
             };
             /** Format: uint64 */
             total: number;
@@ -1190,7 +1191,7 @@ export interface components {
         LocaleTag: string;
         /** @description A slice's funnel: its steps, the lost and manual shares, and its payments. */
         LocationFunnel: {
-            brand: string | null;
+            brand: string;
             location: string | null;
             lost: components["schemas"]["Share"];
             manual: components["schemas"]["Share"];
@@ -5914,6 +5915,7 @@ export const dayOfWeekValues: ReadonlyArray<FlattenedDeepRequired<components>["s
 export const dayPartValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["DayPart"]> = ["morning", "afternoon", "evening"];
 export const errorCodeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ErrorCode"]> = ["already_attached", "bad_request", "booking_done", "consent_expired", "forbidden", "gmb_taken", "google_refused", "google_unavailable", "idempotency_conflict", "idempotency_key_taken", "internal", "invalid_pricing", "invalid_settings", "invoice_not_open", "invoice_processing", "invoices_unavailable", "ledger_refused", "ledger_unavailable", "no_booking", "no_won_job", "not_booked", "not_found", "not_granted", "place_exists", "scope_frozen", "stale", "too_large", "unauthenticated"];
 export const funnelByValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["FunnelBy"]> = ["location"];
+export const funnelStepStageValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["FunnelStep"]["stage"]> = ["created", "contacted", "quoted", "won", "completed", "paid"];
 export const invoiceStateValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["InvoiceState"]> = ["cancelled", "expired", "creating", "open", "processing", "paid"];
 export const leadChannelValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["LeadChannel"]> = ["form", "phone_inbound", "callback", "whatsapp", "telegram"];
 export const leadFlowValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["LeadFlow"]> = ["quote", "estimate", "fixed"];

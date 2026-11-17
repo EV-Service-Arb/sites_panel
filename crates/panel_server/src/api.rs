@@ -26,7 +26,7 @@ use panel::{
 use panel_core::{
 	booking::{BookingMatch, BookingStatus, DayPart, Provider},
 	fact::{self, ContactChannel, LeadChannel, LeadFlow, LeadSuspect, LostReason, ManualChannel, MessageRef, Messenger},
-	funnel::{MIN_SAMPLE, Share},
+	funnel::{MIN_SAMPLE, Share, Totals},
 	ids::{JobId, LeadId, LocationId},
 	lead::Stage,
 	pricing::InputId,
@@ -35,7 +35,6 @@ use sa_auth::{Analysis, Catalog, Denied, Gate, Leads, PermissionSet, Pii as Sees
 use sa_core::{Invalid, ids::BrandId};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
-use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::http::ApiRoute;
@@ -49,10 +48,10 @@ const MAX_MINOR: i64 = 10_000_000_000;
 
 /// The currencies a quote or a payment may be in. Checked here, not in the registry: a rebuild
 /// must not re-judge what was journaled under an older list.
-#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize, strum::IntoStaticStr, strum::VariantArray)]
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize, strum::IntoStaticStr)]
 #[serde(rename_all = "UPPERCASE")]
 #[strum(serialize_all = "UPPERCASE")]
-pub enum Currency {
+pub(crate) enum Currency {
 	Eur,
 	Usd,
 	Gbp,
@@ -60,7 +59,7 @@ pub enum Currency {
 }
 
 /// The header a client sets to make a write safe to retry.
-pub const IDEMPOTENCY_KEY: &str = "idempotency-key";
+const IDEMPOTENCY_KEY: &str = "idempotency-key";
 
 fn amount(what: &str, v: i64) -> ApiResult<i64> {
 	if v.unsigned_abs() > MAX_MINOR.unsigned_abs() {
@@ -347,12 +346,11 @@ fn day_start(d: Date) -> ApiResult<Timestamp> {
 // ── /me ─────────────────────────────────────────────────────────────────────────────────
 
 /// `GET /me`.
-#[derive(JsonSchema, Serialize, TS)]
-pub struct Me {
+#[derive(JsonSchema, Serialize)]
+struct Me {
 	/// The concierge user id: what a user's own marks are kept under.
 	sub: Uuid,
 	/// The caller's `sa:sites:*` permissions.
-	#[ts(type = "Array<Permission>")]
 	permissions: Vec<SitesPermission>,
 }
 
@@ -935,12 +933,18 @@ impl From<Share> for ShareDto {
 }
 
 #[derive(JsonSchema, Serialize)]
-#[schemars(rename = "FunnelStep")]
+#[schemars(rename = "FunnelStep", transform = a_step_of_the_funnel)]
 struct StepDto {
 	stage: Stage,
 	reached: u64,
 	of_previous: Option<ShareDto>,
 	of_leads: ShareDto,
+}
+
+/// A step's stage is one `Totals::steps` names: `Lost` is beside the funnel, never a step of it.
+fn a_step_of_the_funnel(schema: &mut Schema) {
+	let words: Vec<&str> = Totals::default().steps().iter().map(|s| s.stage.as_str()).collect();
+	schema.get_mut("properties").and_then(Value::as_object_mut).expect("a struct's properties")["stage"] = serde_json::json!({ "type": "string", "enum": words });
 }
 
 /// What a slice's leads were paid in one currency, in its minor units; never converted.
@@ -996,7 +1000,7 @@ impl From<FunnelSlice> for SliceDto {
 #[derive(JsonSchema, Serialize)]
 #[schemars(rename = "LocationFunnel")]
 struct LocationSliceDto {
-	brand: Option<String>,
+	brand: String,
 	location: Option<String>,
 	#[serde(flatten)]
 	slice: SliceDto,
@@ -1053,7 +1057,7 @@ async fn funnel(State(panel): State<Panel>, Params(q): Params<FunnelQuery>) -> A
 			locations: slices
 				.into_iter()
 				.map(|s| LocationSliceDto {
-					brand: s.brand.clone(),
+					brand: s.brand.clone().expect("FunnelBy::Location slices by brand"),
 					location: s.location.clone(),
 					slice: s.into(),
 				})
@@ -1123,12 +1127,23 @@ struct CountsQuery {
 }
 
 #[derive(JsonSchema, Serialize)]
-#[schemars(rename = "LeadCounts")]
+#[schemars(rename = "LeadCounts", transform = every_stage)]
 struct CountsDto {
 	/// Every stage, 0 included.
 	stages: BTreeMap<Stage, u64>,
 	overdue: u64,
 	total: u64,
+}
+
+/// A map keyed by a closed enum lists its keys as properties; `stages` has each of them.
+fn every_stage(schema: &mut Schema) {
+	let stages = schema
+		.get_mut("properties")
+		.and_then(|p| p.get_mut("stages"))
+		.and_then(Value::as_object_mut)
+		.expect("CountsDto's stages");
+	let keys: Vec<Value> = stages["properties"].as_object().expect("a key per stage").keys().cloned().map(Value::String).collect();
+	stages.insert("required".to_owned(), Value::Array(keys));
 }
 
 /// How many leads are at each stage, and how many are overdue for their first contact.

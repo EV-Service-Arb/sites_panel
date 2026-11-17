@@ -2,11 +2,13 @@ import { Badge, Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, 
 import { useState } from "react";
 
 import type { UnmatchedBooking } from "@/entities/booking";
-import { type LeadFilter, contactOf, fetchLeads } from "@/entities/lead";
+import { useResource } from "@evinvest/api/react";
+
+import { contactOf } from "@/entities/lead";
+import { api } from "@/shared/api";
 import { useLocale, useT } from "@/shared/i18n";
 import { formatDateTime } from "@/shared/lib/format";
 import { formatSlot } from "@/shared/lib/instant";
-import { useResource } from "@/shared/lib/use-resource";
 import { ErrorState } from "@/shared/ui/error-state";
 import { PanelOverlay } from "@/shared/ui/panel-overlay";
 
@@ -15,9 +17,6 @@ import { useAttach } from "../model/use-attach";
 
 /** How many of the brand's newest leads are offered; an older one is attached by its id. */
 const RECENT = 50;
-
-// Every place of the brand: the booking's lead may be at one the outline does not select.
-const brandOnly = (brand: string): LeadFilter => ({ stage: null, brand, gmbs: null, overdue: false, createdFrom: null, createdTo: null, suspect: null, flow: null, booking: null, channel: null, messageRef: null });
 
 /**
  * Pick the lead a provider's booking belongs to: the brand's newest leads,
@@ -44,7 +43,8 @@ function Picker({ booking, onAttached }: { booking: UnmatchedBooking; onAttached
   const locale = useLocale();
   const [search, setSearch] = useState("");
   const { busy, attach } = useAttach(booking, onAttached);
-  const leads = useResource(`attach:${booking.brand}`, () => fetchLeads(brandOnly(booking.brand), null, RECENT));
+  // Every place of the brand: the booking's lead may be at one the outline does not select.
+  const leads = useResource(api(), "/leads", { params: { query: { brand: booking.brand, limit: RECENT } } });
   const id = typedId(search);
   const pick = (lead: string) => !busy && void attach(lead);
 

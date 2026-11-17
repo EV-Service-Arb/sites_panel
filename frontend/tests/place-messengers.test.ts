@@ -3,36 +3,19 @@ import { describe, expect, it } from "vitest";
 
 import { channelPreview } from "@/entities/place/lib/channels";
 import { diffLineText, diffSettings } from "@/entities/place/lib/diff";
-import { type PlaceSettings, settingsParser, settingsToWire } from "@/entities/place/model/settings";
+import { type PlaceSettings, splitLive } from "@/entities/place/model/settings";
 import { draftChanged, draftOf, editedOf, normaliseBot } from "@/features/edit-place-settings/model/draft";
 import { translator } from "@/shared/i18n/translate";
-import { parse } from "@/shared/lib/parse";
+import type { PlaceLive } from "@/shared/api/schema";
 
 const en = translator("en");
-const settings = (o: unknown): PlaceSettings => parse(settingsParser, o);
+const settings = (live: PlaceLive): PlaceSettings => splitLive(live);
 
 describe("the bot and the messenger switches as stored", () => {
   it("are both fields the form edits", () => {
     const s = settings({ telegram: "x_bot", messengers: { telegram: false } });
     expect(s.edited).toEqual({ telegram: "x_bot", messengers: { telegram: false } });
     expect(s.rest).toEqual({});
-  });
-
-  it("ride through untouched when a switch is one the panel does not know", () => {
-    const s = settings({ phone: "+33423500640", messengers: { signal: true } });
-    expect(s.edited).toEqual({ phone: "+33423500640" });
-    expect(s.rest).toEqual({ messengers: { signal: true } });
-    expect(settingsToWire(s)).toEqual({ phone: "+33423500640", messengers: { signal: true } });
-  });
-
-  it("ride through untouched when a switch is not a boolean", () => {
-    const s = settings({ messengers: { whatsapp: "off" } });
-    expect(s.edited).toEqual({});
-    expect(s.rest).toEqual({ messengers: { whatsapp: "off" } });
-  });
-
-  it("refuse a bot that is not a string, saying which field", () => {
-    expect(() => settings({ telegram: 42 })).toThrow(/^\$\.telegram: /);
   });
 });
 

@@ -1,10 +1,12 @@
+import { useResource } from "@evinvest/api/react";
 import { Skeleton } from "@evinvest/uikit";
 import { useState } from "react";
 
-import { ChangeEntry, ConflictAlert, type PlaceSettingsView, fetchSettingsHistory, followsPlace } from "@/entities/place";
+import { ChangeEntry, ConflictAlert, type PlaceSettingsView } from "@/entities/place";
 import { RevertButton } from "@/features/revert-place-change";
+import { api } from "@/shared/api";
 import { useT } from "@/shared/i18n";
-import { useResource } from "@/shared/lib/use-resource";
+import { useRereadOn } from "@/shared/lib/use-reread-on";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { ErrorState } from "@/shared/ui/error-state";
 
@@ -21,11 +23,11 @@ export interface PlaceHistoryProps {
 export function PlaceHistory({ view, version, onChanged, onReload }: PlaceHistoryProps) {
   const t = useT();
   const [conflict, setConflict] = useState(false);
-  const id = `${view.brand}/${view.slug}`;
-  const history = useResource(`history:${id}:${version}`, () => fetchSettingsHistory(view), `history:${id}`, { live: followsPlace(view) });
+  const history = useResource(api(), "/places/{brand}/{slug}/settings/history", { params: { path: { brand: view.brand, slug: view.slug } } });
+  useRereadOn(version, history.reload);
   if (history.status === "loading") return <Skeleton className="h-32 w-full" />;
   if (history.status === "error") return <ErrorState failure={history.failure} onRetry={history.reload} />;
-  if (history.data.length === 0) return <EmptyState className="p-4" title={t("placeSettings.history.empty")} />;
+  if (history.data.changes.length === 0) return <EmptyState className="p-4" title={t("placeSettings.history.empty")} />;
   const revert = (changeId: string) => (
     <RevertButton place={view} changeId={changeId} expectedUpdatedAt={view.updated_at} onReverted={onChanged} onConflict={() => setConflict(true)} />
   );
@@ -40,7 +42,7 @@ export function PlaceHistory({ view, version, onChanged, onReload }: PlaceHistor
         />
       )}
       <ul className="flex flex-col">
-        {history.data.map((change) => (
+        {history.data.changes.map((change) => (
           <ChangeEntry key={change.id} change={change} action={view.can_edit && !conflict ? revert(change.id) : undefined} />
         ))}
       </ul>

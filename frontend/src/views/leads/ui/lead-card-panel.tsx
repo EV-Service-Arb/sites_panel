@@ -1,13 +1,14 @@
+import { useResource } from "@evinvest/api/react";
 import { Separator, Settled, Skeleton } from "@evinvest/uikit";
 import { useState } from "react";
 
-import { type LeadCard, type LeadRef, contactOf, encodeRef, fetchLeadCard } from "@/entities/lead";
+import { type LeadCard, type LeadRef, contactOf } from "@/entities/lead";
 import { CallButton } from "@/features/call-lead";
 import { StageActions, hasMoves } from "@/features/move-stage";
 import { PaymentForm, takesPayment } from "@/features/record-payment";
+import { api } from "@/shared/api";
 import { useT } from "@/shared/i18n";
-import type { ChangedEvent } from "@/shared/lib/live";
-import { useResource } from "@/shared/lib/use-resource";
+import { useRereadOn } from "@/shared/lib/use-reread-on";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { ErrorState } from "@/shared/ui/error-state";
 
@@ -19,15 +20,13 @@ import { EventList } from "./event-list";
 import { LeadDetails } from "./lead-details";
 import { UpdatedNote } from "./updated-note";
 
-const follows = (ref: LeadRef) => (e: ChangedEvent) => e.topic === "lead" && (e.brand_id === null || e.brand_id === ref.brand) && (e.id === null || e.id === ref.lead);
-
 /**
  * The lead card. It follows the lead live; a change the person did not make
  * here (`version` counts theirs) is said in a note at the top.
  */
 export function LeadCardPanel({ leadRef, version, onChanged }: { leadRef: LeadRef; version: number; onChanged: () => void }) {
-  const id = encodeRef(leadRef);
-  const card = useResource(`card:${id}:${version}`, () => fetchLeadCard(leadRef), `card:${id}`, { live: follows(leadRef) });
+  const card = useResource(api(), "/leads/{brand}/{lead}", { params: { path: leadRef } });
+  useRereadOn(version, card.reload);
   const [known, setKnown] = useState<Known>({ version, at: null, awaiting: null });
   const at = card.status === "ok" ? card.data.lead.last_event_at : null;
   const next = nextKnown(known, version, at);

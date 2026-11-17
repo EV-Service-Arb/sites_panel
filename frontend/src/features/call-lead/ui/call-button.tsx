@@ -23,7 +23,7 @@ export function CallButton({ leadRef, phone }: { leadRef: LeadRef; phone: string
   return (
     <div className="flex flex-wrap gap-2">
       <Button asChild size={button("lg")}>
-        <a href={`tel:${tel}`} onClick={() => start(leadRef).catch((e: unknown) => notifyFailure(e, t))}>
+        <a href={`tel:${tel}`} onClick={() => void start(leadRef).then((refused) => refused && notifyFailure(refused, t))}>
           <Phone aria-hidden />
           {t("call.call")}
         </a>

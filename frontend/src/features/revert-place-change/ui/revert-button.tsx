@@ -13,8 +13,8 @@ import {
   toast,
 } from "@evinvest/uikit";
 
-import { type PlaceKey, type PlaceSettingsView, revertSettingsChange } from "@/entities/place";
-import { ApiError } from "@/shared/api";
+import type { PlaceKey, PlaceSettingsView } from "@/entities/place";
+import { api } from "@/shared/api";
 import { useT } from "@/shared/i18n";
 import { notifyFailure } from "@/shared/ui/notify";
 import { useButtonSize } from "@/shared/ui/touch";
@@ -33,14 +33,14 @@ export function RevertButton({ place, changeId, expectedUpdatedAt, onReverted, o
   const t = useT();
   const button = useButtonSize();
   const revert = async () => {
-    try {
-      const view = await revertSettingsChange(place, changeId, expectedUpdatedAt);
-      toast.positive(t("placeSettings.history.reverted"));
-      onReverted(view);
-    } catch (e) {
-      if (e instanceof ApiError && e.failure.kind === "conflict") return onConflict();
-      notifyFailure(e, t);
-    }
+    const { data, error } = await api().POST("/places/{brand}/{slug}/settings/revert/{id}", {
+      params: { path: { brand: place.brand, slug: place.slug, id: changeId } },
+      body: { expected_updated_at: expectedUpdatedAt },
+    });
+    if (error?.code === "stale") return onConflict();
+    if (error !== undefined) return notifyFailure(error, t);
+    toast.positive(t("placeSettings.history.reverted"));
+    onReverted(data);
   };
   return (
     <AlertDialog>

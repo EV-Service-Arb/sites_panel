@@ -8,8 +8,7 @@ import { notifyFailure } from "@/shared/ui/notify";
 
 import { focusField } from "../lib/focus";
 import { type PricingDraft, draftOf, fingerprint } from "./draft";
-import { type FieldErrors, type ServerProblem, errorsOf } from "./errors";
-import { fieldOfPath } from "./paths";
+import { type FieldErrors, errorsOf } from "./errors";
 import { type SaveOutcome, trySave } from "./save";
 import { type Serialized, modelOf } from "./serialize";
 
@@ -29,8 +28,6 @@ export interface PricingEditor {
   /** Starts the draft again from a model (a pasted JSON); the draft stays unsaved. */
   replace: (model: PricingModel) => void;
   reset: () => void;
-  /** Every problem shown, and the field a model path names in focus. */
-  showPath: (path: string) => void;
   showFirst: () => void;
 }
 
@@ -44,7 +41,7 @@ export function usePricingEditor(base: PricingItem, today: string, onSaved: (ite
   const t = useT();
   const [draft, setDraft] = useState<PricingDraft>(() => draftOf(base.model, today));
   const [revealAll, setRevealAll] = useState(false);
-  const [server, setServer] = useState<ServerProblem | null>(null);
+  const [server, setServer] = useState<string | null>(null);
   const [state, setState] = useState<EditorState>({ kind: "idle" });
   // A request, numbered, so asking for the same field twice focuses it twice.
   const [focusReq, setFocusReq] = useState<{ field: string | null; n: number }>({ field: null, n: 0 });
@@ -66,15 +63,12 @@ export function usePricingEditor(base: PricingItem, today: string, onSaved: (ite
         return onSaved(outcome.item);
       case "conflict":
         return setState({ kind: "conflict", current: outcome.current });
-      case "invalid": {
-        const field = fieldOfPath(outcome.path, draft);
-        setServer({ field, path: outcome.path, message: outcome.message });
-        setState({ kind: "idle" });
-        return setFocusTo(field);
-      }
+      case "invalid":
+        setServer(outcome.message);
+        return setState({ kind: "idle" });
       case "failed":
         setState({ kind: "idle" });
-        return notifyFailure(outcome.error, t);
+        return notifyFailure(outcome.failure, t);
     }
   };
   const put = (expected: string | null) => {
@@ -110,10 +104,6 @@ export function usePricingEditor(base: PricingItem, today: string, onSaved: (ite
       setServer(null);
       setRevealAll(false);
       setDraft(draftOf(base.model, today));
-    },
-    showPath: (path) => {
-      setRevealAll(true);
-      setFocusTo(fieldOfPath(path, draft));
     },
     showFirst: () => {
       setRevealAll(true);

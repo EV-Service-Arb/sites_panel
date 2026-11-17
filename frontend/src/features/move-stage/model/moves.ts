@@ -1,4 +1,5 @@
 import type { Stage } from "@/entities/lead";
+import { lostReasonValues } from "@/shared/api/schema";
 import type { T } from "@/shared/i18n";
 
 export type MoveKind = "contacted" | "quoted" | "won" | "lost" | "completed";
@@ -18,21 +19,13 @@ export const MOVES: Record<Stage, readonly MoveKind[]> = {
   lost: ["contacted", "quoted", "won"],
 };
 
-/**
- * Why a lead was lost, as slugs the reports group by. The backend takes any
- * slug; this list is the panel's vocabulary, kept short so the reasons stay
- * comparable.
- */
-export const LOST_REASONS = ["too_expensive", "no_answer", "went_elsewhere", "out_of_area", "not_needed", "spam", "other"] as const;
-export type LostReason = (typeof LOST_REASONS)[number];
-
 /** Whether a lead in this stage has a next step at all; the card hides "Next step" otherwise. */
 export function hasMoves(stage: Stage): boolean {
   return MOVES[stage].length > 0;
 }
 
-/** A reason as a person reads it; a slug from outside the panel's list shows as it is. */
+/** A reason as a person reads it; a slug of a `lead.lost` from before the panel's words shows as it is. */
 export function lostReasonLabel(reason: string, t: T): string {
-  const known = LOST_REASONS.find((r) => r === reason);
+  const known = lostReasonValues.find((r) => r === reason);
   return known ? t(`lost.${known}`) : reason;
 }

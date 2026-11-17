@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { type Invoice, canonicalAmount, expiresInDays, memoProblem, payableInvoiceId } from "@/entities/invoice";
 import { type PayOutcome, parsePayMessage, payActionUrl, payNotice, payResultFromEvent, refetchesAfter } from "@/features/pay-invoice-element";
 import { invoiceFrom, keepsKey } from "@/features/create-invoice";
-import type { ApiFailure } from "@/shared/api";
+import type { Failure } from "@/shared/api";
 
 describe("canonicalAmount", () => {
   it.each([
@@ -72,22 +72,14 @@ describe("invoiceFrom", () => {
 
 describe("keepsKey", () => {
   it("replays the idempotency key after a failure that may have reached banking", () => {
-    const keeps: ApiFailure[] = [{ kind: "network" }, { kind: "unavailable" }, { kind: "failed", status: 500, message: "" }];
-    expect(keeps.map(keepsKey)).toEqual([true, true, true]);
+    const keeps = (["network", "internal", "invoices_unavailable", "ledger_unavailable", "not_granted"] as const).map((code): Failure => ({ code, error: "" }));
+    expect(keeps.map(keepsKey)).toEqual(keeps.map(() => true));
   });
 
   it("drops the key after a refusal, which created nothing", () => {
-    const drops: ApiFailure[] = [
-      { kind: "unauthenticated" },
-      { kind: "no_access" },
-      { kind: "csrf" },
-      { kind: "forbidden", message: "" },
-      { kind: "not_found" },
-      { kind: "conflict", message: "invoice_not_open", body: null },
-      { kind: "bad_request", message: "" },
-      { kind: "invalid_fields", fields: {} },
-      { kind: "invalid_path", path: "amount", message: "" },
-    ];
+    const drops = (["unauthenticated", "forbidden", "not_found", "invoice_not_open", "scope_frozen", "idempotency_conflict", "ledger_refused", "bad_request"] as const).map(
+      (code): Failure => ({ code, error: "" }),
+    );
     expect(drops.map(keepsKey)).toEqual(drops.map(() => false));
   });
 });
@@ -113,7 +105,7 @@ describe("payableInvoiceId", () => {
     expect(payableInvoiceId(row({}))).toBe("inv_123");
   });
 
-  it.each(["processing", "paid", "creating", "cancelled", "expired", "unknown"] as const)("is null for a %s row", (state) => {
+  it.each(["processing", "paid", "creating", "cancelled", "expired"] as const)("is null for a %s row", (state) => {
     expect(payableInvoiceId(row({ state }))).toBeNull();
   });
 

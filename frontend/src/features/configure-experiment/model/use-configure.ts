@@ -1,7 +1,8 @@
 import { toast } from "@evinvest/uikit";
 import { useState } from "react";
 
-import { type Experiment, type ExperimentPatch, configureExperiment } from "@/entities/experiment";
+import type { Experiment, ExperimentPatch } from "@/entities/experiment";
+import { api } from "@/shared/api";
 import { useT } from "@/shared/i18n";
 import { notifyFailure } from "@/shared/ui/notify";
 
@@ -16,16 +17,15 @@ export function useConfigure(experiment: Experiment, onSaved: (updated: Experime
   const [busy, setBusy] = useState(false);
   const save = async (patch: ExperimentPatch, done: string): Promise<boolean> => {
     setBusy(true);
-    try {
-      onSaved(await configureExperiment(experiment.brand, experiment.key, patch));
-      toast.positive(done);
-      return true;
-    } catch (e) {
-      notifyFailure(e, t);
+    const { data, error } = await api().PUT("/experiments/{brand}/{key}", { params: { path: { brand: experiment.brand, key: experiment.key } }, body: patch });
+    setBusy(false);
+    if (error !== undefined) {
+      notifyFailure(error, t);
       return false;
-    } finally {
-      setBusy(false);
     }
+    onSaved(data);
+    toast.positive(done);
+    return true;
   };
   return { busy, save };
 }

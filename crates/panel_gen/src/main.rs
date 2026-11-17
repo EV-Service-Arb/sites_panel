@@ -10,17 +10,15 @@ use std::{fs, path::Path};
 use ev_lib::ts_gen::Ts;
 use panel::experiment::LiveExperiments;
 use panel_core::{
-	booking::{self, BookingMatch, BookingStatus, DayPart, OperatorAction, PageProvider, Provider},
+	booking::{self, BookingStatus, DayPart, OperatorAction, PageProvider, Provider},
 	event::may_write,
 	experiment,
-	fact::{self, LeadChannel, LeadFlow, LeadSuspect, ManualChannel, Messenger},
+	fact::{self, LeadChannel, LeadFlow, LeadSuspect, Messenger},
 	funnel::CONTACT_SLA,
-	lead::Stage,
 	place::{self, DayOfWeek, FIELDS, PlaceLive},
 	pricing::{self, InputKind, PricingModel},
 };
-use panel_server::api::{Currency, IDEMPOTENCY_KEY, Me};
-use sa_auth::{Catalog, Service, SourceKind};
+use sa_auth::SourceKind;
 
 /// `export const NAME = [...] as const;`: the words of a vocabulary whose type ts-rs declares.
 fn words(name: &'static str, items: impl IntoIterator<Item = &'static str>) -> Ts {
@@ -171,25 +169,9 @@ fn frontend(root: &Path) {
 			value: document["x-views"].clone(),
 		}],
 	);
-	let catalog = Catalog::collect("sa", 0);
 	Ts::write(
 		&root.join("entities/lead/model/generated.ts"),
 		&[
-			Ts::Union {
-				name: "STAGES",
-				ty: "Stage",
-				items: Stage::ALL.map(Stage::as_str).into(),
-			},
-			Ts::Union {
-				name: "MANUAL_CHANNELS",
-				ty: "ManualChannel",
-				items: ManualChannel::ALL.map(ManualChannel::as_str).into(),
-			},
-			Ts::Union {
-				name: "BOOKING_MATCHES",
-				ty: "BookingMatch",
-				items: BookingMatch::ALL.map(BookingMatch::as_str).into(),
-			},
 			Ts::Value {
 				name: "CONTACT_SLA_SECONDS",
 				value: CONTACT_SLA.as_secs().into(),
@@ -205,34 +187,6 @@ fn frontend(root: &Path) {
 					.collect::<serde_json::Map<_, _>>()
 					.into(),
 			},
-		],
-	);
-	Ts::write(
-		&root.join("shared/config/generated.ts"),
-		&[Ts::Union {
-			name: "CURRENCIES",
-			ty: "Currency",
-			items: <Currency as strum::VariantArray>::VARIANTS.iter().map(|&c| <&str>::from(c)).collect(),
-		}],
-	);
-	Ts::write(
-		&root.join("shared/api/generated.ts"),
-		&[
-			Ts::Const {
-				name: "IDEMPOTENCY_HEADER",
-				value: IDEMPOTENCY_KEY,
-			},
-			Ts::Union {
-				name: "PERMISSIONS",
-				ty: "Permission",
-				items: catalog
-					.permissions
-					.iter()
-					.filter(|p| p.starts_with(Service::Sites.prefix()))
-					.map(|p| &*p.clone().leak()) // Ts::Union takes &'static str; one-shot generator
-					.collect(),
-			},
-			Ts::types::<Me>(),
 		],
 	);
 }

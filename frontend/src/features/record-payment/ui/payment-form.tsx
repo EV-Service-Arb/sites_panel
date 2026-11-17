@@ -1,7 +1,8 @@
 import { Button, Field, FieldError, FieldLabel, Input, toast } from "@evinvest/uikit";
 import { useId, useState } from "react";
 
-import { type Lead, recordPayment, refOf } from "@/entities/lead";
+import { type Lead, refOf } from "@/entities/lead";
+import { api } from "@/shared/api";
 import { DEFAULT_CURRENCY } from "@/shared/config/money";
 import { useT } from "@/shared/i18n";
 import { CurrencyField } from "@/shared/ui/currency-field";
@@ -17,7 +18,7 @@ export function PaymentForm({ lead, onSaved }: { lead: Lead; onSaved: () => void
   const id = useId();
   const [billed, setBilled] = useState("");
   const [commission, setCommission] = useState("");
-  const [currency, setCurrency] = useState<string>(DEFAULT_CURRENCY);
+  const [currency, setCurrency] = useState(DEFAULT_CURRENCY);
   const [busy, setBusy] = useState(false);
   const size = useControlSize();
   const payment = paymentFrom(billed, commission, currency);
@@ -26,17 +27,13 @@ export function PaymentForm({ lead, onSaved }: { lead: Lead; onSaved: () => void
   const submit = async () => {
     if (!payment) return;
     setBusy(true);
-    try {
-      await recordPayment(refOf(lead), payment);
-      toast.positive(t("payment.saved"));
-      setBilled("");
-      setCommission("");
-      onSaved();
-    } catch (e) {
-      notifyFailure(e, t);
-    } finally {
-      setBusy(false);
-    }
+    const { error } = await api().POST("/leads/{brand}/{lead}/payments", { params: { path: refOf(lead) }, body: payment });
+    setBusy(false);
+    if (error !== undefined) return notifyFailure(error, t);
+    toast.positive(t("payment.saved"));
+    setBilled("");
+    setCommission("");
+    onSaved();
   };
 
   return (

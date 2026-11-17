@@ -4,67 +4,38 @@ import { describe, expect, it } from "vitest";
 import { channelPreview } from "@/entities/place/lib/channels";
 import { diffLineText, diffSettings } from "@/entities/place/lib/diff";
 import { formatDays, formatHours, localTimeOf } from "@/entities/place/lib/hours";
-import { placesParser } from "@/entities/place/model/place";
-import { type PlaceSettings, historyParser, placeSettingsParser, settingsParser, settingsToWire } from "@/entities/place/model/settings";
+import { type PlaceSettings, settingsToWire, splitLive } from "@/entities/place/model/settings";
 import { addArea, draftChanged, draftOf, draftProblems, editedOf, settingsOf } from "@/features/edit-place-settings/model/draft";
 import { fieldErrorsOf } from "@/features/edit-place-settings/model/field-errors";
 import { addHoursRow, hoursDraftOf, hoursOf, normaliseTime, removeHoursRow, rowProblems, updateHoursRow } from "@/features/edit-place-settings/model/hours-draft";
-import { createHttp } from "@/shared/api/http";
 import { translator } from "@/shared/i18n/translate";
-import { parse } from "@/shared/lib/parse";
+import type { PlaceLive } from "@/shared/api/schema";
 
 const en = translator("en");
 
 const weekdays: OpeningHours = { days: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"], opens: "08:00", closes: "19:00" };
 const address = { street: "12 rue Paul Bert", postalCode: "69003", locality: "Lyon" };
 
-const settings = (o: unknown): PlaceSettings => parse(settingsParser, o);
+const settings = (live: PlaceLive): PlaceSettings => splitLive(live);
 
 describe("the settings answer", () => {
-  const view = {
-    brand: "aquafix",
-    slug: "royat",
-    withdrawn: false,
-    settings: { phone: "+33423500640", hours: [weekdays], serviceArea: ["Royat", "Chamalières"], address, rating: { value: 4.8, count: 31, fetchedAt: "2026-10-01T00:00:00Z" } },
-    updated_at: "2026-10-03T12:00:00Z",
-    updated_by: "admin@evinvest.ltd",
-    can_edit: true,
-  };
+  const live: PlaceLive = { phone: "+33423500640", hours: [weekdays], serviceArea: ["Royat", "Chamalières"], address, rating: { value: 4.8, count: 31, fetchedAt: "2026-10-01T00:00:00Z" } };
 
   it("splits the fields the form edits from those it carries through", () => {
-    const v = parse(placeSettingsParser, view);
-    expect(v.settings.edited).toEqual({ phone: "+33423500640", hours: [weekdays], serviceArea: ["Royat", "Chamalières"] });
-    expect(Object.keys(v.settings.rest).sort()).toEqual(["address", "rating"]);
+    const v = splitLive(live);
+    expect(v.edited).toEqual({ phone: "+33423500640", hours: [weekdays], serviceArea: ["Royat", "Chamalières"] });
+    expect(Object.keys(v.rest).sort()).toEqual(["address", "rating"]);
   });
 
   it("sends back the fields it does not edit as they came", () => {
-    const v = parse(placeSettingsParser, view);
-    const draft = draftOf(v.settings.edited);
+    const v = splitLive(live);
+    const draft = draftOf(v.edited);
     draft.phone = "+33 6 12 34 56 78";
-    expect(settingsToWire(settingsOf(draft, v.settings))).toEqual({ ...view.settings, phone: "+33612345678" });
+    expect(settingsToWire(settingsOf(draft, v))).toEqual({ ...live, phone: "+33612345678" });
   });
 
-  it("reads an empty settings object and a null updated_at, a place never set", () => {
-    const v = parse(placeSettingsParser, { ...view, settings: {}, updated_at: null, updated_by: null });
-    expect(v.settings).toEqual({ edited: {}, rest: {} });
-    expect(v.updated_at).toBeNull();
-  });
-
-  it("refuses a day that is not a weekday name", () => {
-    expect(() => parse(placeSettingsParser, { ...view, settings: { hours: [{ days: ["Mo"], opens: "08:00", closes: "19:00" }] } })).toThrow(/hours\[0\]\.days\[0\]/);
-  });
-
-  it("reads the history, newest first as given", () => {
-    const h = parse(historyParser, { changes: [{ id: "c2", at: "2026-10-03T12:00:00Z", by: "cli", before: {}, after: { phone: "+33612345678" } }] });
-    expect(h.changes[0]?.after.edited.phone).toBe("+33612345678");
-  });
-
-  it("reads /places from before the flags as neither set nor withdrawn", () => {
-    const p = parse(placesParser, { places: [{ brand: "aquafix", location: "royat", last_lead_at: null }, { brand: "aquafix", location: "lyon-3", last_lead_at: null, has_settings: true, withdrawn: true }] });
-    expect(p.places.map((x) => [x.has_settings, x.withdrawn])).toEqual([
-      [false, false],
-      [true, true],
-    ]);
+  it("splits an empty settings object, a place never set", () => {
+    expect(splitLive({})).toEqual({ edited: {}, rest: {} });
   });
 });
 
@@ -144,26 +115,14 @@ describe("the form draft", () => {
   });
 });
 
-describe("a 422", () => {
-  it("is told field by field, a path inside a field on that field", async () => {
-    const http = createHttp({
-      fetch: async () => new Response(JSON.stringify({ error: "invalid", fields: { phone: "must be E.164", "hours[0].opens": "must be HH:MM", geo: "out of range" } }), { status: 422 }),
-      cookie: () => "",
-      host: () => ({ api: "", csrfCookie: "sa_csrf" }),
-      onUnauthenticated: () => {},
-    });
-    const err: unknown = await http.send("PUT", "/x", {}, (v) => v).catch((e: unknown) => e);
-    const failure = (err as { failure?: unknown }).failure;
-    expect(failure).toEqual({ kind: "invalid_fields", fields: { phone: "must be E.164", "hours[0].opens": "must be HH:MM", geo: "out of range" } });
-    const sorted = fieldErrorsOf({ phone: "must be E.164", "hours[0].opens": "must be HH:MM", geo: "out of range" });
+describe("the form's own problems", () => {
+  it("are told field by field, a path inside a field on that field", () => {
+    const sorted = fieldErrorsOf({ phone: "must be E.164", "hours[0].opens": "must be HH:MM" });
     expect(sorted.byField).toEqual({ phone: ["must be E.164"], hours: ["must be HH:MM"] });
-    expect(sorted.other).toEqual([{ key: "geo", reason: "out of range" }]);
   });
 
-  it("without fields stays a plain failure", async () => {
-    const http = createHttp({ fetch: async () => new Response("{}", { status: 422 }), cookie: () => "", host: () => ({ api: "", csrfCookie: "sa_csrf" }), onUnauthenticated: () => {} });
-    const err: unknown = await http.get("/x", (v) => v).catch((e: unknown) => e);
-    expect((err as { failure?: unknown }).failure).toEqual({ kind: "failed", status: 422, message: "" });
+  it("name a field the form edits, or the form is wrong", () => {
+    expect(() => fieldErrorsOf({ geo: "out of range" })).toThrow(/geo/);
   });
 });
 

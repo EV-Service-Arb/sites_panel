@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
 
-import type { Me, Permission } from "@/shared/api";
+import type { Me } from "@/shared/api/schema";
 
 const MeContext = createContext<Me | null>(null);
 
@@ -11,9 +11,4 @@ export function useMe(): Me {
   const me = useContext(MeContext);
   if (!me) throw new Error("useMe outside MeProvider");
   return me;
-}
-
-/** Whether the caller holds `permission`: the set the conductor asserts is concrete. */
-export function may(caller: Pick<Me, "permissions">, permission: Permission): boolean {
-  return caller.permissions.includes(permission);
 }

@@ -59,7 +59,7 @@ export function EditWorkspace({ base, fresher, today, version, focusStatus, onWr
       }
       aside={
         <>
-          <PreviewPanel id={PREVIEW_ID} brand={base.brand_id} model={editor.serialized.model} onShowPath={editor.showPath} onShowProblem={editor.showFirst} />
+          <PreviewPanel id={PREVIEW_ID} brand={base.brand_id} model={editor.serialized.model} onShowProblem={editor.showFirst} />
           <Card>
             <CardHeader>
               <CardTitle>{t("pricing.json.title")}</CardTitle>

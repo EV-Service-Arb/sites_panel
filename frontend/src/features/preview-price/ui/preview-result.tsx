@@ -1,15 +1,14 @@
 import { PRICING_CURRENCY } from "@evinvest/sites-contract";
-import { Alert, AlertDescription, Button, Spinner } from "@evinvest/uikit";
+import { Alert, AlertDescription, Spinner } from "@evinvest/uikit";
 
 import { useLocale, useT } from "@/shared/i18n";
 import { formatCents } from "@/shared/lib/format";
 import { failureText } from "@/shared/ui/failure-text";
-import { ApiError } from "@/shared/api";
 
 import type { PreviewState } from "../model/use-preview";
 
 /** The server's answer for the combination: a price, "no price", or what in the model stops it. */
-export function PreviewResult({ state, onShowPath }: { state: PreviewState; onShowPath: (path: string) => void }) {
+export function PreviewResult({ state }: { state: PreviewState }) {
   const t = useT();
   const locale = useLocale();
   switch (state.kind) {
@@ -30,17 +29,14 @@ export function PreviewResult({ state, onShowPath }: { state: PreviewState; onSh
       );
     case "invalid":
       return (
-        <Alert tone="error" className="flex flex-col gap-2">
-          <AlertDescription className="wrap-anywhere">{t("pricing.preview.invalid", { path: state.path, message: state.message })}</AlertDescription>
-          <Button type="button" variant="link" className="self-start px-0" onClick={() => onShowPath(state.path)}>
-            {t("pricing.preview.showField")}
-          </Button>
+        <Alert tone="error">
+          <AlertDescription className="wrap-anywhere">{t("pricing.preview.invalid", { message: state.message })}</AlertDescription>
         </Alert>
       );
     case "failed":
       return (
         <Alert tone="error">
-          <AlertDescription>{state.error instanceof ApiError ? failureText(state.error.failure, t) : t("state.error", { detail: String(state.error) })}</AlertDescription>
+          <AlertDescription>{failureText(state.failure, t)}</AlertDescription>
         </Alert>
       );
   }

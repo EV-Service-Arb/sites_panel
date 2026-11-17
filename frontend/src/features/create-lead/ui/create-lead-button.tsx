@@ -1,8 +1,9 @@
 import { Button, Field, FieldLabel, Input, Textarea, toast } from "@evinvest/uikit";
 import { useId, useState } from "react";
 
-import { type LeadRef, type ManualChannel, createLead } from "@/entities/lead";
+import type { LeadRef, ManualChannel } from "@/entities/lead";
 import { type Place, locationsOf } from "@/entities/place";
+import { api } from "@/shared/api";
 import { isSlug } from "@/shared/config/brands";
 import { useT } from "@/shared/i18n";
 import { notifyFailure } from "@/shared/ui/notify";
@@ -47,17 +48,14 @@ export function CreateLeadButton({ brands, places, onCreated }: { brands: string
 
   const submit = async () => {
     setBusy(true);
-    try {
-      const created = await createLead({ brand: place.brand, location, need: need.trim(), phone: phone.trim() || null, channel });
-      writeLastPlace({ brand: place.brand, location });
-      toast.positive(t("create.saved"));
-      setOpen(false);
-      onCreated({ brand: created.brand, lead: created.lead_id });
-    } catch (e) {
-      notifyFailure(e, t);
-    } finally {
-      setBusy(false);
-    }
+    const body = { brand: place.brand, location, need: need.trim(), channel, ...(phone.trim() ? { phone: phone.trim() } : {}) };
+    const { data, error } = await api().POST("/leads", { body });
+    setBusy(false);
+    if (error !== undefined) return notifyFailure(error, t);
+    writeLastPlace({ brand: place.brand, location });
+    toast.positive(t("create.saved"));
+    setOpen(false);
+    onCreated({ brand: data.brand, lead: data.lead_id });
   };
 
   return (

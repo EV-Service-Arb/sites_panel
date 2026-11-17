@@ -4,13 +4,15 @@ import { useLocale, useT } from "@/shared/i18n";
 import { formatDateTime } from "@/shared/lib/format";
 
 import { diffLineText, diffSettings } from "../lib/diff";
-import type { SettingsChange } from "../model/settings";
+import type { PlaceChange as SettingsChange } from "@/shared/api/schema";
+
+import { splitLive } from "../model/settings";
 
 /** One change of a place's live data: who and when, then each field before → after. */
 export function ChangeEntry({ change, action }: { change: SettingsChange; action?: ReactNode }) {
   const t = useT();
   const locale = useLocale();
-  const lines = diffSettings(change.before, change.after, t);
+  const lines = diffSettings(splitLive(change.before), splitLive(change.after), t);
   return (
     <li className="flex flex-col gap-2 border-b border-border py-3 last:border-b-0">
       <div className="flex flex-wrap items-center justify-between gap-2">

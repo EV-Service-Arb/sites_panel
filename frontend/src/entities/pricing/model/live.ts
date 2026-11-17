@@ -1,10 +1,3 @@
-import type { ChangedEvent } from "@/shared/lib/live";
-
-/** A `pricing` change of this brand — or of any brand, when the event names none. */
-export function followsPricing(brand: string | null): (event: ChangedEvent) => boolean {
-  return (e) => e.topic === "pricing" && (brand === null || e.brand_id === null || e.brand_id === brand);
-}
-
 const timeOf = (at: string | null) => (at === null ? Number.NEGATIVE_INFINITY : Date.parse(at));
 
 /**

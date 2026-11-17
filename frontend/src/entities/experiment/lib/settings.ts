@@ -1,4 +1,4 @@
-import type { Experiment } from "../model/experiment";
+import type { Experiment } from "@/shared/api/schema";
 
 /** Each variant's share of the traffic in percent; all zero when the weights sum to nothing. */
 export function sharesOf(weights: readonly number[]): number[] {

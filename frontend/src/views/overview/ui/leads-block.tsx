@@ -1,6 +1,6 @@
 import { Badge, Card, CardContent, CardHeader, CardTitle, cn } from "@evinvest/uikit";
 
-import { type Funnel, biggestLoss } from "@/entities/funnel";
+import { type WholeFunnel, biggestLoss } from "@/entities/funnel";
 import { useT } from "@/shared/i18n";
 import { formatShare } from "@/shared/lib/share";
 import { EmptyState } from "@/shared/ui/empty-state";
@@ -13,7 +13,7 @@ import { PaidLines } from "./paid-lines";
  * and the step that loses the most leads is marked. Under "Paid", the money
  * those leads brought, per currency.
  */
-export function LeadsBlock({ funnel }: { funnel: Funnel }) {
+export function LeadsBlock({ funnel }: { funnel: WholeFunnel }) {
   const t = useT();
   const worst = biggestLoss(funnel.stages);
   const leads = funnel.stages[0]?.reached ?? 0;

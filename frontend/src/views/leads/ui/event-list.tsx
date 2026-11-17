@@ -1,12 +1,12 @@
 import { MESSENGERS } from "@evinvest/sites-contract";
 import { Badge } from "@evinvest/uikit";
 
-import { ChannelIcon, type LeadEvent } from "@/entities/lead";
+import { ChannelIcon, type LeadEvent, fieldsOf } from "@/entities/lead";
 import { useLocale, useT } from "@/shared/i18n";
 import { formatDateTime } from "@/shared/lib/format";
 
 /** The properties worth a glance, as `key: value`; ids and nested objects stay out. */
-function summary(properties: Record<string, unknown>): string {
+function summary(properties: Readonly<Record<string, unknown>>): string {
   return Object.entries(properties)
     .filter(([k, v]) => !k.endsWith("Id") && (typeof v === "string" || typeof v === "number" || typeof v === "boolean"))
     .map(([k, v]) => `${k}: ${String(v)}`)
@@ -17,7 +17,7 @@ function summary(properties: Record<string, unknown>): string {
  * `lead.messaged` in words: "The customer wrote on WhatsApp". The ref it may carry
  * stays in the summary line; a channel the panel does not know leaves the raw line.
  */
-function MessagedLine({ properties }: { properties: Record<string, unknown> }) {
+function MessagedLine({ properties }: { properties: Readonly<Record<string, unknown>> }) {
   const t = useT();
   const channel = MESSENGERS.find((m) => m === properties.channel);
   if (!channel) return null;
@@ -42,8 +42,8 @@ export function EventList({ events }: { events: LeadEvent[] }) {
             {e.manual && <Badge tone="neutral">{t("leads.manual")}</Badge>}
             <span className="text-xs tabular-nums text-ink-soft">{formatDateTime(e.occurred_at, locale)}</span>
           </span>
-          {e.type === "lead.messaged" && <MessagedLine properties={e.properties} />}
-          {summary(e.properties) && <span className="wrap-anywhere text-xs text-ink-mid">{summary(e.properties)}</span>}
+          {e.type === "lead.messaged" && <MessagedLine properties={fieldsOf(e.properties)} />}
+          {summary(fieldsOf(e.properties)) && <span className="wrap-anywhere text-xs text-ink-mid">{summary(fieldsOf(e.properties))}</span>}
         </li>
       ))}
     </ol>

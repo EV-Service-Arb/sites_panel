@@ -1,63 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import { unmatchedListParser } from "@/entities/booking/model/booking";
 import { bookingWhen } from "@/entities/lead/lib/booking-text";
-import { NO_BOOKING, bookingActions } from "@/entities/lead/model/booking";
-import { type Lead, leadParser } from "@/entities/lead/model/lead";
 import { rankCandidates, sameContact, typedId } from "@/features/attach-booking/model/candidates";
 import { leadFilterFrom, narrows, paramsWith } from "@/features/lead-filters/model/params";
 import { bookingRefusal } from "@/features/manage-booking/model/failure";
 import { slotBody, slotDraftOf, slotProblems } from "@/features/manage-booking/model/slot-draft";
 import { attemptFor } from "@/shared/api/idempotency";
-import { createHttp } from "@/shared/api/http";
 import { translator } from "@/shared/i18n/translate";
 import { formatSlot, localInstant, rfc3339 } from "@/shared/lib/instant";
-import { parse } from "@/shared/lib/parse";
+
+import { NO_BOOKING, lead as leadOf } from "./fixtures";
 
 const en = translator("en");
-const row = { brand: "aquafix", lead_id: "lead-42-0a1b2c3d", stage: "created", manual: false, last_event_at: "2026-10-04T08:00:00Z" };
-const booked = { status: "booked", provider: "google_calendar", start_at: "2026-10-06T08:00:00Z", end_at: "2026-10-06T09:00:00Z", external_ref: "ev1", match: "contact", preferred_date: null, preferred_part: null };
-
-describe("a lead's booking as the API sends it", () => {
-  it("reads every field", () => {
-    expect(parse(leadParser, { ...row, booking: booked }).booking).toEqual(booked);
-  });
-
-  it("is none on a lead read from before bookings", () => {
-    expect(parse(leadParser, row).booking).toEqual(NO_BOOKING);
-  });
-
-  it("refuses a status, a provider or a part of the day it does not know", () => {
-    expect(() => parse(leadParser, { ...row, booking: { ...booked, status: "pending" } })).toThrow(/booking\.status/);
-    expect(() => parse(leadParser, { ...row, booking: { ...booked, provider: "calendly" } })).toThrow(/booking\.provider/);
-    expect(() => parse(leadParser, { ...row, booking: { ...NO_BOOKING, preferred_part: "night" } })).toThrow(/preferred_part/);
-  });
-});
-
-describe("the bookings without a lead", () => {
-  const base = { id: "b1", brand: "aquafix", provider: "google_calendar", external_ref: "e1", status: "booked", start_at: "2026-10-06T08:00:00Z", end_at: null, booked_at: null, last_event_at: "2026-10-04T08:00:00Z", lead_id: null, match: null };
-
-  it("read with the attendee's contact, or without it for a role that does not see it", () => {
-    const list = parse(unmatchedListParser, { bookings: [{ ...base, contact: { phone: "+33600000003" } }, { ...base, id: "b2", status: "canceled" }] });
-    expect(list.bookings[0]?.contact).toEqual({ name: null, email: null, phone: "+33600000003" });
-    expect(list.bookings[1]?.contact).toBeNull();
-    expect(() => parse(unmatchedListParser, { bookings: [{ ...base, status: "done" }] })).toThrow(/status/);
-  });
-});
-
-describe("the operator's actions", () => {
-  // `BookingStatus::allows`, the backend's transitions test row by row.
-  it.each([
-    ["none", ["set"]],
-    ["requested", ["set", "clear"]],
-    ["booked", ["set", "done", "no_show", "canceled", "clear"]],
-    ["canceled", ["set", "clear"]],
-    ["done", []],
-    ["no_show", ["set", "clear"]],
-  ] as const)("from %s offer %j", (status, actions) => {
-    expect(bookingActions(status)).toEqual(actions);
-  });
-});
 
 describe("a slot as sent", () => {
   it("is RFC 3339 with the zone's offset, to the second", () => {
@@ -119,38 +73,18 @@ describe("a slot as read", () => {
 });
 
 describe("a refused booking write", () => {
-  const failing = (status: number, body: unknown) =>
-    createHttp({ fetch: async () => new Response(JSON.stringify(body), { status }), cookie: () => "", host: () => ({ api: "", csrfCookie: "sa_csrf" }), onUnauthenticated: () => {} })
-      .send("POST", "/x", {}, () => null)
-      .catch((e: unknown) => e);
-
-  it("409: says the booking moved on and reads the card again", async () => {
-    expect(bookingRefusal(await failing(409, { error: "not from booked" }))).toEqual({ key: "booking.conflict", reread: true });
+  it("a conflict says the booking moved on and reads the card again", () => {
+    for (const code of ["booking_done", "no_booking", "not_booked"] as const) expect(bookingRefusal({ code, error: "x" })).toEqual({ key: "booking.conflict", reread: true });
   });
 
-  it("404 and 400 have their own words; anything else is the general failure", async () => {
-    expect(bookingRefusal(await failing(404, { error: "not_found" }))).toMatchObject({ key: "booking.notFound", reread: true });
-    expect(bookingRefusal(await failing(400, { error: "start_at is not an instant" }))).toEqual({ key: "booking.badTime", detail: "start_at is not an instant", reread: false });
-    expect(bookingRefusal(await failing(500, {}))).toBeNull();
+  it("not found and a bad instant have their own words; anything else is the general failure", () => {
+    expect(bookingRefusal({ code: "not_found", error: "no such lead" })).toMatchObject({ key: "booking.notFound", reread: true });
+    expect(bookingRefusal({ code: "bad_request", error: "start_at is not an instant" })).toEqual({ key: "booking.badTime", detail: "start_at is not an instant", reread: false });
+    expect(bookingRefusal({ code: "internal", error: "internal error" })).toBeNull();
   });
 });
 
 describe("the Idempotency-Key", () => {
-  it("rides on the write beside the CSRF token", async () => {
-    const sent: Headers[] = [];
-    const http = createHttp({
-      fetch: async (_input, init) => {
-        sent.push(new Headers(init?.headers));
-        return new Response(JSON.stringify({ event_id: "e" }), { status: 201 });
-      },
-      cookie: () => "sa_csrf=c",
-      host: () => ({ api: "", csrfCookie: "sa_csrf" }),
-      onUnauthenticated: () => {},
-    });
-    await http.send("POST", "/x", { action: "clear" }, () => null, { "idempotency-key": "k1" });
-    expect(sent.map((h) => [h.get("idempotency-key"), h.get("x-sa-csrf")])).toEqual([["k1", "c"]]);
-  });
-
   it("stays with a retried body and changes with a new one", () => {
     let n = 0;
     const mint = () => `k${++n}`;
@@ -176,7 +110,7 @@ describe("the booking filter in the URL", () => {
 });
 
 describe("picking the lead to attach", () => {
-  const lead = (id: string, pii: Record<string, unknown>): Lead => parse(leadParser, { ...row, lead_id: id, pii });
+  const lead = (id: string, pii: Record<string, unknown>) => leadOf({ lead_id: id, pii });
 
   it("knows the contact however it was written", () => {
     expect(sameContact(lead("a", { phone: "+33 6 00 00 00 03" }), { name: null, email: null, phone: "06 00 00 00 03" })).toBe(true);

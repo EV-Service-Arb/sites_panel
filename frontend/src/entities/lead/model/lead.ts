@@ -1,83 +1,8 @@
-import { LEAD_CHANNELS, LEAD_FLOWS, LEAD_SUSPECTS, MESSENGERS, type Messenger } from "@evinvest/sites-contract";
+import { MESSENGERS, type Messenger } from "@evinvest/sites-contract";
 
-import { type Infer, arrayOf, bool, cents, dictOf, isoDay, nullable, num, object, oneOf, oneOfOr, record, recordOf, str } from "@/shared/lib/parse";
+import type { Lead, operations } from "@/shared/api/schema";
 
-import { leadBookingParser } from "./booking";
-import { CONTACT_SLA_SECONDS, STAGES, type Stage } from "./generated";
-
-export { CONTACT_SLA_SECONDS, MANUAL_CHANNELS, STAGES } from "./generated";
-export type { ManualChannel, Stage } from "./generated";
-
-const slaParser = object({ waiting_since: str, waiting_seconds: num, overdue: bool });
-
-export const leadParser = object({
-  brand: str,
-  lead_id: str,
-  location: nullable(str),
-  job_id: nullable(str),
-  stage: oneOf(STAGES),
-  /** How the customer reached the brand; null for a lead seen before its creation, `other` for a channel newer than this build. */
-  channel: nullable(oneOfOr(LEAD_CHANNELS, "other")),
-  /** The ref the landing gave the customer to quote in a messenger (`AQ-7K3F`). */
-  message_ref: nullable(str),
-  /** When the customer first wrote on a messenger, and on which (null too for a messenger newer than this build). */
-  messaged_at: nullable(str),
-  messaged_channel: nullable(oneOfOr(MESSENGERS, null)),
-  manual: bool,
-  created_at: nullable(str),
-  contacted_at: nullable(str),
-  quoted_at: nullable(str),
-  won_at: nullable(str),
-  completed_at: nullable(str),
-  paid_at: nullable(str),
-  lost_at: nullable(str),
-  lost_reason: nullable(str),
-  /** Kept for good once marked: progress does not clear it. */
-  suspect: nullable(oneOf(LEAD_SUSPECTS)),
-  last_event_at: str,
-  /** Set while the lead waits for its first contact; overdue after 30 minutes. */
-  sla: nullable(slaParser),
-  /** What the customer left, for the roles that see it. */
-  pii: nullable(record),
-  /** The form variant the site used; the three fields below are absent from older leads. */
-  flow: nullable(oneOf(LEAD_FLOWS)),
-  /** EUR TTC in integer cents, with `estimate` and `fixed` only. */
-  quoted_cents: nullable(cents),
-  /** The day the price model used took effect. */
-  pricing_valid_from: nullable(isoDay),
-  /** `estimate` only: input id → value id, as the site's model names them (no labels yet). */
-  estimate_inputs: nullable(dictOf(str)),
-  /** Where the lead's booking stands: `status: none` when it has none. */
-  booking: leadBookingParser,
-});
-export type Lead = Infer<typeof leadParser>;
-
-export const leadEventParser = object({
-  id: str,
-  type: str,
-  type_version: num,
-  occurred_at: str,
-  received_at: str,
-  source_kind: str,
-  source_id: str,
-  manual: bool,
-  job_id: nullable(str),
-  status: str,
-  status_reason: nullable(str),
-  properties: record,
-  pii: nullable(record),
-});
-export type LeadEvent = Infer<typeof leadEventParser>;
-
-export const leadPageParser = object({ leads: arrayOf(leadParser), next_cursor: nullable(str) });
-export type LeadPage = Infer<typeof leadPageParser>;
-
-export const leadCardParser = object({ lead: leadParser, events: arrayOf(leadEventParser) });
-export type LeadCard = Infer<typeof leadCardParser>;
-
-/** `GET /leads/counts`: leads by their current stage (every stage, 0 included), and how many are overdue. */
-export const leadCountsParser = object({ stages: recordOf(STAGES, num), overdue: num, total: num });
-export type LeadCounts = Infer<typeof leadCountsParser>;
+import { CONTACT_SLA_SECONDS } from "./generated";
 
 /**
  * The wait as of `now`, from `waiting_since` — the API's `waiting_seconds` and
@@ -94,6 +19,9 @@ export function awaitingMessage(lead: Pick<Lead, "channel" | "messaged_at">): Me
   if (lead.messaged_at !== null) return null;
   return MESSENGERS.find((m) => m === lead.channel) ?? null;
 }
+
+/** What narrows the queue, as `GET /leads` takes it; the GMBs are the host's selection, beside it. */
+export type LeadFilter = Omit<NonNullable<operations["list_leads"]["parameters"]["query"]>, "gmb" | "cursor" | "limit">;
 
 /** A lead's address in the API and in the page URL: `brand/lead`. */
 export interface LeadRef {
@@ -116,10 +44,6 @@ export function decodeRef(raw: string | null): LeadRef | null {
   return { brand: raw.slice(0, at), lead: raw.slice(at + 1) };
 }
 
-export function leadPath(ref: LeadRef): string {
-  return `/leads/${encodeURIComponent(ref.brand)}/${encodeURIComponent(ref.lead)}`;
-}
-
 /** What the customer left, the known fields picked out as text. */
 export interface Contact {
   name: string | null;
@@ -128,9 +52,17 @@ export interface Contact {
   need: string | null;
 }
 
-export function contactOf(pii: Record<string, unknown> | null): Contact {
+/** What a customer left, or an event's properties: free JSON, an object when there is any, absent when not. */
+export function fieldsOf(json: unknown): Readonly<Record<string, unknown>> {
+  if (json === undefined) return {};
+  if (typeof json !== "object" || json === null || Array.isArray(json)) throw new Error(`${JSON.stringify(json)} is not an object`);
+  return json as Record<string, unknown>;
+}
+
+export function contactOf(pii: unknown): Contact {
+  const fields = fieldsOf(pii);
   const text = (k: string) => {
-    const v = pii?.[k];
+    const v = fields[k];
     return typeof v === "string" && v.trim() !== "" ? v : null;
   };
   return { name: text("name"), phone: text("phone"), email: text("email"), need: text("need") };
@@ -154,13 +86,14 @@ function asText(v: unknown): string | null {
  * Everything else the customer left: the labelled keys first, in their order,
  * then the rest by key — a site may send fields the panel has no name for yet.
  */
-export function extrasOf(pii: Record<string, unknown> | null): { labelled: { key: LabelledPii; value: string }[]; other: { key: string; value: string }[] } {
+export function extrasOf(pii: unknown): { labelled: { key: LabelledPii; value: string }[]; other: { key: string; value: string }[] } {
+  const fields = fieldsOf(pii);
   const labelled = LABELLED_PII.flatMap((key) => {
-    const value = asText(pii?.[key]);
+    const value = asText(fields[key]);
     return value === null ? [] : [{ key, value }];
   });
   const known: readonly string[] = [...CONTACT_KEYS, ...LABELLED_PII];
-  const other = Object.entries(pii ?? {})
+  const other = Object.entries(fields)
     .filter(([k]) => !known.includes(k))
     .flatMap(([key, v]) => {
       const value = asText(v);
@@ -186,7 +119,7 @@ export function dialable(phone: string | null): string | null {
  * lead lost after a quote did reach "quoted"). The same rule the backend's
  * funnel counts by.
  */
-export function reached(lead: Lead, stage: Exclude<Stage, "lost">): boolean {
+export function reached(lead: Lead, stage: Exclude<Lead["stage"], "lost">): boolean {
   switch (stage) {
     case "created":
       return true;

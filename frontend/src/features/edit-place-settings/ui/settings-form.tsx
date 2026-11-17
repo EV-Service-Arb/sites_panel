@@ -1,7 +1,7 @@
 import { Alert, AlertDescription, Button } from "@evinvest/uikit";
 import { useEffect, useState } from "react";
 
-import { ChannelPreview, ConflictAlert, type PlaceSettingsView, StaleAlert } from "@/entities/place";
+import { ChannelPreview, ConflictAlert, type PlaceSettingsView, StaleAlert, splitLive } from "@/entities/place";
 import { useT } from "@/shared/i18n";
 import { useButtonSize } from "@/shared/ui/touch";
 
@@ -36,12 +36,12 @@ export interface SettingsFormProps {
 export function SettingsForm({ place, onSaved, onReload, fresher, onTakeFresh }: SettingsFormProps) {
   const t = useT();
   const button = useButtonSize();
-  const base = place.settings;
+  const base = splitLive(place.settings);
   const [draft, setDraft] = useState<SettingsDraft>(() => draftOf(base.edited));
-  const { state, refused, save } = useSave(place, place.updated_at, onSaved);
-  // An hours row says its own; the server's reason wins over the form's on one path.
+  const { state, save } = useSave({ brand: place.brand, slug: place.slug }, place.updated_at, onSaved);
+  // An hours row says its own.
   const own = [...draftProblems(draft)].filter(([path]) => !path.startsWith("hours["));
-  const errors = fieldErrorsOf({ ...Object.fromEntries(own.map(([path, code]) => [path, t(`placeSettings.problem.${code}`)])), ...refused });
+  const errors = fieldErrorsOf(Object.fromEntries(own.map(([path, code]) => [path, t(`placeSettings.problem.${code}`)])));
   const set = (patch: Partial<SettingsDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const changed = draftChanged(draft, base);
   useEffect(() => {
@@ -62,9 +62,7 @@ export function SettingsForm({ place, onSaved, onReload, fresher, onTakeFresh }:
         <Alert tone="error">
           <AlertDescription>
             {t("placeSettings.invalid")}
-            {errors.other.map((o) => (
-              <span key={o.key} className="block">{`${o.key}: ${o.reason}`}</span>
-            ))}
+            <span className="block">{state.message}</span>
           </AlertDescription>
         </Alert>
       )}

@@ -1,7 +1,6 @@
 import { useSyncExternalStore } from "react";
 
 import { GMBS_EVENT, tellHost } from "@/shared/lib/host-events";
-import { arrayOf, nullable, num, object, parse } from "@/shared/lib/parse";
 
 /** The GMBs the host's outline selects: `null` narrows nothing; `undefined` until the host has said. */
 export type Gmbs = readonly number[] | null;
@@ -10,14 +9,20 @@ let selected: Gmbs | undefined;
 const listeners = new Set<() => void>();
 let installed = false;
 
-const detailParser = object({ ids: nullable(arrayOf(num)) });
+/** The host's event, read as untrusted: `{ ids: number[] | null }`. */
+function idsOf(detail: unknown): Gmbs {
+  const ids = typeof detail === "object" && detail !== null && "ids" in detail ? detail.ids : undefined;
+  if (ids === null) return null;
+  if (Array.isArray(ids) && ids.every((id) => Number.isSafeInteger(id))) return ids as number[];
+  throw new Error(`sa:gmbs: ${JSON.stringify(detail)} is not { ids: number[] | null }`);
+}
 
 /** Called by each element as it connects: the window listener once per page, the selection asked for each time. */
 export function followHostGmbs(): void {
   if (!installed) {
     installed = true;
     window.addEventListener(GMBS_EVENT, (e) => {
-      selected = parse(detailParser, (e as CustomEvent<unknown>).detail).ids;
+      selected = idsOf((e as CustomEvent<unknown>).detail);
       for (const l of listeners) l();
     });
   }
@@ -41,5 +46,5 @@ export function useGmbs(): Gmbs {
   return gmbs;
 }
 
-/** A key part naming the selection, for reads that follow it. */
-export const gmbsKey = (gmbs: Gmbs): string => (gmbs === null ? "*" : gmbs.join(","));
+/** The selection as the API's `gmb` takes it (`Gmbs`): comma-joined, `""` selecting none, absent narrowing nothing. */
+export const gmbParam = (gmbs: Gmbs): string | null => (gmbs === null ? null : gmbs.join(","));

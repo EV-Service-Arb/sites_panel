@@ -6,7 +6,6 @@ import { type Root, createRoot } from "react-dom/client";
 import { settleHost } from "@/shared/config/host";
 import { LocaleProvider, localeOf } from "@/shared/i18n";
 import { followHostGmbs } from "@/shared/lib/gmbs";
-import { followHostLive } from "@/shared/lib/live";
 import { followLink } from "@/shared/lib/router";
 
 /** Sets `[data-ready]` in the commit that first paints the element, the signal hosts wait on (concierge's define-element). */
@@ -52,7 +51,6 @@ export function defineElement(tag: string, render: (element: HTMLElement) => Rea
       this.classList.add("ph-no-capture");
       settleHost({ api: attribute(this, "api"), base: attribute(this, "base"), csrfCookie: attribute(this, "csrf-cookie") });
       attachStylesheet();
-      followHostLive();
       followHostGmbs();
       const langHost = this.closest("[lang]");
       if (langHost === null) throw new Error(`<${tag}> is under no [lang]`);
