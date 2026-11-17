@@ -4,10 +4,10 @@
 
 use eyre::WrapErr;
 use panel_core::{
-	experiment::{self, Declaration, Happened, Override, State},
+	experiment::{self, Declaration, ExperimentKey, Happened, Override, State, Variant},
 	fact::Fact,
-	ids::BrandId,
 };
+use sa_core::ids::BrandId;
 use sqlx::{SqliteConnection, types::Json};
 
 use super::{events, from_db, projections::registered, to_db};
@@ -42,7 +42,7 @@ pub async fn recompute(conn: &mut SqliteConnection, brand: &BrandId) -> eyre::Re
 			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)",
 		)
 		.bind(brand.as_str())
-		.bind(&key)
+		.bind(key.as_str())
 		.bind(Json(&s.declared.variants))
 		.bind(Json(&s.declared.weights))
 		.bind(s.declared.enabled)
@@ -68,7 +68,7 @@ pub async fn recompute(conn: &mut SqliteConnection, brand: &BrandId) -> eyre::Re
 struct Row {
 	brand_id: String,
 	key: String,
-	variants: Json<Vec<String>>,
+	variants: Json<Vec<Variant>>,
 	declared_weights: Json<Vec<f64>>,
 	declared_enabled: bool,
 	declared_holdout: Option<f64>,
@@ -102,7 +102,7 @@ impl TryFrom<Row> for (BrandId, State) {
 		let state = State {
 			// Written from a checked declaration; read back as is.
 			declared: Declaration {
-				key: r.key,
+				key: ExperimentKey::parse(&r.key).wrap_err("a stored experiment's key")?,
 				variants: r.variants.0,
 				weights: r.declared_weights.0,
 				enabled: r.declared_enabled,

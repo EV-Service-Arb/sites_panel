@@ -15,10 +15,10 @@ use axum::{
 	error_handling::HandleErrorLayer,
 	extract::{Path, State},
 	http::{HeaderMap, Method, StatusCode},
-	response::{IntoResponse, Response},
+	response::{Html, IntoResponse, Response},
 	routing::post,
 };
-use ev_lib::api::{Created, JsonSchema, Upserted};
+use ev_lib::api::{Body, Created, Ids, JsonSchema, Params, Refusal, Refuses, Upserted};
 use jiff::Timestamp;
 use panel::{
 	Panel,
@@ -26,34 +26,116 @@ use panel::{
 	operator::Actor,
 };
 use panel_core::{
-	booking::BookingMatch,
-	ids::{BrandId, LeadId},
+	booking::{BookingMatch, Closed},
+	ids::LeadId,
 };
-use sa_auth::Leads;
+use sa_auth::{Gate, Leads, Places, Work};
+use sa_core::ids::BrandId;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::json;
 use tokio::sync::Semaphore;
 use tower::{BoxError, ServiceBuilder, limit::GlobalConcurrencyLimitLayer};
 use tower_http::timeout::TimeoutLayer;
 use uuid::Uuid;
 
 use crate::{
-	api::{ApiResult, Body, IdempotencyKey, Ids, Journaled, LeadPath, Params, recorded},
-	gate::Caller,
-	http::{ApiRoute, Gate, Section},
+	api::{ApiResult, Caller, Code, IdempotencyKey, Journaled, LeadPath, recorded},
+	google_calendar::{ConsentError, Consents},
+	http::ApiRoute,
+	places::editor,
 };
 
 /// The operator's booking routes.
 pub(crate) fn routes() -> Vec<ApiRoute> {
 	use Method as M;
-	let work = Gate::section(Section::Work);
-	let edit = work.may(Leads::Edit);
+	let work = Gate::USER.needs(Work::Read);
+	let edit = Gate::USER.needs(Leads::Edit);
 	vec![
 		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/booking", edit, book_lead),
 		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/booking/status", edit, close_booking),
 		ApiRoute::new(M::GET, "/bookings/unmatched", work, unmatched_bookings),
 		ApiRoute::new(M::POST, "/bookings/{id}/attach", edit, attach_booking),
+		ApiRoute::new(M::POST, "/bookings/google_calendar/{brand}/consent", Gate::USER.needs(Places::Edit), google_consent),
+		ApiRoute::new(M::GET, "/bookings/google_calendar/callback", Gate::USER.needs(Places::Edit), google_callback),
 	]
+}
+
+/// The owners' consent flow, when the Google OAuth client is configured.
+type MaybeConsents = Option<Extension<Arc<Consents>>>;
+
+fn consents(c: MaybeConsents) -> ApiResult<Arc<Consents>> {
+	c.map(|Extension(c)| c)
+		.ok_or_else(|| Refusal::new(Code::GoogleUnavailable, "no Google OAuth client is configured"))
+}
+
+impl Refuses<ConsentError> for Code {
+	fn refusal(e: ConsentError) -> Refusal<Self> {
+		match e {
+			ConsentError::Elsewhere(_) => Refusal::new(Self::BadRequest, e.to_string()),
+			ConsentError::Unknown => Refusal::new(Self::ConsentExpired, e.to_string()),
+			ConsentError::Refused(_) => Refusal::new(Self::GoogleRefused, e.to_string()),
+			ConsentError::Internal(e) => Self::refusal(e),
+		}
+	}
+}
+
+/// `{brand}`.
+#[derive(Deserialize, JsonSchema)]
+struct BrandPath {
+	brand: BrandId,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(rename = "GoogleConsentAsked")]
+struct ConsentBody {
+	/// The calendar to read; the owner's own (`primary`) when absent.
+	calendar_id: Option<String>,
+	/// The page to come back to once Google answered: one of the conductor's.
+	#[schemars(with = "String", url)]
+	return_to: url::Url,
+}
+
+#[derive(JsonSchema, Serialize)]
+#[schemars(rename = "GoogleConsentUrl")]
+struct ConsentDto {
+	/// Google's consent page, for the brand's calendar owner to open.
+	url: String,
+}
+
+/// Asks the brand's calendar owner to let the panel read it: Google's consent page, which sends
+/// them back through the callback to `return_to`.
+async fn google_consent(caller: Caller, c: MaybeConsents, Ids(BrandPath { brand }): Ids<BrandPath>, Body(b): Body<ConsentBody>) -> ApiResult<Json<ConsentDto>> {
+	let calendar_id = b.calendar_id.unwrap_or_else(|| "primary".to_owned());
+	if !(1..=1024).contains(&calendar_id.len()) {
+		return Err(Refusal::new(Code::BadRequest, "calendar_id is 1 to 1024 characters"));
+	}
+	let url = consents(c)?.ask(brand, calendar_id, b.return_to, editor(&caller), Timestamp::now())?;
+	Ok(Json(ConsentDto { url }))
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[schemars(rename = "GoogleConsentAnswer")]
+struct CallbackQuery {
+	state: String,
+	code: Option<String>,
+	/// Google's word when the owner said no.
+	error: Option<String>,
+}
+
+/// Google's redirect after the owner's consent: the brand's refresh token kept, sealed, and a
+/// page that sends the owner back to the one the consent was asked from. 409 `consent_expired` for a consent
+/// asked more than 10 minutes ago, or never.
+async fn google_callback(State(panel): State<Panel>, c: MaybeConsents, Params(q): Params<CallbackQuery>) -> ApiResult<Html<String>> {
+	let code = q.code.as_deref().ok_or(q.error.as_deref().unwrap_or("no code"));
+	let now = Timestamp::now();
+	let (consent, by, back) = consents(c)?.answer(&q.state, code, now).await?;
+	panel.connect_google_calendar(&by, &consent, now).await?;
+	// A page that goes on to `back`: the table's answers are 2xx, so not a 303.
+	let back = back.as_str().replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;");
+	Ok(Html(format!(
+		"<!doctype html><meta charset=utf-8><meta http-equiv=refresh content=\"0;url={back}\"><title>Google Calendar connected</title><a href=\"{back}\">Google Calendar connected: back to the panel</a>"
+	)))
 }
 
 /// A webhook's body at most: a booking is a few KiB.
@@ -149,7 +231,7 @@ enum SlotBody {
 /// 400 for an instant that is not one; 409 when the booking is not where the action starts from.
 async fn book_lead(
 	State(panel): State<Panel>,
-	Extension(caller): Extension<Caller>,
+	caller: Caller,
 	Ids(LeadPath { brand, lead }): Ids<LeadPath>,
 	IdempotencyKey(key): IdempotencyKey,
 	Body(b): Body<SlotBody>,
@@ -166,8 +248,7 @@ async fn book_lead(
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "BookingEnd")]
 struct CloseBody {
-	/// done | no_show | canceled
-	status: String,
+	status: Closed,
 }
 
 /// How a lead's booking ended (`booking.status_changed`).
@@ -175,14 +256,12 @@ struct CloseBody {
 /// 409 unless the lead is booked.
 async fn close_booking(
 	State(panel): State<Panel>,
-	Extension(caller): Extension<Caller>,
+	caller: Caller,
 	Ids(LeadPath { brand, lead }): Ids<LeadPath>,
 	IdempotencyKey(key): IdempotencyKey,
 	Body(b): Body<CloseBody>,
 ) -> ApiResult<Upserted<Journaled>> {
-	let done = panel
-		.close_booking_once(Actor(caller.user_id), &brand, &lead, &b.status, Timestamp::now(), key.as_deref())
-		.await?;
+	let done = panel.close_booking_once(Actor(caller.user_id), &brand, &lead, b.status, Timestamp::now(), key.as_deref()).await?;
 	Ok(recorded(done, |e| Journaled { event_id: e.raw() }))
 }
 
@@ -202,8 +281,7 @@ struct ProviderBookingDto {
 	brand: BrandId,
 	provider: Provider,
 	external_ref: String,
-	/// booked | canceled
-	status: &'static str,
+	status: ProviderBookingStatus,
 	start_at: Timestamp,
 	end_at: Option<Timestamp>,
 	booked_at: Option<Timestamp>,
@@ -214,7 +292,28 @@ struct ProviderBookingDto {
 	r#match: Option<BookingMatch>,
 	/// The attendee, for a caller who sees PII.
 	#[serde(skip_serializing_if = "Option::is_none")]
-	contact: Option<Value>,
+	contact: Option<AttendeeDto>,
+}
+
+/// Where a provider's booking stands.
+#[derive(JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ProviderBookingStatus {
+	Booked,
+	Canceled,
+}
+
+/// What the provider gave of who booked.
+#[derive(Deserialize, JsonSchema, Serialize)]
+#[serde(deny_unknown_fields)]
+#[schemars(rename = "Attendee")]
+struct AttendeeDto {
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	name: Option<String>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	email: Option<String>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	phone: Option<String>,
 }
 
 impl From<BookingView> for ProviderBookingDto {
@@ -226,14 +325,14 @@ impl From<BookingView> for ProviderBookingDto {
 			brand: r.brand_id,
 			provider: r.provider,
 			external_ref: r.external_ref,
-			status: if r.booked { "booked" } else { "canceled" },
+			status: if r.booked { ProviderBookingStatus::Booked } else { ProviderBookingStatus::Canceled },
 			start_at: r.start_at,
 			end_at: r.end_at,
 			booked_at: r.booked_at,
 			last_event_at: r.last_event_at,
 			lead_id,
 			r#match,
-			contact: v.contact,
+			contact: v.contact.map(|c| serde_json::from_value(c).expect("sealed by contact_pii: name, email, phone")),
 		}
 	}
 }
@@ -245,7 +344,7 @@ struct BookingsDto {
 }
 
 /// The providers' bookings no lead was found for, the next slot first; at most 200.
-async fn unmatched_bookings(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Params(q): Params<UnmatchedQuery>) -> ApiResult<Json<BookingsDto>> {
+async fn unmatched_bookings(State(panel): State<Panel>, caller: Caller, Params(q): Params<UnmatchedQuery>) -> ApiResult<Json<BookingsDto>> {
 	let rows = panel.unmatched_bookings(q.brand.as_ref(), crate::api::pii(&caller), q.limit.unwrap_or(100)).await?;
 	Ok(Json(BookingsDto {
 		bookings: rows.into_iter().map(ProviderBookingDto::from).collect(),
@@ -269,12 +368,7 @@ struct AttachBody {
 ///
 /// 404 for a booking not known, or no such lead of its brand; 409 when it was joined by hand
 /// already.
-async fn attach_booking(
-	State(panel): State<Panel>,
-	Extension(caller): Extension<Caller>,
-	Ids(BookingPath { id }): Ids<BookingPath>,
-	Body(b): Body<AttachBody>,
-) -> ApiResult<Created<Journaled>> {
+async fn attach_booking(State(panel): State<Panel>, caller: Caller, Ids(BookingPath { id }): Ids<BookingPath>, Body(b): Body<AttachBody>) -> ApiResult<Created<Journaled>> {
 	let event = panel.attach_booking(Actor(caller.user_id), id, &b.lead, Timestamp::now()).await?;
 	Ok(Created(Journaled { event_id: event.raw() }))
 }

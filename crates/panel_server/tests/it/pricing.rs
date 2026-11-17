@@ -50,7 +50,8 @@ async fn an_operator_reads_and_previews_but_changes_nothing() {
 	assert_eq!(b.get("/api/v1/pricing/Vifnet").await.0, StatusCode::NOT_FOUND, "not a brand id: names nothing");
 
 	let nobody = Client { who: As::Nobody, ..b };
-	assert_eq!(nobody.get(ITEM).await, (StatusCode::UNAUTHORIZED, json!({"error": "unauthenticated"})));
+	let (status, refused) = nobody.get(ITEM).await;
+	assert_eq!((status, &refused["code"]), (StatusCode::UNAUTHORIZED, &json!("unauthenticated")));
 }
 
 #[tokio::test]
@@ -82,7 +83,7 @@ async fn an_admin_saves_a_model_and_the_sites_read_it() {
 		(status, body),
 		(
 			StatusCode::UNPROCESSABLE_ENTITY,
-			json!({"error": "no input \"pets\"", "code": "noInput", "path": "needs.standard.inputs[2]"})
+			json!({"code": "invalid_pricing", "error": "needs.standard.inputs[2]: no input \"pets\""})
 		)
 	);
 	let mut unlabelled = cleaning.clone();
@@ -92,11 +93,14 @@ async fn an_admin_saves_a_model_and_the_sites_read_it() {
 		(status, body),
 		(
 			StatusCode::UNPROCESSABLE_ENTITY,
-			json!({"error": "no \"en\" label", "code": "labelMissing", "path": "inputs[1].options[0].labels.en"})
+			json!({"code": "invalid_pricing", "error": "inputs[1].options[0].labels.en: no \"en\" label"})
 		)
 	);
 	let (status, body) = b.put(ITEM, json!({"model": [], "expected_updated_at": null})).await;
-	assert_eq!((status, body), (StatusCode::UNPROCESSABLE_ENTITY, json!({"error": "an object", "code": "object", "path": ""})));
+	assert_eq!(
+		(status, body),
+		(StatusCode::UNPROCESSABLE_ENTITY, json!({"code": "invalid_pricing", "error": "model: an object"}))
+	);
 
 	let (status, saved) = b.put(ITEM, put.clone()).await;
 	assert_eq!(status, StatusCode::OK, "{saved}");
@@ -110,7 +114,10 @@ async fn an_admin_saves_a_model_and_the_sites_read_it() {
 	assert_eq!(b.get("/api/v1/pricing").await.1, json!({"items": [saved.clone()]}));
 
 	let (status, stale) = b.put(ITEM, put).await;
-	assert_eq!((status, stale), (StatusCode::CONFLICT, json!({"error": "stale", "current": saved})));
+	assert_eq!(
+		(status, stale),
+		(StatusCode::CONFLICT, json!({"code": "stale", "error": "the pricing changed since it was read"}))
+	);
 
 	let mut cheaper = cleaning.clone();
 	cheaper["minimumCents"] = json!(3900);
@@ -144,6 +151,35 @@ async fn an_admin_saves_a_model_and_the_sites_read_it() {
 
 /// The editor's preview is what the site shows: the vectors' cases, priced over HTTP, to the cent.
 #[tokio::test]
+async fn an_admin_sets_the_locales_a_model_must_label_and_the_sites_stop_on_a_missing_one() {
+	let db = TestDb::create().await;
+	let conductor = Conductor::new("k1");
+	let app = app(panel(&db).await, &conductor);
+	let admin = Client {
+		app: &app,
+		conductor: &conductor,
+		who: As::user(alias("sa:admin")),
+	};
+	let locales = format!("{ITEM}/locales");
+	let (status, saved) = admin.put(ITEM, json!({"model": fixture("valid/cleaning.json"), "expected_updated_at": null})).await;
+	assert_eq!(status, StatusCode::OK, "{saved}");
+
+	let (status, item) = admin.put(&locales, json!({"locales": ["fr", "en", "de"]})).await;
+	assert_eq!((status, &item["locales"]), (StatusCode::OK, &json!(["fr", "en", "de"])), "{item}");
+	assert_eq!(admin.get(LIVE).await, (StatusCode::OK, json!({})), "a model without the new locale's labels is not served");
+
+	for refused in [json!({"locales": []}), json!({"locales": ["fr", "fr"]}), json!({"locales": ["FR"]})] {
+		let (status, body) = admin.put(&locales, refused.clone()).await;
+		assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}: {body}");
+	}
+	let operator = Client {
+		who: As::user(alias("sa:operator")),
+		..admin
+	};
+	assert_eq!(operator.put(&locales, json!({"locales": ["fr"]})).await.0, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn the_preview_prices_the_vectors_cases() {
 	let db = TestDb::create().await;
 	let conductor = Conductor::new("k1");
@@ -168,7 +204,7 @@ async fn the_preview_prices_the_vectors_cases() {
 		(status, answer),
 		(
 			StatusCode::UNPROCESSABLE_ENTITY,
-			json!({"error": "an integer from 1 to 100000000", "code": "int", "path": "roundToCents"})
+			json!({"code": "invalid_pricing", "error": "roundToCents: an integer from 1 to 100000000"})
 		)
 	);
 }

@@ -38,13 +38,13 @@ use std::{collections::BTreeSet, sync::Arc};
 use eyre::WrapErr;
 use jiff::Timestamp;
 use panel_core::{
-	Invalid,
 	event::{Envelope, KeyGrant},
-	fact::{Fact, MessageRef},
-	ids::{BrandId, LeadId, LocationId},
+	fact::{Fact, LeadChannel, LeadFlow, MessageRef},
+	ids::{LeadId, LocationId},
 	lead::Recorded,
 };
 use sa_auth::SourceKind;
+use sa_core::{Invalid, ids::BrandId};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
@@ -112,7 +112,7 @@ pub struct EventVerdict {
 pub struct RefLead {
 	pub lead_id: String,
 	/// `None` for a lead seen before its `lead.created`.
-	pub channel: Option<String>,
+	pub channel: Option<LeadChannel>,
 	pub stage: &'static str,
 	pub created_at: Option<Timestamp>,
 	pub message_ref: String,
@@ -121,7 +121,7 @@ pub struct RefLead {
 	pub need: Option<String>,
 	pub locality: Option<String>,
 	pub quoted_cents: Option<i64>,
-	pub flow: Option<String>,
+	pub flow: Option<LeadFlow>,
 	/// When the customer first wrote on a messenger, and on which: a bot need not say it twice.
 	pub messaged_at: Option<Timestamp>,
 	pub messaged_channel: Option<&'static str>,
@@ -195,7 +195,6 @@ async fn queue_capture(conn: &mut sqlx::SqliteConnection, recorded: &Recorded, l
 pub struct Panel {
 	store: Store,
 	key: Arc<DataKey>,
-	live: live::Bus,
 	posthog: Option<posthog::PosthogProject>,
 	/// Whether journaled lead events are queued for PostHog ([`capture`]).
 	capture: bool,
@@ -206,7 +205,6 @@ impl Panel {
 		Self {
 			store,
 			key: Arc::new(key),
-			live: live::Bus::default(),
 			posthog: None,
 			capture: false,
 		}
@@ -223,19 +221,13 @@ impl Panel {
 		self.posthog.as_ref().map(|p| p.funnel_url(brand, from, to))
 	}
 
-	/// This panel on `bus` instead of its own: a bus of another capacity, or one shared.
-	pub fn with_live(mut self, bus: live::Bus) -> Self {
-		self.live = bus;
-		self
-	}
-
 	pub fn store(&self) -> &Store {
 		&self.store
 	}
 
-	/// What changed, after each commit: see [`live`].
+	/// The tables each committed write touched: see [`live`].
 	pub fn bus(&self) -> &live::Bus {
-		&self.live
+		self.store.bus()
 	}
 
 	/// Judges, journals and projects each event of a batch written under `grant`.
@@ -419,7 +411,6 @@ impl Panel {
 			Inserted::Duplicate => return Ok(Outcome::Duplicate),
 			Inserted::Conflict => return Ok(Outcome::Rejected(Invalid::new("id already names a different event"))),
 		}
-		let mut changes = Vec::new();
 		if let Some(fact) = fact {
 			let env = &incoming.envelope;
 			let recorded = Recorded {
@@ -434,17 +425,10 @@ impl Panel {
 			// Here, in the journal's transaction, and nowhere else: the rebuild projects without
 			// passing here, so it never tells PostHog anything twice.
 			if self.capture {
-				queue_capture(&mut tx, &recorded, applied.lead.as_ref(), now).await?;
+				queue_capture(&mut tx, &recorded, applied.as_ref(), now).await?;
 			}
-			changes = live::Change::of_applied(&recorded, &applied, now);
 		}
 		tx.commit().await.wrap_err("committing an event")?;
-		// Every event that reaches the projections passes here, whoever wrote it: this one
-		// publication is what keeps ingest, the operator's actions and the booking adapters
-		// from forgetting to. An unregistered event changes no read, and says nothing.
-		for change in changes {
-			self.live.changed(change);
-		}
 		Ok(Outcome::Accepted {
 			unregistered: status == Status::Unregistered,
 		})
@@ -536,7 +520,6 @@ impl Panel {
 			store::experiments::recompute(&mut tx, brand).await?;
 		}
 		tx.commit().await.wrap_err("committing the rebuild")?;
-		self.live.publish(live::Signal::Resync);
 		Ok(done)
 	}
 }

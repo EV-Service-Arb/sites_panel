@@ -3,28 +3,24 @@ import { readFileSync } from "node:fs";
 import type { PricingModel } from "@evinvest/sites-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { clearPricing, previewPrice } from "@/entities/pricing";
 import { trySave } from "@/features/edit-pricing/model/save";
 import { answersFor, needFor } from "@/features/preview-price/model/answers";
 import { type Timers, createRunner } from "@/features/preview-price/model/runner";
 import { PREVIEW_DEBOUNCE_MS } from "@/features/preview-price/model/use-preview";
-
-import { pricingRoute } from "../scripts/stub-pricing.ts";
 
 const cleaning = JSON.parse(readFileSync(new URL("../../contracts/vectors/pricing/valid/cleaning.json", import.meta.url), "utf8")) as PricingModel;
 const item = (updated_at: string | null, by: string | null = "someone@example.test") => ({ brand_id: "vifnet", locales: ["fr", "en"], model: cleaning, updated_at, updated_by: by });
 
 /** Each call answers the next of `replies`, and is recorded. */
 function answer(...replies: [number, unknown][]) {
-  const calls: { url: string; init: RequestInit }[] = [];
-  vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
-    calls.push({ url, init });
+  const calls: { method: string; path: string; body: unknown }[] = [];
+  vi.stubGlobal("fetch", async (request: Request) => {
+    calls.push({ method: request.method, path: new URL(request.url).pathname, body: request.method === "GET" ? undefined : await request.json() });
     const [status, body] = replies[Math.min(calls.length - 1, replies.length - 1)] ?? [500, {}];
-    return new Response(JSON.stringify(body), { status });
+    return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
   });
   return calls;
 }
-const sent = (call: { init: RequestInit } | undefined): unknown => JSON.parse(String(call?.init.body));
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -35,54 +31,31 @@ describe("saving a model", () => {
   it("PUTs exactly the model and the updated_at the draft started from", async () => {
     const calls = answer([200, item("2026-10-03T12:00:00Z")]);
     expect(await trySave("vifnet", cleaning, "2026-10-01T09:00:00Z")).toMatchObject({ kind: "saved", item: { updated_at: "2026-10-03T12:00:00Z" } });
-    expect(calls[0]?.url).toBe("/api/sites/pricing/vifnet");
-    expect(calls[0]?.init.method).toBe("PUT");
-    expect(sent(calls[0])).toStrictEqual({ model: cleaning, expected_updated_at: "2026-10-01T09:00:00Z" });
+    expect(calls).toEqual([{ method: "PUT", path: "/api/sites/pricing/vifnet", body: { model: cleaning, expected_updated_at: "2026-10-01T09:00:00Z" } }]);
   });
 
-  it("on 409 hands back the pricing as it now is, and overwriting sends its updated_at", async () => {
+  it("when stale, reads the brand again, and overwriting sends what it read", async () => {
     const current = item("2026-10-03T12:30:00Z", "colleague@example.test");
-    const calls = answer([409, { error: "stale", current }], [200, item("2026-10-03T12:31:00Z")]);
+    const calls = answer([409, { code: "stale", error: "someone saved first" }], [200, current], [200, item("2026-10-03T12:31:00Z")]);
     const outcome = await trySave("vifnet", cleaning, "2026-10-01T09:00:00Z");
     expect(outcome).toEqual({ kind: "conflict", current });
     if (outcome.kind !== "conflict" || !outcome.current) throw new Error("no current");
     // "Overwrite with my draft": the same model, over what is current.
     expect((await trySave("vifnet", cleaning, outcome.current.updated_at)).kind).toBe("saved");
-    expect(sent(calls[1])).toStrictEqual({ model: cleaning, expected_updated_at: "2026-10-03T12:30:00Z" });
+    expect(calls.map((c) => [c.method, c.body])).toEqual([
+      ["PUT", { model: cleaning, expected_updated_at: "2026-10-01T09:00:00Z" }],
+      ["GET", undefined],
+      ["PUT", { model: cleaning, expected_updated_at: "2026-10-03T12:30:00Z" }],
+    ]);
   });
 
-  it("reads the pricing when a 409 does not carry it", async () => {
-    const calls = answer([409, { error: "stale" }], [200, item("2026-10-03T12:30:00Z")]);
-    expect(await trySave("vifnet", cleaning, null)).toMatchObject({ kind: "conflict", current: { updated_at: "2026-10-03T12:30:00Z" } });
-    expect(calls[1]?.init.method).toBe("GET");
-  });
-
-  it("files a 422 under its path", async () => {
-    answer([422, { error: 'no "en" label', path: "inputs.bedrooms.options.studio.labels.en" }]);
-    expect(await trySave("vifnet", cleaning, null)).toEqual({ kind: "invalid", path: "inputs.bedrooms.options.studio.labels.en", message: 'no "en" label' });
-  });
-
-  it("taking pricing off is guarded like a save", async () => {
-    const calls = answer([200, { ...item("2026-10-03T13:00:00Z"), model: null }]);
-    await clearPricing("vifnet", "2026-10-03T12:00:00Z");
-    expect(calls[0]?.init.method).toBe("DELETE");
-    expect(sent(calls[0])).toStrictEqual({ expected_updated_at: "2026-10-03T12:00:00Z" });
+  it("tells a refused model in the server's own words", async () => {
+    answer([422, { code: "invalid_pricing", error: 'inputs[1].labels.en: no "en" label' }]);
+    expect(await trySave("vifnet", cleaning, null)).toEqual({ kind: "invalid", message: 'inputs[1].labels.en: no "en" label' });
   });
 });
 
 describe("the preview", () => {
-  it("asks the server, sending the draft's model, the need and the answers", async () => {
-    const calls = answer([200, { cents: 8400 }]);
-    expect(await previewPrice("vifnet", cleaning, "standard", { zone: "proche" })).toBe(8400);
-    expect(calls[0]?.url).toBe("/api/sites/pricing/vifnet/preview");
-    expect(sent(calls[0])).toStrictEqual({ model: cleaning, need: "standard", inputs: { zone: "proche" } });
-  });
-
-  it("reads null as no price", async () => {
-    answer([200, { cents: null }]);
-    expect(await previewPrice("vifnet", cleaning, "standard", {})).toBeNull();
-  });
-
   it("answers every asked question, the picked option where the model still has it", () => {
     expect(answersFor(cleaning, "standard", { zone: "loin", bedrooms: "gone" })).toEqual({ zone: "loin", bedrooms: "studio", surface: "s40", frequency: "weekly" });
     expect(answersFor(cleaning, "windows", { zone: "loin" })).toEqual({});
@@ -139,34 +112,5 @@ describe("the preview's debounce", () => {
     runner.request("b", 2);
     await vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS);
     expect(run).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe("the dev stub", () => {
-  const route = (method: string, path: string, body: Record<string, unknown> = {}, role = "admin") => pricingRoute(method, path, body, role, "t@example.test");
-
-  it("lists vifnet with the vectors' cleaning model and aquafix with none", () => {
-    const list = route("GET", "/pricing")?.body as { items: { brand_id: string; model: unknown }[] };
-    expect(list.items.map((i) => [i.brand_id, i.model === null])).toEqual([
-      ["aquafix", true],
-      ["vifnet", false],
-    ]);
-  });
-
-  it("refuses a save at a stale updated_at with the current pricing, and takes it at the current one", () => {
-    const current = route("GET", "/pricing/vifnet")?.body as { updated_at: string };
-    expect(route("PUT", "/pricing/vifnet", { model: cleaning, expected_updated_at: null })).toMatchObject({ status: 409, body: { error: "stale", current } });
-    expect(route("PUT", "/pricing/vifnet", { model: cleaning, expected_updated_at: current.updated_at })).toMatchObject({ status: 200, changed: "vifnet" });
-  });
-
-  it("answers 422 with a path the editor can show", () => {
-    const model = { ...cleaning, inputs: cleaning.inputs.map((i) => (i.id === "bedrooms" ? { ...i, labels: { fr: "Chambres" } } : i)) };
-    expect(route("PUT", "/pricing/aquafix", { model, expected_updated_at: null })).toEqual({ status: 422, body: { path: "inputs[1].labels.en", code: "labelMissing", error: "labelMissing (stub)" } });
-  });
-
-  it("lets an operator read and preview, not write", () => {
-    expect(route("PUT", "/pricing/aquafix", { model: cleaning, expected_updated_at: null }, "operator")?.status).toBe(403);
-    expect(route("POST", "/pricing/aquafix/preview", { model: cleaning, need: "windows", inputs: {} }, "operator")).toMatchObject({ status: 200, body: { cents: 8900 } });
-    expect(route("POST", "/pricing/aquafix/preview", { model: cleaning, need: "standard", inputs: {} }, "operator")).toMatchObject({ status: 200, body: { cents: null } });
   });
 });

@@ -1,8 +1,8 @@
 //! The `google_calendar` booking adapter: a brand owner's Google Calendar, pulled
 //! (`events.list` with a sync token; Google appointment schedules send no webhooks), its
 //! appointment bookings read as [`BookingEvent`]s for [`panel::Panel::ingest_bookings`]. And
-//! the CLI's one-off consent (`sites_panel booking google-authorize <brand>`) that yields the
-//! owner's refresh token.
+//! the owner's consent, asked from the editor ([`Consents`]), that yields the refresh token the
+//! panel keeps sealed (`panel::Panel::connect_google_calendar`).
 //!
 //! ```text
 //! every minute, per brand with a token: the brand's lease, due every GOOGLE_CALENDAR_SYNC_MINUTES
@@ -23,9 +23,9 @@
 //! id and the engine keeps only those of bookings it has. The phone is the line after (or
 //! beside) a phone label in the description, normalized as the sites do.
 //!
-//! Secrets: `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` (the panel's OAuth
-//! client), `GOOGLE_CALENDAR_REFRESH_TOKEN_<BRAND>` per brand, `GOOGLE_CALENDAR_ID_<BRAND>`
-//! optional (`primary`). Scope `calendar.events.readonly`: read, never write.
+//! Secrets: `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` (the panel's OAuth client,
+//! a Web client whose redirect is `GOOGLE_OAUTH_REDIRECT_URI`); each brand's refresh token is
+//! data, sealed. Scope `calendar.events.readonly`: read, never write.
 
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
@@ -34,9 +34,10 @@ use eyre::WrapErr;
 use jiff::{SignedDuration, Timestamp};
 use panel::{
 	Panel,
-	booking::{BookingEvent, Change, Contact, Provider, PullError, PullSource, Pulled},
+	booking::{BookingEvent, Change, Contact, GoogleConsent, Provider, PullError, PullSource, Pulled},
 };
-use panel_core::{ids::BrandId, phone};
+use panel_core::{phone, place::Editor};
+use sa_core::ids::BrandId;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, watch};
@@ -70,7 +71,7 @@ const TICK: Duration = Duration::from_secs(60);
 /// One brand's calendar.
 pub struct BrandCalendar {
 	pub refresh_token: Zeroizing<String>,
-	/// `primary` unless `GOOGLE_CALENDAR_ID_<BRAND>` says.
+	/// `primary`, or a calendar the owner shares.
 	pub calendar_id: String,
 }
 
@@ -125,6 +126,24 @@ impl GoogleCalendar {
 			brands: Arc::new(brands),
 			tokens: Arc::default(),
 		})
+	}
+
+	/// This adapter over the brands `consents` name, its access tokens kept.
+	pub fn of(&self, consents: Vec<GoogleConsent>) -> Self {
+		let brands = consents
+			.into_iter()
+			.map(|c| {
+				let cal = BrandCalendar {
+					refresh_token: c.refresh_token,
+					calendar_id: c.calendar_id,
+				};
+				(c.brand, cal)
+			})
+			.collect();
+		Self {
+			brands: Arc::new(brands),
+			..self.clone()
+		}
 	}
 
 	/// The brands with a calendar.
@@ -384,11 +403,12 @@ pub fn booking_of(item: &Value, now: Timestamp) -> Option<BookingEvent> {
 
 // ── the schedule in `serve` ─────────────────────────────────────────────────────────────
 
-/// Pulls every brand's calendar until `shutdown`: each minute, the brands whose sync is due
-/// (`every`) and not held by another process.
+/// Pulls every consented brand's calendar until `shutdown`: each minute, the brands whose sync is
+/// due (`every`) and not held by another process, read from the consents as they stand then.
 pub async fn run(panel: Panel, google: GoogleCalendar, every: SignedDuration, shutdown: watch::Receiver<bool>) {
 	let holder = Uuid::now_v7();
 	crate::every(TICK, shutdown, "the google calendar sync", || async {
+		let google = google.of(panel.google_calendars().await?);
 		for brand in google.brands() {
 			// One brand's failure is reported and does not hold the others back.
 			if let Err(e) = panel.sync_bookings(&google, &brand, holder, Timestamp::now(), every, false, false).await {
@@ -400,16 +420,115 @@ pub async fn run(panel: Panel, google: GoogleCalendar, every: SignedDuration, sh
 	.await;
 }
 
-// ── consent, from the CLI ───────────────────────────────────────────────────────────────
+// ── consent, from the editor ────────────────────────────────────────────────────────────
 
-/// What the owner's consent gave: the refresh token, to put in the brand's secret.
-pub struct Consent {
-	pub refresh_token: Zeroizing<String>,
+/// How long a consent asked may wait for Google's redirect.
+const CONSENT_WITHIN: SignedDuration = SignedDuration::from_mins(10);
+
+/// The owners' consents: Google's consent page, then its redirect to `redirect_uri` (the
+/// conductor's path to [`crate::booking`]'s callback, registered on the OAuth client), traded
+/// there for the refresh token. A consent asked waits in memory: one pod.
+pub struct Consents {
+	google: GoogleCalendar,
+	redirect_uri: url::Url,
+	asked: std::sync::Mutex<BTreeMap<String, Asked>>,
 }
 
-/// Google's consent URL for a loopback redirect: offline access (a refresh token), the
-/// consent screen every time (so a refresh token is always given), PKCE.
-pub fn consent_url(client_id: &str, redirect_uri: &str, state: &str, challenge: &str) -> eyre::Result<String> {
+struct Asked {
+	brand: BrandId,
+	calendar_id: String,
+	verifier: Zeroizing<String>,
+	return_to: url::Url,
+	by: Editor,
+	until: Timestamp,
+}
+
+/// Why a consent's redirect was not taken.
+#[derive(Debug, thiserror::Error)]
+pub enum ConsentError {
+	/// `return_to` is not on the redirect's origin: the editor's page is the conductor's.
+	#[error("return_to is not a page of {0}")]
+	Elsewhere(String),
+	/// No consent asked under this state, or asked more than 10 minutes ago.
+	#[error("no consent waits under this state: ask again")]
+	Unknown,
+	/// Google said no, or gave no refresh token.
+	#[error("{0}")]
+	Refused(String),
+	#[error(transparent)]
+	Internal(#[from] eyre::Report),
+}
+
+impl Consents {
+	pub fn new(google: GoogleCalendar, redirect_uri: url::Url) -> Self {
+		Self {
+			google,
+			redirect_uri,
+			asked: std::sync::Mutex::default(),
+		}
+	}
+
+	/// Google's consent URL for `brand`'s owner: offline access (a refresh token), the consent
+	/// screen every time (so a refresh token is always given), PKCE.
+	pub(crate) fn ask(&self, brand: BrandId, calendar_id: String, return_to: url::Url, by: Editor, now: Timestamp) -> Result<String, ConsentError> {
+		if return_to.origin() != self.redirect_uri.origin() {
+			return Err(ConsentError::Elsewhere(self.redirect_uri.origin().ascii_serialization()));
+		}
+		let state = random_token()?;
+		let verifier = Zeroizing::new(random_token()?);
+		let url = consent_url(&self.google.client_id, self.redirect_uri.as_str(), &state, &pkce_challenge(&verifier))?;
+		let mut asked = self.asked.lock().expect("no panic while held");
+		asked.retain(|_, a| a.until > now);
+		asked.insert(
+			state,
+			Asked {
+				brand,
+				calendar_id,
+				verifier,
+				return_to,
+				by,
+				until: now + CONSENT_WITHIN,
+			},
+		);
+		Ok(url)
+	}
+
+	/// Google's redirect: the consent asked under `state`, its `code` traded for the refresh token.
+	/// Answers the consent, who asked it, and the page to send them back to.
+	pub(crate) async fn answer(&self, state: &str, code: Result<&str, &str>, now: Timestamp) -> Result<(GoogleConsent, Editor, url::Url), ConsentError> {
+		let asked = self
+			.asked
+			.lock()
+			.expect("no panic while held")
+			.remove(state)
+			.filter(|a| a.until > now)
+			.ok_or(ConsentError::Unknown)?;
+		let code = code.map_err(|e| ConsentError::Refused(format!("Google answered {e}")))?;
+		let form = url::form_urlencoded::Serializer::new(String::new())
+			.append_pair("client_id", &self.google.client_id)
+			.append_pair("client_secret", &self.google.client_secret)
+			.append_pair("code", code)
+			.append_pair("code_verifier", &asked.verifier)
+			.append_pair("redirect_uri", self.redirect_uri.as_str())
+			.append_pair("grant_type", "authorization_code")
+			.finish();
+		let answer = token_request(&self.google.http, &self.google.token_url, form)
+			.await
+			.map_err(|e| ConsentError::Refused(format!("trading the consent's code: {e}")))?;
+		let refresh = answer
+			.get("refresh_token")
+			.and_then(Value::as_str)
+			.ok_or_else(|| ConsentError::Refused("Google gave no refresh token: revoke the panel's access in the Google account and ask again".into()))?;
+		let consent = GoogleConsent {
+			brand: asked.brand,
+			calendar_id: asked.calendar_id,
+			refresh_token: Zeroizing::new(refresh.to_owned()),
+		};
+		Ok((consent, asked.by, asked.return_to))
+	}
+}
+
+fn consent_url(client_id: &str, redirect_uri: &str, state: &str, challenge: &str) -> eyre::Result<String> {
 	let mut url = url::Url::parse(AUTH_URL).wrap_err("Google's consent URL")?;
 	url.query_pairs_mut()
 		.append_pair("client_id", client_id)
@@ -422,68 +541,6 @@ pub fn consent_url(client_id: &str, redirect_uri: &str, state: &str, challenge: 
 		.append_pair("code_challenge", challenge)
 		.append_pair("code_challenge_method", "S256");
 	Ok(url.into())
-}
-
-/// The owner's consent, on this machine: prints the consent URL, waits (10 minutes at most)
-/// on `127.0.0.1:<port>` for Google's redirect, checks its state, and trades its code for a
-/// refresh token. The OAuth client must be of the Desktop kind (any loopback port), or a Web
-/// client with `http://127.0.0.1:<port>/` registered.
-pub async fn authorize(client_id: &str, client_secret: &str, port: u16, token_url: &str) -> eyre::Result<Consent> {
-	use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-	let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
-		.await
-		.wrap_err_with(|| format!("listening on 127.0.0.1:{port}"))?;
-	let redirect_uri = format!("http://127.0.0.1:{}/", listener.local_addr()?.port());
-	let state = random_token()?;
-	let verifier = Zeroizing::new(random_token()?);
-	println!(
-		"Open this URL as the brand's calendar owner and allow read access:\n\n{}\n",
-		consent_url(client_id, &redirect_uri, &state, &pkce_challenge(&verifier))?
-	);
-	let code = tokio::time::timeout(Duration::from_secs(600), async {
-		loop {
-			let (mut socket, _) = listener.accept().await?;
-			let mut buf = vec![0u8; 8192];
-			let n = socket.read(&mut buf).await?;
-			let request = String::from_utf8_lossy(&buf[..n]);
-			let target = request.lines().next().and_then(|l| l.split_whitespace().nth(1)).unwrap_or("/").to_owned();
-			let query = url::Url::parse(&format!("http://127.0.0.1{target}")).ok();
-			let get = |k: &str| query.as_ref().and_then(|u| u.query_pairs().find(|(q, _)| q == k).map(|(_, v)| v.into_owned()));
-			let (reply, result) = match (get("state"), get("code"), get("error")) {
-				(Some(s), Some(code), _) if s == state => ("Done: you can close this tab and go back to the terminal.", Some(Ok(code))),
-				(_, _, Some(e)) => ("Consent refused: see the terminal.", Some(Err(eyre::eyre!("Google answered {e}")))),
-				// A favicon, a stray request: not Google's redirect.
-				_ => ("Waiting for Google's redirect.", None),
-			};
-			let page = format!(
-				"HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",
-				reply.len()
-			);
-			socket.write_all(page.as_bytes()).await?;
-			if let Some(r) = result {
-				return r;
-			}
-		}
-	})
-	.await
-	.map_err(|_| eyre::eyre!("no consent within 10 minutes"))??;
-	let form = url::form_urlencoded::Serializer::new(String::new())
-		.append_pair("client_id", client_id)
-		.append_pair("client_secret", client_secret)
-		.append_pair("code", &code)
-		.append_pair("code_verifier", &verifier)
-		.append_pair("redirect_uri", &redirect_uri)
-		.append_pair("grant_type", "authorization_code")
-		.finish();
-	let answer = token_request(&client()?, token_url, form).await.wrap_err("trading the consent's code")?;
-	let refresh = answer
-		.get("refresh_token")
-		.and_then(Value::as_str)
-		.ok_or_else(|| eyre::eyre!("Google gave no refresh token: revoke the panel's access in the Google account and run this again"))?;
-	Ok(Consent {
-		refresh_token: Zeroizing::new(refresh.to_owned()),
-	})
 }
 
 #[cfg(test)]

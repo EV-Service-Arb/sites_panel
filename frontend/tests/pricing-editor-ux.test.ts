@@ -5,7 +5,7 @@ import { type ReactElement, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { type PricingItem, PricingStatus, changedParts, pricingStamp } from "@/entities/pricing";
+import { type PricingItem, PricingStatus, pricingStamp } from "@/entities/pricing";
 import { type PricingEditor, PricingEditorForm } from "@/features/edit-pricing";
 import { PASTE_FIELD_CLASS, PROBLEMS_CLASS } from "@/features/edit-pricing/config/paste";
 import { draftOf } from "@/features/edit-pricing/model/draft";
@@ -44,7 +44,6 @@ function editorOf(base: PricingItem, errors: FieldErrors = NO_FIELD_ERRORS): Pri
     overwrite: noop,
     replace: noop,
     reset: noop,
-    showPath: noop,
     showFirst: noop,
   };
 }
@@ -99,24 +98,6 @@ describe("the last write's stamp", () => {
   it("reads 'Taken off' in the conflict alert when the write that won took the pricing off", () => {
     const html = render(createElement(ConflictAlert, { current: item(null), onTakeFresh: () => {}, onOverwrite: () => {} }));
     expect(html).toMatch(/Taken off [^<]*56[^<]* by admin@example\.test\. Your draft is kept\./);
-  });
-});
-
-describe("what a history row says changed", () => {
-  it("names the parts that differ from the change before it", () => {
-    const later: PricingModel = { ...cleaning, validFrom: "2026-11-01", minimumCents: cleaning.minimumCents + 100 };
-    expect(changedParts(later, cleaning)).toEqual(["validFrom", "general"]);
-  });
-
-  it("is empty for the same model saved again, needs read back in another key order included", () => {
-    const reordered: PricingModel = { ...cleaning, needs: Object.fromEntries(Object.entries(cleaning.needs).reverse()) };
-    expect(changedParts(reordered, cleaning)).toEqual([]);
-  });
-
-  it("has nothing to compare for the first save or around a take-off", () => {
-    expect(changedParts(cleaning, undefined)).toBeNull();
-    expect(changedParts(cleaning, null)).toBeNull();
-    expect(changedParts(null, cleaning)).toBeNull();
   });
 });
 

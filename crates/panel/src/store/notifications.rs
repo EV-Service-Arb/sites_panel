@@ -224,18 +224,30 @@ pub async fn after(conn: &mut SqliteConnection, after: i64, limit: i64) -> eyre:
 		.collect()
 }
 
-/// Drops notes created before `notes_before` and claims made before `claims_before`.
+/// Drops notes created before `notes_before` and claims made before `claims_before`. Looked for
+/// first: a DELETE is told on the live bus whether or not it finds a row, and the fan-out asks
+/// every 2 s.
 pub async fn prune(conn: &mut SqliteConnection, notes_before: Timestamp, claims_before: Timestamp) -> eyre::Result<()> {
-	sqlx::query("DELETE FROM notifications WHERE created_at < $1")
+	let (notes, claims): (bool, bool) = sqlx::query_as("SELECT EXISTS (SELECT 1 FROM notifications WHERE created_at < $1), EXISTS (SELECT 1 FROM fanout WHERE fanned_at < $2)")
 		.bind(to_db(notes_before))
-		.execute(&mut *conn)
-		.await
-		.wrap_err("pruning the notes")?;
-	sqlx::query("DELETE FROM fanout WHERE fanned_at < $1")
 		.bind(to_db(claims_before))
-		.execute(&mut *conn)
+		.fetch_one(&mut *conn)
 		.await
-		.wrap_err("pruning the fan-out claims")?;
+		.wrap_err("looking for what to prune")?;
+	if notes {
+		sqlx::query("DELETE FROM notifications WHERE created_at < $1")
+			.bind(to_db(notes_before))
+			.execute(&mut *conn)
+			.await
+			.wrap_err("pruning the notes")?;
+	}
+	if claims {
+		sqlx::query("DELETE FROM fanout WHERE fanned_at < $1")
+			.bind(to_db(claims_before))
+			.execute(&mut *conn)
+			.await
+			.wrap_err("pruning the fan-out claims")?;
+	}
 	Ok(())
 }
 

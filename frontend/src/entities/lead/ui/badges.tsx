@@ -6,7 +6,9 @@ import { useT } from "@/shared/i18n";
 import { formatWait } from "@/shared/lib/format";
 import { useNow } from "@/shared/lib/use-now";
 
-import { type Lead, type Stage, slaAt } from "../model/lead";
+import type { Lead, Stage } from "@/shared/api/schema";
+
+import { slaAt } from "../model/lead";
 
 const STAGE_VARIANT: Record<Stage, Tone> = {
   created: "primary",

@@ -1,12 +1,11 @@
+import { useResource } from "@evinvest/api/react";
 import { Settled, Skeleton } from "@evinvest/uikit";
 
-import { fetchExperiments } from "@/entities/experiment";
-import { brandsOf, selectedBrands, usePlaces } from "@/entities/place";
-import { may, useMe } from "@/entities/session";
-import { useFilterParams } from "@/features/funnel-filters";
+import { brandsOf, usePlaces, useSelectedBrands } from "@/entities/place";
+import { useMe } from "@/entities/session";
+import { api } from "@/shared/api";
 import { useT } from "@/shared/i18n";
-import { gmbsKey, useGmbs } from "@/shared/lib/gmbs";
-import { useResource } from "@/shared/lib/use-resource";
+import { openView, useViewParams } from "@/shared/lib/router";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { ErrorState } from "@/shared/ui/error-state";
 import { FilterSelect } from "@/shared/ui/filter-select";
@@ -24,20 +23,15 @@ import { BrandExperiments } from "./brand-experiments";
 export function ExperimentsView() {
   const t = useT();
   const me = useMe();
-  const { brand, update } = useFilterParams();
-  const gmbs = useGmbs();
+  const brand = useViewParams("experiments").brand ?? null;
+  const update = ({ brand }: { brand: string | null }) => openView({ view: "experiments", params: brand === null ? {} : { brand } }, { replace: true });
   const places = usePlaces();
-  const key = `experiments:${brand ?? ""}:${gmbsKey(gmbs)}`;
-  const data = useResource(
-    key,
-    async () => {
-      const [list, brands] = await Promise.all([fetchExperiments(brand), selectedBrands(gmbs)]);
-      return brands === null ? list : list.filter((e) => brands.has(e.brand));
-    },
-    key,
-    { live: ["experiments", "places"] },
-  );
-  const list = data.status === "ok" ? data.data : [];
+  const all = useResource(api(), "/experiments", { params: { query: { brand } } });
+  const selection = useSelectedBrands();
+  const failure = all.status === "error" ? all.failure : selection.status === "error" ? selection.failure : undefined;
+  const selected = selection.status === "ok" ? selection.data : undefined;
+  const ready = all.status === "ok" && selected !== undefined;
+  const list = !ready ? [] : selected === null ? all.data.experiments : all.data.experiments.filter((e) => selected.has(e.brand));
   const brands = brandsOf([...places, ...list], brand);
 
   return (
@@ -45,14 +39,14 @@ export function ExperimentsView() {
       title={t("experiments.title")}
       actions={<FilterSelect label={t("filter.brand")} allLabel={t("filter.brand.all")} value={brand} options={brands.map((b) => ({ value: b, label: b }))} onChange={(b) => update({ brand: b })} />}
     >
-      <Settled loading={data.status === "loading"} skeleton={<Skeleton className="h-64 w-full" />} className="flex flex-col gap-4">
-        {data.status === "error" && <ErrorState failure={data.failure} onRetry={data.reload} />}
-        {data.status === "ok" && list.length === 0 && <EmptyState title={t("experiments.empty")} description={t("experiments.empty.body")} />}
-        {data.status === "ok" && list.length > 0 && (
+      <Settled loading={!ready && failure === undefined} skeleton={<Skeleton className="h-64 w-full" />} className="flex flex-col gap-4">
+        {failure !== undefined && <ErrorState failure={failure} onRetry={all.reload} />}
+        {ready && list.length === 0 && <EmptyState title={t("experiments.empty")} description={t("experiments.empty.body")} />}
+        {ready && list.length > 0 && (
           <>
             <p className="px-1 text-sm text-ink-soft">{t("experiments.how")}</p>
             {byBrand(list).map(([b, experiments]) => (
-              <BrandExperiments key={b} brand={b} experiments={experiments} editable={may(me, "sa:sites:analysis:experiments:edit")} onSaved={data.reload} />
+              <BrandExperiments key={b} brand={b} experiments={experiments} editable={api().mayCall("put", "/experiments/{brand}/{key}", me.permissions)} onSaved={all.reload} />
             ))}
           </>
         )}

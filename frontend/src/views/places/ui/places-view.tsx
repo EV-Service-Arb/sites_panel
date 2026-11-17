@@ -1,17 +1,17 @@
+import { useResource } from "@evinvest/api/react";
 import { Settled, Skeleton } from "@evinvest/uikit";
 import { useMemo, useState } from "react";
 
-import { fetchFunnelByLocation } from "@/entities/funnel";
-import { type PlaceKey, fetchPlaces } from "@/entities/place";
-import { fetchPricingList } from "@/entities/pricing";
-import { may, useMe } from "@/entities/session";
+import { byLocation } from "@/entities/funnel";
+import type { PlaceKey } from "@/entities/place";
+import { useMe } from "@/entities/session";
 import { AddPlaceButton } from "@/features/add-place";
-import { type Period, rangeOf } from "@/features/funnel-filters";
+import { rangeOf } from "@/features/funnel-filters";
+import { api } from "@/shared/api";
 import { useT } from "@/shared/i18n";
-import { gmbsKey, useGmbs } from "@/shared/lib/gmbs";
-import { replaceQuery, useQuery } from "@/shared/lib/router";
+import { gmbParam, useGmbs } from "@/shared/lib/gmbs";
+import { openView, useViewParams } from "@/shared/lib/router";
 import { useLastNonNull } from "@/shared/lib/use-last-non-null";
-import { useResource } from "@/shared/lib/use-resource";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { ErrorState } from "@/shared/ui/error-state";
 import { PanelOverlay } from "@/shared/ui/panel-overlay";
@@ -22,7 +22,8 @@ import { type PlaceRow, placeRows } from "../model/rows";
 import { PlaceCard } from "./place-card";
 import { PlaceSettingsPanel } from "./place-settings-panel";
 
-const WINDOW_DAYS: Period = 30;
+/** The cards' own window: the funnel of the last month, not a view key. */
+const WINDOW_DAYS = 30;
 
 /**
  * Locations with a mini funnel each, from the backend's per-location funnel,
@@ -33,36 +34,34 @@ export function PlacesView() {
   const me = useMe();
   // Fixed when the screen opens: a range that moved mid-render would refetch in a loop.
   const [range] = useState(() => rangeOf(WINDOW_DAYS, new Date()));
-  const [version, setVersion] = useState(0);
   // The open place lives in the URL (`?brand=&location=`), so another service can link to it.
-  const params = useQuery();
-  const brand = params.get("brand");
-  const location = params.get("location");
-  const open = useMemo<PlaceKey | null>(() => (brand && location ? { brand, slug: location } : null), [brand, location]);
-  const setOpen = (key: PlaceKey | null) => replaceQuery(key ? new URLSearchParams({ brand: key.brand, location: key.slug }) : new URLSearchParams());
+  const { brand, location } = useViewParams("places");
+  const open = useMemo<PlaceKey | null>(() => (brand !== undefined && location !== undefined ? { brand, slug: location } : null), [brand, location]);
+  const setOpen = (key: PlaceKey | null) => openView({ view: "places", params: key ? { brand: key.brand, location: key.slug } : {} }, { replace: true });
   // Title and form stay put while the sheet slides away.
   const shown = useLastNonNull(open);
-  const refresh = () => setVersion((v) => v + 1);
-  const gmbs = useGmbs();
-  const key = `places:${range.from}:${range.to}:${gmbsKey(gmbs)}`;
-  // The cards count leads, and say whether a place has live data or is withdrawn.
-  const data = useResource(
-    `${key}:${version}`,
-    async () => {
-      const [funnel, places, pricing] = await Promise.all([fetchFunnelByLocation({ ...range, brand: null, gmbs }), fetchPlaces(gmbs), fetchPricingList()]);
-      return { rows: placeRows(funnel.locations, places), minSample: funnel.min_sample, brands: offeredBrands(places, pricing) };
-    },
-    key,
-    { live: ["places", "leads", "lead"] },
-  );
+  const gmb = gmbParam(useGmbs());
+  // The cards count leads, and say whether a place has live data or is withdrawn; each read follows its own tables.
+  const funnel = useResource(api(), "/funnel", { params: { query: { ...range, gmb, by: "location" } } });
+  const places = useResource(api(), "/places", { params: { query: { gmb } } });
+  const pricing = useResource(api(), "/pricing");
+  const refresh = () => {
+    funnel.reload();
+    places.reload();
+  };
+  const failure = [funnel, places, pricing].find((r) => r.status === "error")?.failure;
+  const data =
+    funnel.status === "ok" && places.status === "ok" && pricing.status === "ok"
+      ? { rows: placeRows(byLocation(funnel.data), places.data.places), minSample: funnel.data.min_sample, brands: offeredBrands(places.data.places, pricing.data.items) }
+      : null;
 
   return (
     <ScreenFrame
       title={t("places.title")}
       actions={
-        may(me, "sa:sites:work:places:edit") && data.status === "ok" ? (
+        api().mayCall("post", "/places", me.permissions) && data !== null ? (
           <AddPlaceButton
-            brands={data.data.brands}
+            brands={data.brands}
             onAdded={(key) => {
               refresh();
               setOpen(key);
@@ -71,10 +70,10 @@ export function PlacesView() {
         ) : undefined
       }
     >
-      <Settled loading={data.status === "loading"} skeleton={<Skeleton className="h-48 w-full" />} className="flex flex-col gap-4">
-        {data.status === "error" && <ErrorState failure={data.failure} onRetry={data.reload} />}
-        {data.status === "ok" && <p className="text-sm text-ink-soft">{t("places.window", { days: WINDOW_DAYS, min: data.data.minSample })}</p>}
-        {data.status === "ok" && <PlaceGrid rows={data.data.rows} onOpen={setOpen} />}
+      <Settled loading={data === null && failure === undefined} skeleton={<Skeleton className="h-48 w-full" />} className="flex flex-col gap-4">
+        {failure !== undefined && <ErrorState failure={failure} onRetry={refresh} />}
+        {data !== null && <p className="text-sm text-ink-soft">{t("places.window", { days: WINDOW_DAYS, min: data.minSample })}</p>}
+        {data !== null && <PlaceGrid rows={data.rows} onOpen={setOpen} />}
       </Settled>
       <PanelOverlay
         open={open !== null}

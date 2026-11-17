@@ -14,14 +14,8 @@ export interface FieldErrors {
 /** Said only once a save was tried: a new row is not wrong for being empty yet. */
 const QUIET: ReadonlySet<DraftCode> = new Set(["required", "labelMissing"]);
 
-/** A refusal by the server, filed under the field its path names (null: none). */
-export interface ServerProblem {
-  field: string | null;
-  path: string;
-  message: string;
-}
-
-export function errorsOf(problems: readonly DraftProblem[], revealAll: boolean, server: ServerProblem | null): FieldErrors {
+/** `server`: a refusal's own words, above the form: it names no path. */
+export function errorsOf(problems: readonly DraftProblem[], revealAll: boolean, server: string | null): FieldErrors {
   const byField = new Map<string, Shown[]>();
   const general: Shown[] = [];
   let first: string | null = null;
@@ -33,7 +27,7 @@ export function errorsOf(problems: readonly DraftProblem[], revealAll: boolean, 
     first ??= field;
     byField.set(field, [...(byField.get(field) ?? []), shown]);
   };
-  if (server) file(server.field, server.field === null && server.path !== "" ? { text: `${server.path}: ${server.message}` } : { text: server.message });
+  if (server !== null) file(null, { text: server });
   for (const p of problems) if (revealAll || !QUIET.has(p.code)) file(p.field, { code: p.code, vars: p.vars });
   return { byField, general, first };
 }

@@ -1,12 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { type Experiment, experimentsParser, sharesOf, statusOf } from "@/entities/experiment";
+import { type Experiment, sharesOf, statusOf } from "@/entities/experiment";
 import { RESET_PATCH, checkDraft, draftOf, enabledPatch, parseDecimal, resetMovesWeights } from "@/features/configure-experiment/model/draft";
-import { parseLiveMessage } from "@/shared/lib/live/protocol";
-import { ParseError, parse } from "@/shared/lib/parse";
+import { api } from "@/shared/api";
 import { byBrand } from "@/views/experiments/model/group";
 
-const item = {
+const item: Experiment = {
   brand: "aquafix",
   key: "lead_layout",
   variants: ["a", "b"],
@@ -18,25 +17,21 @@ const item = {
   posthog_url: "https://us.posthog.com/project/1/insights/new#q=%7B%7D",
 };
 
-const read = (over: Record<string, unknown> = {}): Experiment => {
-  const e = parse(experimentsParser, { experiments: [{ ...item, ...over }] }).experiments[0];
-  if (!e) throw new Error("no experiment");
-  return e;
-};
+const read = (over: Partial<Experiment> = {}): Experiment => ({ ...item, ...over });
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe("the experiments answer", () => {
-  it("is read as config: variants, declaration, override, effective split", () => {
-    const e = read({ override: { weights: [3, 1], enabled: null, holdout: null, changed_by: "admin@example.test", changed_at: "2026-10-02T10:00:00Z" }, effective: { weights: [3, 1], enabled: true, holdout: null } });
-    expect(e.variants).toEqual(["a", "b"]);
-    expect(e.override?.weights).toEqual([3, 1]);
-    expect(e.override?.enabled).toBeNull();
-    expect(e.declared.summary).toBe("Shorter form converts better");
-  });
-
-  it("takes an absent posthog_url as none and refuses one that is not http(s)", () => {
-    expect(read({ posthog_url: null }).posthog_url).toBeNull();
-    expect(() => read({ posthog_url: "javascript:alert(1)" })).toThrow(ParseError);
-    expect(() => read({ posthog_url: "not a url" })).toThrow(ParseError);
+  // The link goes into an `href` on a page holding a session: the document's pattern keeps `javascript:` out of it.
+  it("is refused when its posthog_url is not http(s)", async () => {
+    const answering = (posthog_url: string | null) =>
+      vi.stubGlobal("fetch", async () => new Response(JSON.stringify({ experiments: [{ ...item, posthog_url }] }), { headers: { "content-type": "application/json" } }));
+    answering(null);
+    expect((await api().GET("/experiments")).data?.experiments[0]?.posthog_url).toBeNull();
+    for (const bad of ["javascript:alert(1)", "not a url"]) {
+      answering(bad);
+      await expect(api().GET("/experiments")).rejects.toThrow(/posthog_url|pattern/);
+    }
   });
 });
 
@@ -107,12 +102,5 @@ describe("a draft", () => {
     expect(RESET_PATCH).toEqual({ enabled: null, weights: null, holdout: null });
     expect(resetMovesWeights(read({ effective: { weights: [3, 1], enabled: true, holdout: null } }))).toBe(true);
     expect(resetMovesWeights(read({ effective: { weights: [1, 1], enabled: false, holdout: null } }))).toBe(false);
-  });
-});
-
-describe("the live socket", () => {
-  it("no longer knows the metrics topic: such a message is ignored", () => {
-    expect(parseLiveMessage({ type: "changed", topic: "metrics", brand_id: null, id: null, at: "2026-10-04T00:00:00Z" })).toBeNull();
-    expect(parseLiveMessage({ type: "changed", topic: "experiments", brand_id: "aquafix", id: null, at: "2026-10-04T00:00:00Z" })).not.toBeNull();
   });
 });

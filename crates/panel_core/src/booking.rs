@@ -10,11 +10,12 @@
 use std::collections::BTreeMap;
 
 use jiff::{Timestamp, civil::Date};
+use sa_core::Invalid;
 use serde::Serialize;
 use serde_json::Value;
 use ts_rs::TS;
 
-use crate::{Invalid, ids::EventId};
+use crate::ids::EventId;
 
 vocabulary! {
 	/// Where a slot is booked.
@@ -383,7 +384,9 @@ impl BookingStatus {
 }
 
 /// How a booked slot ended, as an operator says (`booking.status_changed`).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, serde::Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(rename = "BookingClosed")]
 pub enum Closed {
 	Done,
 	NoShow,
@@ -391,6 +394,8 @@ pub enum Closed {
 }
 
 impl Closed {
+	pub const ALL: [Self; 3] = [Self::Done, Self::NoShow, Self::Canceled];
+
 	pub fn as_str(self) -> &'static str {
 		self.status().as_str()
 	}
@@ -404,7 +409,7 @@ impl Closed {
 	}
 
 	pub fn parse(raw: &str) -> Result<Self, Invalid> {
-		[Self::Done, Self::NoShow, Self::Canceled]
+		Self::ALL
 			.into_iter()
 			.find(|c| c.as_str() == raw)
 			.ok_or_else(|| Invalid::new("status is not one of done, no_show, canceled"))
@@ -417,6 +422,20 @@ pub enum OperatorAction {
 	Set,
 	Clear,
 	Close(Closed),
+}
+
+impl OperatorAction {
+	/// In the order the card offers them.
+	pub const ALL: [Self; 5] = [Self::Set, Self::Close(Closed::Done), Self::Close(Closed::NoShow), Self::Close(Closed::Canceled), Self::Clear];
+
+	/// The word the API's bodies say it with: a slot's `action`, else the closed status.
+	pub fn as_str(self) -> &'static str {
+		match self {
+			Self::Set => "set",
+			Self::Clear => "clear",
+			Self::Close(c) => c.as_str(),
+		}
+	}
 }
 
 vocabulary! {

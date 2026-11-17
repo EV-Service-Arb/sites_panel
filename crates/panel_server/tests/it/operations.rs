@@ -10,7 +10,7 @@ use axum::{
 };
 use panel::testing::{Conductor, TestDb, panel};
 use panel_server::testing::{As, app, send};
-use serde_json::Value;
+use serde_json::{Value, json};
 use tower::ServiceExt;
 
 const DOCUMENT: &str = "/api/v1/openapi.json";
@@ -64,6 +64,21 @@ async fn the_conductor_pulls_the_document_of_every_operation_the_overview_names(
 	assert_eq!(
 		doc["paths"]["/leads"]["post"]["x-permission"], "sa:sites:work:leads:edit",
 		"an action's own permission, not only its section's"
+	);
+
+	for (path, item) in doc["paths"].as_object().unwrap() {
+		for (method, op) in item.as_object().unwrap() {
+			assert!(op["x-errors"].is_object(), "{method} {path} says what it refuses");
+		}
+	}
+	let gmb = &doc["paths"]["/places/{brand}/{slug}/gmb"]["put"]["x-errors"];
+	assert_eq!((&gmb["gmb_taken"], &gmb["not_found"], &gmb["forbidden"]), (&json!(409), &json!(404), &json!(403)), "{gmb}");
+
+	let committed = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../frontend/src/shared/api/openapi.json")).unwrap();
+	assert_eq!(
+		serde_json::from_str::<Value>(&committed).unwrap(),
+		doc,
+		"the committed document is the served one: `nix run .#gen`"
 	);
 
 	let arch = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/ARCHITECTURE.md")).unwrap();

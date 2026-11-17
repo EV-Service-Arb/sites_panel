@@ -2,8 +2,8 @@ import { Button, Field, FieldDescription, FieldError, FieldLabel, Input, Select,
 import { Plus } from "lucide-react";
 import { useId, useState } from "react";
 
-import { type PlaceKey, addPlace } from "@/entities/place";
-import { ApiError } from "@/shared/api";
+import type { PlaceKey } from "@/entities/place";
+import { api } from "@/shared/api";
 import { isSlug } from "@/shared/config/brands";
 import { useT } from "@/shared/i18n";
 import { notifyFailure } from "@/shared/ui/notify";
@@ -30,18 +30,14 @@ export function AddPlaceButton({ brands, onAdded }: { brands: string[]; onAdded:
 
   const submit = async () => {
     setBusy(true);
-    try {
-      await addPlace({ brand, slug });
-      toast.positive(t("addPlace.done", { brand, slug }));
-      setOpen(false);
-      setSlug("");
-      onAdded({ brand, slug });
-    } catch (e) {
-      if (e instanceof ApiError && e.failure.kind === "conflict") return setExists({ brand, slug });
-      notifyFailure(e, t);
-    } finally {
-      setBusy(false);
-    }
+    const { error } = await api().POST("/places", { body: { brand, slug } });
+    setBusy(false);
+    if (error?.code === "place_exists") return setExists({ brand, slug });
+    if (error !== undefined) return notifyFailure(error, t);
+    toast.positive(t("addPlace.done", { brand, slug }));
+    setOpen(false);
+    setSlug("");
+    onAdded({ brand, slug });
   };
 
   return (

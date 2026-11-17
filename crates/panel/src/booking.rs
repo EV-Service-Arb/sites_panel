@@ -29,15 +29,16 @@ use panel_contracts::SCHEMA;
 pub use panel_core::booking::{BookingEvent, Change, Contact, Provider};
 use panel_core::{
 	booking::{BookingMatch, BookingStatus, Closed, OperatorAction, is_external_ref, is_version},
-	ids::{BrandId, EventId, LeadId},
+	ids::{EventId, LeadId},
 	phone,
 };
+use sa_core::ids::BrandId;
 use serde_json::{Map, Value, json};
 use uuid::Uuid;
 
 use crate::{
 	Outcome, Panel,
-	operator::{ActionError, Actor, Done, Pii, idempotent_id, subject_of},
+	operator::{ActionError, Actor, Conflict, Done, Pii, idempotent_id, subject_of},
 	store::{
 		bookings::{self, BookingRow},
 		reads::Sealed,
@@ -187,10 +188,9 @@ pub enum SlotAction {
 
 fn conflict(status: BookingStatus, action: OperatorAction) -> ActionError {
 	ActionError::Conflict(match (action, status) {
-		(OperatorAction::Set, _) => "the lead's booking is done: a done booking is not booked again",
-		(OperatorAction::Clear, BookingStatus::None) => "the lead has no booking to clear",
-		(OperatorAction::Clear, _) => "a done booking is not cleared",
-		(OperatorAction::Close(_), _) => "only a booked slot is closed",
+		(OperatorAction::Clear, BookingStatus::None) => Conflict::NoBooking,
+		(OperatorAction::Set | OperatorAction::Clear, _) => Conflict::BookingDone,
+		(OperatorAction::Close(_), _) => Conflict::NotBooked,
 	})
 }
 
@@ -411,8 +411,7 @@ impl Panel {
 	}
 
 	/// Closes a lead's booked slot: done, no_show or canceled (`booking.status_changed`).
-	pub async fn close_booking_once(&self, by: Actor, brand: &BrandId, lead: &LeadId, status: &str, now: Timestamp, key: Option<&str>) -> Result<Done<EventId>, ActionError> {
-		let closed = Closed::parse(status).map_err(ActionError::Invalid)?;
+	pub async fn close_booking_once(&self, by: Actor, brand: &BrandId, lead: &LeadId, closed: Closed, now: Timestamp, key: Option<&str>) -> Result<Done<EventId>, ActionError> {
 		let id = key.map(|k| idempotent_id(by, &format!("booking_status/{brand}/{lead}"), k));
 		if let Some(done) = self.replayed(by, id).await? {
 			return Ok(done.map(|(_, e)| e));
@@ -435,7 +434,7 @@ impl Panel {
 		};
 		let current = self.lead_row(&row.brand_id, lead).await?.ok_or(ActionError::NotFound)?;
 		if row.lead.as_ref().is_some_and(|(l, m)| l == lead && *m == BookingMatch::Manual) {
-			return Err(ActionError::Conflict("the booking is attached to this lead already"));
+			return Err(Conflict::AlreadyAttached.into());
 		}
 		let properties = json!({ "provider": row.provider.as_str(), "externalRef": row.external_ref });
 		Ok(self.act(by, None, "booking.attached", subject_of(&current), properties, None, now).await?.value.1)
@@ -469,4 +468,64 @@ fn contact_pii(c: &Contact) -> Map<String, Value> {
 		}
 	}
 	m
+}
+
+/// A brand's Google Calendar, as its owner consented to it: which calendar, and the refresh
+/// token that reads it.
+pub struct GoogleConsent {
+	pub brand: BrandId,
+	/// `primary`, or a calendar the owner shares.
+	pub calendar_id: String,
+	pub refresh_token: zeroize::Zeroizing<String>,
+}
+
+impl std::fmt::Debug for GoogleConsent {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("GoogleConsent")
+			.field("brand", &self.brand)
+			.field("calendar_id", &self.calendar_id)
+			.finish_non_exhaustive()
+	}
+}
+
+impl Panel {
+	/// Keeps a brand's consent, its token sealed under the data key at once; it replaces the one
+	/// before, and the next pull reads with it.
+	pub async fn connect_google_calendar(&self, by: &panel_core::place::Editor, consent: &GoogleConsent, now: Timestamp) -> eyre::Result<()> {
+		let aad = crate::seal::google_aad(consent.brand.as_str());
+		let stored = crate::store::google::Stored {
+			brand: consent.brand.clone(),
+			calendar_id: consent.calendar_id.clone(),
+			refresh_sealed: self.key.seal(&aad, consent.refresh_token.as_bytes())?,
+			data_key_fp: self.key.fingerprint().to_vec(),
+			connected_at: now,
+			connected_by: by.label.as_str().to_owned(),
+		};
+		let mut conn = self.store.pool().acquire().await.wrap_err("a connection for a Google Calendar")?;
+		crate::store::google::put(&mut conn, &stored).await?;
+		tracing::info!(by = by.label.as_str(), brand = %consent.brand, "google calendar connected");
+		Ok(())
+	}
+
+	/// Every brand's consent, its token opened.
+	pub async fn google_calendars(&self) -> eyre::Result<Vec<GoogleConsent>> {
+		let mut conn = self.store.pool().acquire().await.wrap_err("a connection for the Google Calendars")?;
+		crate::store::google::all(&mut conn)
+			.await?
+			.into_iter()
+			.map(|s| {
+				eyre::ensure!(s.data_key_fp == self.key.fingerprint(), "{}'s Google Calendar was sealed under another PANEL_DATA_KEY", s.brand);
+				let plain = self
+					.key
+					.open(&crate::seal::google_aad(s.brand.as_str()), &s.refresh_sealed)
+					.wrap_err_with(|| format!("opening {}'s Google Calendar", s.brand))?;
+				let token = String::from_utf8(plain.to_vec()).wrap_err("a refresh token is text")?;
+				Ok(GoogleConsent {
+					brand: s.brand,
+					calendar_id: s.calendar_id,
+					refresh_token: zeroize::Zeroizing::new(token),
+				})
+			})
+			.collect()
+	}
 }

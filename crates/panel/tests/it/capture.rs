@@ -15,9 +15,10 @@ use panel::{
 use panel_core::{
 	booking::{BookingEvent, Change, Contact, Provider},
 	event::KeyGrant,
-	ids::{BrandId, LeadId},
+	ids::LeadId,
 };
 use sa_auth::SourceKind;
+use sa_core::ids::BrandId;
 use serde_json::{Value, json};
 
 /// Answers each send with the next of `answers` (then Ok), and remembers every batch.
@@ -74,7 +75,18 @@ async fn only_a_fresh_commit_queues_and_never_the_rebuild() {
 	let l1 = LeadId::parse("L-1").unwrap();
 	// A minute on: the outbox is read in occurred_at order, and ties fall to the ids' random bits.
 	let later = now + SignedDuration::from_mins(1);
-	panel.move_lead(by, &brand, &l1, StageMove::Contacted { channel: Some("phone".into()) }, later).await.unwrap();
+	panel
+		.move_lead(
+			by,
+			&brand,
+			&l1,
+			StageMove::Contacted {
+				channel: Some(panel_core::fact::ContactChannel::Phone),
+			},
+			later,
+		)
+		.await
+		.unwrap();
 	panel.attempt_call(by, &brand, &l1, later).await.unwrap();
 
 	let queued = outbox(&panel).await;
@@ -138,7 +150,10 @@ async fn a_booking_is_told_under_its_lead_and_never_without_one() {
 	assert_eq!(got.written, 2, "{got:?}");
 	let by = Actor(uuid::Uuid::now_v7());
 	let l1 = LeadId::parse("L-1").unwrap();
-	panel.close_booking_once(by, &brand, &l1, "done", later + SignedDuration::from_mins(1), None).await.unwrap();
+	panel
+		.close_booking_once(by, &brand, &l1, panel_core::booking::Closed::Done, later + SignedDuration::from_mins(1), None)
+		.await
+		.unwrap();
 
 	let queued = outbox(&panel).await;
 	let names: Vec<(&str, &str)> = queued.iter().map(|(e, d, _)| (e.as_str(), d.as_str())).collect();

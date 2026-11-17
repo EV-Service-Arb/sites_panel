@@ -115,6 +115,7 @@ pub struct Rating {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[ts(optional_fields)]
+#[schemars(transform = skipped_not_null)]
 pub struct PlaceLive {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub phone: Option<String>,
@@ -681,8 +682,29 @@ pub fn hours_from_spec(spec: &str) -> Result<Value, String> {
 	Ok(Value::Array(rows))
 }
 
+/// A field skipped when none is absent, never `null`: an `Option` alone documents both.
+fn skipped_not_null(schema: &mut schemars::Schema) {
+	let fields = schema.get_mut("properties").and_then(Value::as_object_mut).expect("a struct's properties");
+	for field in fields.values_mut() {
+		let field = field.as_object_mut().expect("a field's schema");
+		if let Some(Value::Array(types)) = field.get("type") {
+			let types: Vec<Value> = types.iter().filter(|t| *t != "null").cloned().collect();
+			assert_eq!(types.len(), 1, "an Option of one type");
+			field.insert("type".into(), types[0].clone());
+		}
+		if let Some(Value::Array(any)) = field.remove("anyOf") {
+			let mut rest = any.into_iter().filter(|s| s.get("type").is_none_or(|t| t != "null"));
+			let Some(Value::Object(only)) = rest.next() else { panic!("an Option of one schema") };
+			assert!(rest.next().is_none(), "an Option of one schema");
+			field.extend(only);
+		}
+	}
+}
+
 /// What a change did to a place.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(rename = "PlaceChangeKind")]
 pub enum ChangeKind {
 	/// Registered by hand (it may not have had a lead yet).
 	Register,
@@ -712,29 +734,11 @@ impl ChangeKind {
 	}
 }
 
-/// Who changed a place: a signed-in user (concierge id, and the email the history shows), or
-/// the CLI on the pod.
+/// Who changed a place: the signed-in user's concierge id, and what the history shows as `by`.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Editor {
-	User { id: Uuid, label: String },
-	Cli,
-}
-
-impl Editor {
-	/// What the history shows as `by`.
-	pub fn label(&self) -> &str {
-		match self {
-			Self::User { label, .. } => label,
-			Self::Cli => "cli",
-		}
-	}
-
-	pub fn user_id(&self) -> Option<Uuid> {
-		match self {
-			Self::User { id, .. } => Some(*id),
-			Self::Cli => None,
-		}
-	}
+pub struct Editor {
+	pub id: Uuid,
+	pub label: String,
 }
 
 /// One entry of a place's history: what its settings were before and after, who, when.

@@ -1,6 +1,6 @@
 import { formatMoment } from "@/shared/lib/format";
 
-import type { PricingItem } from "../model/item";
+import type { Pricing as PricingItem } from "@/shared/api/schema";
 
 /** The brand's last write: who and when, and whether it saved a model or took the pricing off. */
 export interface PricingStamp {

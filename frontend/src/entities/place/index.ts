@@ -1,11 +1,8 @@
-export { addPlace, fetchPlaceSettings, fetchSettingsHistory, revertSettingsChange, savePlaceSettings, setPlaceWithdrawn } from "./api/settings";
-export type { PlaceKey } from "./api/settings";
-export { fetchPlaces, selectedBrands } from "./api/places";
-export { brandsOf, locationsOf, placesParser } from "./model/place";
-export type { Place } from "./model/place";
-export { EDITED_KEYS, historyParser, placeSettingsParser, settingsParser, settingsToWire } from "./model/settings";
-export type { EditedFields, PlaceSettings, PlaceSettingsView, SettingsChange } from "./model/settings";
-export { usePlaces } from "./model/use-places";
+export { brandsOf, locationsOf } from "./model/place";
+export { EDITED_KEYS, settingsToWire, splitLive } from "./model/settings";
+export type { EditedFields, PlaceSettings } from "./model/settings";
+export type { Place as PlaceSettingsView, PlaceChange as SettingsChange, PlaceSummary as Place } from "@/shared/api/schema";
+export { usePlaces, useSelectedBrands } from "./model/use-places";
 export { PLACE_TIME_ZONE } from "./config/time-zone";
 export { channelPreview, messengerOn } from "./lib/channels";
 export type { Channel, ChannelPlan, ChannelSlot } from "./lib/channels";
@@ -17,5 +14,11 @@ export { ChannelPreview } from "./ui/channel-preview";
 export { ChangeEntry } from "./ui/change-entry";
 export { ConflictAlert } from "./ui/conflict-alert";
 export { StaleAlert } from "./ui/stale-alert";
-export { followsPlace, savedSince } from "./lib/live";
+export { savedSince } from "./lib/live";
 export { bookingText } from "./lib/booking";
+
+/** A place as the settings routes name it: brand and slug, both path segments. */
+export interface PlaceKey {
+  brand: string;
+  slug: string;
+}

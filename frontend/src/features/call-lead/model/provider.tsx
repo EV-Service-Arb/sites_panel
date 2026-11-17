@@ -1,21 +1,31 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import type { LeadRef } from "@/entities/lead";
+import { type Failure, api } from "@/shared/api";
+import type { CallOutcome } from "@/shared/api/schema";
 
-import { attemptCall, logCallOutcome } from "../api/calls";
-import { CallFlow, type CallOutcome, type CallState, documentVisibility } from "./call-flow";
+import { type CallApi, CallFlow, type CallState, documentVisibility } from "./call-flow";
 
 interface CallFlowValue {
   state: CallState;
-  start: (ref: LeadRef) => Promise<void>;
+  start: (ref: LeadRef) => Promise<Failure | null>;
   ask: () => void;
   dismiss: () => void;
-  answer: (outcome: CallOutcome) => Promise<void>;
+  answer: (outcome: CallOutcome) => Promise<Failure | null>;
 }
 
 const CallFlowContext = createContext<CallFlowValue | null>(null);
 
-const API = { attempt: attemptCall, outcome: logCallOutcome };
+const API: CallApi = {
+  async attempt(ref) {
+    const { data, error } = await api().POST("/leads/{brand}/{lead}/calls/attempt", { params: { path: ref } });
+    return error === undefined ? { attemptId: data.attempt_id } : { failure: error };
+  },
+  async outcome(ref, attempt, outcome) {
+    const { error } = await api().POST("/leads/{brand}/{lead}/calls/{attempt}/outcome", { params: { path: { ...ref, attempt } }, body: { outcome } });
+    return error ?? null;
+  },
+};
 
 /** One call at a time for the whole Leads screen, so the question outlives the card. */
 export function CallFlowProvider({ onLogged, children }: { onLogged: (ref: LeadRef) => void; children: ReactNode }) {
@@ -31,10 +41,11 @@ export function CallFlowProvider({ onLogged, children }: { onLogged: (ref: LeadR
   const answer = useCallback(
     async (outcome: CallOutcome) => {
       const f = flow.current;
-      if (!f || f.current.phase !== "asking") return;
+      if (!f || f.current.phase !== "asking") return null;
       const { ref } = f.current;
-      await f.answer(outcome);
-      onLogged(ref);
+      const refused = await f.answer(outcome);
+      if (refused === null) onLogged(ref);
+      return refused;
     },
     [onLogged],
   );
@@ -42,7 +53,7 @@ export function CallFlowProvider({ onLogged, children }: { onLogged: (ref: LeadR
   const value = useMemo<CallFlowValue>(
     () => ({
       state,
-      start: (ref) => flow.current?.start(ref) ?? Promise.resolve(),
+      start: (ref) => flow.current?.start(ref) ?? Promise.resolve(null),
       ask: () => flow.current?.ask(),
       dismiss: () => flow.current?.dismiss(),
       answer,

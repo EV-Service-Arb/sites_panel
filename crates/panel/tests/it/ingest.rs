@@ -71,7 +71,7 @@ async fn dedup_by_id() {
 	let mut changed = e.clone();
 	changed["properties"]["channel"] = json!("phone_inbound");
 	let conflict = send(&panel, &site(), &[changed]).await;
-	assert_eq!(outcomes(&conflict), [Outcome::Rejected(panel_core::Invalid::new("id already names a different event"))]);
+	assert_eq!(outcomes(&conflict), [Outcome::Rejected(sa_core::Invalid::new("id already names a different event"))]);
 
 	let pool = db.pool().await;
 	assert_eq!(count(&pool, "SELECT count(*) FROM events").await, 1);
@@ -95,7 +95,7 @@ async fn a_callback_request_is_a_lead_channel() {
 		outcomes(&got),
 		[
 			ACCEPTED,
-			Outcome::Rejected(panel_core::Invalid::new("properties.channel is not one of form, phone_inbound, callback, whatsapp, telegram"))
+			Outcome::Rejected(sa_core::Invalid::new("properties.channel is not one of form, phone_inbound, callback, whatsapp, telegram"))
 		]
 	);
 	let pool = db.pool().await;
@@ -167,7 +167,7 @@ async fn a_suspect_lead_is_kept_and_marked() {
 		[
 			ACCEPTED,
 			ACCEPTED,
-			Outcome::Rejected(panel_core::Invalid::new("properties.suspect is not one of rate_limited, too_fast")),
+			Outcome::Rejected(sa_core::Invalid::new("properties.suspect is not one of rate_limited, too_fast")),
 			ACCEPTED
 		]
 	);
@@ -192,6 +192,21 @@ async fn a_suspect_lead_is_kept_and_marked() {
 
 /// The suspect migration adds a column and remakes the views: undone, the column is gone and
 /// the leads are not; applied again, the rebuild brings the marks back from the journal.
+#[tokio::test]
+async fn a_lost_reason_outside_the_panels_words_stops_the_migration() {
+	const WORDS: i64 = 20261117120000;
+	let db = TestDb::create().await;
+	let panel = panel(&db).await;
+	send(&panel, &site(), &[event("lead.created", at(0), "site", lead("L-1"), json!({"channel": "form"}))]).await;
+	let pool = db.pool().await;
+	let migrator = sqlx::migrate!("./migrations");
+	migrator.undo(&pool, WORDS - 1).await.unwrap();
+	sqlx::query("UPDATE leads SET lost_reason = 'price'").execute(&pool).await.unwrap();
+	assert!(migrator.run(&pool).await.is_err(), "a slug of no word stops it");
+	sqlx::query("UPDATE leads SET lost_reason = 'too_expensive'").execute(&pool).await.unwrap();
+	migrator.run(&pool).await.unwrap();
+}
+
 #[tokio::test]
 async fn the_suspect_migration_keeps_the_leads_both_ways() {
 	const SUSPECT: i64 = 20261003140000;
@@ -257,7 +272,7 @@ async fn a_key_writes_only_its_brands_and_kind() {
 	];
 	let got = send(&panel, &site(), &events).await;
 	let [foreign, posing, ok] = &got[..] else { panic!("{got:?}") };
-	assert_eq!(foreign.outcome, Outcome::Rejected(panel_core::Invalid::new("this key may not write for brand vifnet")));
+	assert_eq!(foreign.outcome, Outcome::Rejected(sa_core::Invalid::new("this key may not write for brand vifnet")));
 	assert!(matches!(&posing.outcome, Outcome::Rejected(e) if e.0.contains("source.kind panel")), "{posing:?}");
 	assert_eq!(ok.outcome, ACCEPTED);
 	assert_eq!((foreign.index, ok.index), (0, 2));
@@ -459,7 +474,7 @@ async fn a_site_key_writes_no_operator_events() {
 		event("call.logged", at(0), "site", lead("L-1"), json!({"outcome": "answered"})),
 	];
 	let got = send(&panel, &site(), &events).await;
-	assert_eq!(got[0].outcome, Outcome::Rejected(panel_core::Invalid::new("a site source may not write payment.received")));
+	assert_eq!(got[0].outcome, Outcome::Rejected(sa_core::Invalid::new("a site source may not write payment.received")));
 	assert!(got.iter().all(|v| matches!(v.outcome, Outcome::Rejected(_))), "{got:?}");
 	let pool = db.pool().await;
 	assert_eq!(count(&pool, "SELECT count(*) FROM events").await, 0);
@@ -537,7 +552,7 @@ async fn a_source_is_named_by_its_key() {
 	let mut e = event("lead.created", at(0), "site", lead("L-1"), json!({"channel": "form"}));
 	e["source"]["id"] = json!("vifnet-site");
 	let got = panel.ingest(&site(), &batch_verbatim(&[e]), now()).await.unwrap();
-	assert_eq!(outcomes(&got), [Outcome::Rejected(panel_core::Invalid::new("source.id is not the id of the key that signed it"))]);
+	assert_eq!(outcomes(&got), [Outcome::Rejected(sa_core::Invalid::new("source.id is not the id of the key that signed it"))]);
 	let e = event("lead.created", at(0), "site", lead("L-1"), json!({"channel": "form"}));
 	let got = send(&panel, &site(), &[e]).await;
 	assert_eq!(outcomes(&got), [ACCEPTED]);
@@ -618,11 +633,11 @@ async fn a_bot_starts_messenger_leads_and_says_when_a_customer_wrote() {
 		outcomes(&got),
 		[
 			ACCEPTED,
-			Outcome::Rejected(panel_core::Invalid::new("a bot source writes lead.created only with channel whatsapp or telegram")),
+			Outcome::Rejected(sa_core::Invalid::new("a bot source writes lead.created only with channel whatsapp or telegram")),
 			ACCEPTED,
-			Outcome::Deferred(panel_core::Invalid::new(panel::UNKNOWN_REF)),
+			Outcome::Deferred(sa_core::Invalid::new(panel::UNKNOWN_REF)),
 			ACCEPTED,
-			Outcome::Rejected(panel_core::Invalid::new("subject.lead_id or properties.message_ref is required for lead.messaged")),
+			Outcome::Rejected(sa_core::Invalid::new("subject.lead_id or properties.message_ref is required for lead.messaged")),
 		]
 	);
 	assert!(panel::UNKNOWN_REF.starts_with("unknown_ref"), "what a bot matches on");
@@ -694,7 +709,7 @@ async fn who_may_say_a_customer_wrote() {
 	// A lead id the panel has no lead for is waited for, not taken as a phantom lead.
 	let ahead = event("lead.messaged", at(3), "bot", lead("tg-404"), json!({"channel": "telegram"}));
 	let got = send(&panel, &bot(), std::slice::from_ref(&ahead)).await;
-	assert_eq!(outcomes(&got), [Outcome::Deferred(panel_core::Invalid::new(panel::UNKNOWN_LEAD))]);
+	assert_eq!(outcomes(&got), [Outcome::Deferred(sa_core::Invalid::new(panel::UNKNOWN_LEAD))]);
 	assert_eq!(count(&db.pool().await, "SELECT count(*) FROM leads WHERE lead_id = 'tg-404'").await, 0);
 	let started = event("lead.created", at(2), "bot", lead("tg-404"), json!({"channel": "telegram"}));
 	let got = send(&panel, &bot(), &[started, ahead]).await;
@@ -707,7 +722,7 @@ async fn who_may_say_a_customer_wrote() {
 		json!({"channel": "telegram", "messageRef": "VF-7K3F"}),
 	);
 	let got = send(&panel, &bot(), &[foreign]).await;
-	assert_eq!(outcomes(&got), [Outcome::Rejected(panel_core::Invalid::new("this key may not write for brand vifnet"))]);
+	assert_eq!(outcomes(&got), [Outcome::Rejected(sa_core::Invalid::new("this key may not write for brand vifnet"))]);
 }
 
 /// The messenger migration rebuilt `leads`: undone, the words whatsapp and telegram have no

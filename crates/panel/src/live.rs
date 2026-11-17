@@ -1,170 +1,32 @@
-//! What changed, told to whoever is watching: the bus the conductor's change feed
+//! What committed, told to whoever is watching: the bus the conductor's change feed
 //! (`/api/conductor/changes`) reads.
 //!
+//! A topic is a table, `sites.<table>`: the store's pool tells each table a committed write
+//! touched once its connection is released (`ev_lib::sqlite`), whoever wrote it — ingest, an
+//! operator, an admin, the booking pull, the invoices' confirmation, a migration. A rolled-back
+//! write tells nothing. A read's answer names the tables it read (`x-sa-reads`), so a screen
+//! re-reads exactly what a change may have touched.
+//!
 //! The panel runs as one process (one pod, one SQLite writer), so the bus is in-process: a
-//! `tokio::sync::broadcast` channel. Every write that a screen reads publishes here, from the
-//! engine, after its transaction commits — never before, so a client told "changed" and
-//! reading at once finds the change. What publishes:
-//!
-//! ```text
-//! Panel::journal        every event journaled and projected: ingest, the operator's actions,
-//!                       a landing's experiments,
-//!                       an admin's experiment settings, the booking adapters
-//!                                                   → leads | lead | experiments | bookings
-//! Panel::rebuild_…      the projections replaced whole                 → resync
-//! place::edit, register a place's settings, withdrawn, registered      → places
-//! pricing               a brand's model saved or removed, its locales  → pricing
-//! invoices              a row stored, read from banking, dropped, paid or ended → invoices
-//! ```
-//!
-//! Publishing never waits and never fails a write: with nobody subscribed the message is
-//! simply dropped, and a subscriber that falls behind by more than the channel holds is told
-//! so ([`broadcast::error::RecvError::Lagged`]) instead of the channel growing.
-//!
-//! A command run in another process (`sites_panel place set`, a rebuild from the CLI)
-//! publishes on its own bus, which nobody listens to: the feed does not see it.
+//! `tokio::sync::broadcast` channel. Publishing never waits and never fails a write; a
+//! subscriber that falls behind by more than the channel holds is told so
+//! ([`broadcast::error::RecvError::Lagged`]) instead of the channel growing. A command run in
+//! another process (`sites_panel rebuild-projections`) tells its own bus, which nobody hears.
 
-use jiff::Timestamp;
-use panel_core::{fact::Fact, ids::BrandId, lead::Recorded};
-use sa_auth::{Analysis, Work};
-use tokio::sync::broadcast;
+use std::sync::Arc;
+
+use tokio::sync::{broadcast, watch};
 
 /// How many messages a subscriber may fall behind before it is told to read everything
 /// afresh. A batch of ingest is at most 500 events; most moments carry a handful.
 pub const DEFAULT_CAPACITY: usize = 1024;
 
-/// What a change is about: which of the screens' reads it may have changed.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub enum Topic {
-	/// A new lead (its `lead.created`).
-	Leads,
-	/// Something about one lead: a stage, a call, a payment.
-	Lead,
-	/// A place's settings, withdrawn or restored, or registered.
-	Places,
-	/// A brand's pricing: its model saved or removed, or its locales.
-	Pricing,
-	/// A brand's experiments: what its landing declared, or what an admin set over it.
-	Experiments,
-	/// The providers' bookings without a lead: one came, changed, or was joined to a lead.
-	Bookings,
-	/// The invoices asked of banking: one issued, read, dropped, paid or ended.
-	Invoices,
-}
-
-impl Topic {
-	pub fn as_str(self) -> &'static str {
-		match self {
-			Self::Leads => "leads",
-			Self::Lead => "lead",
-			Self::Places => "places",
-			Self::Pricing => "pricing",
-			Self::Experiments => "experiments",
-			Self::Bookings => "bookings",
-			Self::Invoices => "invoices",
-		}
-	}
-}
-
-/// Something committed that a screen reads.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Change {
-	pub topic: Topic,
-	pub brand: Option<BrandId>,
-	/// The lead, or the place's slug; `None` when the topic has no single subject.
-	pub id: Option<String>,
-	/// When it was committed (the writer's clock).
-	pub at: Timestamp,
-}
-
-impl Change {
-	/// The permission of the section that reads what changed: whoever holds it may be told,
-	/// for every brand (no permission is narrower than the whole of a section).
-	pub fn permission(&self) -> &'static str {
-		match self.topic {
-			Topic::Leads | Topic::Lead | Topic::Places | Topic::Pricing | Topic::Bookings | Topic::Invoices => Work::Read.as_str(),
-			Topic::Experiments => Analysis::Read.as_str(),
-		}
-	}
-
-	/// What journaling `event` changed; `None` for what no screen reads.
-	pub fn of_event(event: &Recorded, at: Timestamp) -> Option<Self> {
-		let lead = || event.subject.lead_id.as_ref().map(|l| l.as_str().to_owned());
-		let (topic, id) = match &event.fact {
-			Fact::LeadCreated { .. } => (Topic::Leads, lead()),
-			Fact::LeadMessaged { .. }
-			| Fact::LeadContacted { .. }
-			| Fact::LeadQuoted { .. }
-			| Fact::JobWon
-			| Fact::LeadLost { .. }
-			| Fact::JobCompleted
-			| Fact::PaymentReceived { .. }
-			| Fact::CallAttempted
-			| Fact::CallLogged { .. }
-			| Fact::BookingRequested { .. }
-			| Fact::BookingCreated { .. }
-			| Fact::BookingCanceled { .. }
-			| Fact::BookingSet { .. }
-			| Fact::BookingStatusChanged(_)
-			| Fact::BookingCleared
-			| Fact::BookingAttached { .. } => (Topic::Lead, lead()),
-			Fact::ExperimentsDeclared(_) => (Topic::Experiments, None),
-			Fact::ExperimentConfigured { patch, .. } => (Topic::Experiments, Some(patch.key.clone())),
-			Fact::RetiredCount => return None,
-		};
-		Some(Self {
-			topic,
-			brand: Some(event.subject.brand_id.clone()),
-			id,
-			at,
-		})
-	}
-}
-
-impl Change {
-	/// What journaling `event` changed, once projected: as [`Self::of_event`], but a booking
-	/// event tells every lead it changed (a provider's booking may leave one lead and join
-	/// another), and the list of bookings without a lead when that changed — and nothing of a
-	/// lead it did not change.
-	pub fn of_applied(event: &Recorded, applied: &crate::store::projections::Applied, at: Timestamp) -> Vec<Self> {
-		let lead = |l: &panel_core::ids::LeadId| Self {
-			topic: Topic::Lead,
-			brand: Some(event.subject.brand_id.clone()),
-			id: Some(l.as_str().to_owned()),
-			at,
-		};
-		match &event.fact {
-			Fact::BookingCreated { .. } | Fact::BookingCanceled { .. } | Fact::BookingAttached { .. } => {
-				let mut out: Vec<Self> = applied.leads.iter().map(lead).collect();
-				if applied.unmatched {
-					out.push(Self {
-						topic: Topic::Bookings,
-						brand: Some(event.subject.brand_id.clone()),
-						id: None,
-						at,
-					});
-				}
-				out
-			}
-			_ => Self::of_event(event, at).into_iter().collect(),
-		}
-	}
-}
-
-/// What travels on the bus.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Signal {
-	Changed(Change),
-	/// Too much changed to say what: read everything again.
-	Resync,
-	/// The process is stopping: the feed ends, so the graceful shutdown is not held open.
-	GoingAway,
-}
-
-/// The in-process bus. Cloning it gives another handle on the same channel.
+/// The in-process bus: each table a committed write touched, and whether the process is
+/// stopping. Cloning it gives another handle on the same channels.
 #[derive(Clone, Debug)]
 pub struct Bus {
-	tx: broadcast::Sender<Signal>,
+	tx: broadcast::Sender<String>,
+	going: Arc<watch::Sender<bool>>,
 }
 
 impl Default for Bus {
@@ -174,26 +36,38 @@ impl Default for Bus {
 }
 
 impl Bus {
-	/// A bus whose subscribers may fall `capacity` messages behind (at least 1).
+	/// A bus whose subscribers may fall `capacity` topics behind (at least 1).
 	pub fn new(capacity: usize) -> Self {
 		Self {
 			tx: broadcast::channel(capacity.max(1)).0,
+			going: Arc::new(watch::channel(false).0),
 		}
 	}
 
-	pub fn subscribe(&self) -> broadcast::Receiver<Signal> {
+	pub fn subscribe(&self) -> broadcast::Receiver<String> {
 		self.tx.subscribe()
 	}
 
 	/// Tells every subscriber; never waits.
-	pub fn publish(&self, signal: Signal) {
+	pub fn publish(&self, topic: &str) {
 		// `Err` means nobody is subscribed, and then there is nobody to tell: the write it
 		// follows has committed either way.
-		let _nobody_listening = self.tx.send(signal);
+		let _nobody_listening = self.tx.send(topic.to_owned());
 	}
 
-	pub fn changed(&self, change: Change) {
-		self.publish(Signal::Changed(change));
+	/// The process is stopping: every feed ends, so the graceful shutdown is not held open by
+	/// a response that never would.
+	pub fn going_away(&self) {
+		self.going.send_replace(true);
+	}
+
+	/// Resolves once [`Self::going_away`] was called.
+	pub fn gone(&self) -> impl Future<Output = ()> + Send + 'static {
+		let mut going = self.going.subscribe();
+		async move {
+			// `Err`: every handle on the bus is dropped, and nothing can be told any more either.
+			let _bus_dropped = going.wait_for(|gone| *gone).await;
+		}
 	}
 }
 
@@ -201,27 +75,13 @@ impl Bus {
 mod tests {
 	use super::*;
 
-	#[test]
-	fn each_topic_is_told_under_the_permission_of_its_read() {
-		let change = |topic| Change {
-			topic,
-			brand: None,
-			id: None,
-			at: Timestamp::UNIX_EPOCH,
-		};
-		for topic in [Topic::Leads, Topic::Lead, Topic::Places, Topic::Pricing, Topic::Bookings, Topic::Invoices] {
-			assert_eq!(change(topic).permission(), "sa:sites:work:read", "{topic:?}");
-		}
-		assert_eq!(change(Topic::Experiments).permission(), "sa:sites:analysis:read");
-	}
-
 	#[tokio::test]
 	async fn publishing_with_nobody_listening_is_fine() {
 		let bus = Bus::new(2);
-		bus.publish(Signal::Resync);
+		bus.publish("sites.leads");
 		let mut rx = bus.subscribe();
-		bus.publish(Signal::Resync);
-		assert_eq!(rx.recv().await.unwrap(), Signal::Resync);
+		bus.publish("sites.places");
+		assert_eq!(rx.recv().await.unwrap(), "sites.places");
 	}
 
 	#[tokio::test]
@@ -229,7 +89,7 @@ mod tests {
 		let bus = Bus::new(2);
 		let mut rx = bus.subscribe();
 		for _ in 0..5 {
-			bus.publish(Signal::Resync);
+			bus.publish("sites.leads");
 		}
 		assert!(matches!(rx.recv().await, Err(broadcast::error::RecvError::Lagged(3))));
 	}

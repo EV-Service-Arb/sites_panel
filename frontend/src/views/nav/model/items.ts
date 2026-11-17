@@ -1,69 +1,49 @@
 import type { NavIcon } from "@evinvest/uikit";
+import { mayOpen } from "@evinvest/views";
 import { FlaskConical, Inbox, LayoutDashboard, MapPin, Receipt, Tag } from "lucide-react";
 
-import type { Permission } from "@/shared/api";
+import type { Permission } from "@/shared/api/schema";
 import type { T } from "@/shared/i18n";
-import type { Route } from "@/shared/lib/router";
+import { type ViewName, hrefOf } from "@/shared/lib/router";
+import { VIEWS } from "@/shared/lib/views.generated";
 
-import type { Marks } from "./use-marks";
+type Views = (typeof VIEWS)["views"];
+/** The views with a key of their own: the ones the nav lists. */
+export type NavView = { [N in ViewName]: Views[N] extends { key: string } ? N : never }[ViewName];
+type Needs = Views[NavView]["needs"];
 
-export type Badge = { kind: "count"; count: number } | { kind: "dot"; label: string } | null;
+/** Each listed view's icon, in the nav's order. */
+const ICONS: Record<NavView, NavIcon> = { leads: Inbox, places: MapPin, pricing: Tag, invoices: Receipt, overview: LayoutDashboard, experiments: FlaskConical };
 
 export interface NavEntry {
-  route: Route;
+  view: NavView;
+  key: string;
   href: string;
   label: string;
   icon: NavIcon;
   description: string;
-  badge: Badge;
   current: boolean;
 }
 
 export interface NavSection {
-  id: "work" | "analysis";
+  /** The permission that opens the section's views. */
+  id: Needs;
   label: string;
   items: NavEntry[];
 }
 
-const count = (n: number): Badge => (n > 0 ? { kind: "count", count: n } : null);
-
-/**
- * The Sites dropdown: a section per permission that opens it. New leads are counted; bookings without a
- * lead only say "something waits", and a count says it already.
- */
-export function sitesNav(t: T, permissions: readonly Permission[], marks: Marks, base: string, current: Route | null): NavSection[] {
-  const entry = (route: Route, label: string, icon: NavIcon, description: string, badge: Badge): NavEntry => ({
-    route,
-    href: `${base}/${route}`,
-    label,
-    icon,
-    description,
-    badge,
-    current: route === current,
-  });
-  const leadsBadge = marks.leads === 0 && marks.bookings ? { kind: "dot" as const, label: t("nav.unmatched") } : count(marks.leads);
+/** The Sites dropdown: a section per permission the views need, those the caller holds. */
+export function sitesNav(t: T, permissions: readonly Permission[], current: ViewName | null): NavSection[] {
   const sections: NavSection[] = [];
-  if (permissions.includes("sa:sites:work:read")) {
-    sections.push({
-      id: "work",
-      label: t("nav.group.work"),
-      items: [
-        entry("leads", t("nav.leads"), Inbox, t("nav.leads.description"), leadsBadge),
-        entry("places", t("nav.places"), MapPin, t("nav.places.description"), count(marks.places)),
-        entry("pricing", t("nav.pricing"), Tag, t("nav.pricing.description"), null),
-        entry("invoices", t("nav.invoices"), Receipt, t("nav.invoices.description"), null),
-      ],
-    });
-  }
-  if (permissions.includes("sa:sites:analysis:read")) {
-    sections.push({
-      id: "analysis",
-      label: t("nav.group.analysis"),
-      items: [
-        entry("overview", t("nav.overview"), LayoutDashboard, t("nav.overview.description"), null),
-        entry("experiments", t("nav.experiments"), FlaskConical, t("nav.experiments.description"), marks.experiments ? { kind: "dot", label: t("nav.changed") } : null),
-      ],
-    });
+  for (const view of Object.keys(ICONS) as NavView[]) {
+    if (!mayOpen(VIEWS, view, permissions)) continue;
+    const { needs, key } = VIEWS.views[view];
+    let section = sections.find((s) => s.id === needs);
+    if (section === undefined) {
+      section = { id: needs, label: t(`nav.group.${needs}`), items: [] };
+      sections.push(section);
+    }
+    section.items.push({ view, key, href: hrefOf({ view, params: {} }), label: t(`nav.${view}`), icon: ICONS[view], description: t(`nav.${view}.description`), current: view === current });
   }
   return sections;
 }

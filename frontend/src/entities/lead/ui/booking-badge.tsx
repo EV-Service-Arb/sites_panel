@@ -4,7 +4,7 @@ import { Badge, type Tone } from "@evinvest/uikit";
 import { useLocale, useT } from "@/shared/i18n";
 
 import { bookingWhen } from "../lib/booking-text";
-import type { LeadBooking } from "../model/booking";
+import type { LeadBooking } from "@/shared/api/schema";
 
 const VARIANT: Record<Exclude<BookingStatus, "none">, Tone> = {
   requested: "neutral",

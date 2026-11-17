@@ -1,13 +1,15 @@
+import { useResource } from "@evinvest/api/react";
 import { Alert, AlertDescription, Badge, Settled, Skeleton, Tabs, TabsContent, TabsList, TabsTrigger } from "@evinvest/uikit";
 import { useCallback, useState } from "react";
 
-import { type PlaceKey, type PlaceSettingsView, fetchPlaceSettings, followsPlace, savedSince } from "@/entities/place";
-import { may, useMe } from "@/entities/session";
+import { type PlaceKey, type PlaceSettingsView, savedSince } from "@/entities/place";
+import { useMe } from "@/entities/session";
+import { ConnectCalendarButton } from "@/features/connect-calendar";
 import { SettingsForm, SettingsSummary } from "@/features/edit-place-settings";
 import { WithdrawButton } from "@/features/withdraw-place";
+import { api } from "@/shared/api";
 import { useLocale, useT } from "@/shared/i18n";
 import { formatDateTime } from "@/shared/lib/format";
-import { useResource } from "@/shared/lib/use-resource";
 import { ErrorState } from "@/shared/ui/error-state";
 
 import { PlaceHistory } from "./place-history";
@@ -25,8 +27,7 @@ export function PlaceSettingsPanel({ place, onChanged }: { place: PlaceKey; onCh
   const [version, setVersion] = useState(0);
   const [saved, setSaved] = useState(false);
   const [pinned, setPinned] = useState<PlaceSettingsView | null>(null);
-  const id = `${place.brand}/${place.slug}`;
-  const settings = useResource(`settings:${id}:${version}`, () => fetchPlaceSettings(place), `settings:${id}`, { live: followsPlace(place) });
+  const settings = useResource(api(), "/places/{brand}/{slug}/settings", { params: { path: place } });
   const latest = settings.status === "ok" ? settings.data : null;
   if (latest !== null && pinned === null) setPinned(latest);
 
@@ -35,6 +36,7 @@ export function PlaceSettingsPanel({ place, onChanged }: { place: PlaceKey; onCh
     setSaved(note);
     setPinned(view ?? null);
     setVersion((v) => v + 1);
+    settings.reload();
     onChanged();
   };
   const takeFresh = useCallback(() => {
@@ -75,6 +77,9 @@ function PlacePanes({ base, latest, version, saved, onWritten, onReload, onTakeF
   const t = useT();
   const me = useMe();
   const fresher = savedSince(latest, base) ? latest : null;
+  const { booking } = latest.settings;
+  // The consent is the brand's, asked where a place of it books through its Google Calendar.
+  const offersGoogle = booking !== undefined && (booking.default === "google_calendar" || booking.providers.google_calendar !== undefined);
   return (
     <div className="flex flex-col gap-4">
       <PlaceStatus view={latest} />
@@ -88,19 +93,20 @@ function PlacePanes({ base, latest, version, saved, onWritten, onReload, onTakeF
           <TabsTrigger value="edit">{t("placeSettings.tab.edit")}</TabsTrigger>
           <TabsTrigger value="history">{t("placeSettings.tab.history")}</TabsTrigger>
         </TabsList>
-        <TabsContent value="edit" className="pt-3">
+        <TabsContent value="edit" className="flex flex-col gap-4 pt-3">
           {base.can_edit ? (
             <SettingsForm key={base.updated_at ?? "never"} place={base} onSaved={onWritten} onReload={() => onReload()} fresher={fresher} onTakeFresh={onTakeFresh} />
           ) : (
             // Nothing typed to protect: a reader sees the newest at once.
             <SettingsSummary place={latest} />
           )}
+          {offersGoogle && api().mayCall("post", "/bookings/google_calendar/{brand}/consent", me.permissions) && <ConnectCalendarButton brand={latest.brand} />}
         </TabsContent>
         <TabsContent value="history" className="pt-3">
           <PlaceHistory view={base} version={version} onChanged={onWritten} onReload={() => onReload()} />
         </TabsContent>
       </Tabs>
-      {may(me, "sa:sites:work:places:edit") && (
+      {api().mayCall("post", "/places/{brand}/{slug}/withdraw", me.permissions) && (
         // Last and apart: taking a point off the site is rare and not part of editing it.
         <div className="flex flex-col items-start gap-2 border-t border-border pt-4">
           <WithdrawButton place={latest} onChanged={onReload} />

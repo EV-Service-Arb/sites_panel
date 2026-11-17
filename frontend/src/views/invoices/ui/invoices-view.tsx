@@ -1,12 +1,12 @@
+import { useResource } from "@evinvest/api/react";
 import { Button, Settled, Skeleton, toast } from "@evinvest/uikit";
 import { RefreshCw } from "lucide-react";
 
-import { fetchInvoice, fetchInvoices } from "@/entities/invoice";
-import { may, useMe } from "@/entities/session";
+import { useMe } from "@/entities/session";
 import { CreateInvoiceForm } from "@/features/create-invoice";
 import { type PayOutcome, payNotice, refetchesAfter } from "@/features/pay-invoice-element";
+import { api } from "@/shared/api";
 import { useT } from "@/shared/i18n";
-import { useResource } from "@/shared/lib/use-resource";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { ErrorState } from "@/shared/ui/error-state";
 import { notifyFailure } from "@/shared/ui/notify";
@@ -19,7 +19,7 @@ export function InvoicesView() {
   const t = useT();
   const me = useMe();
   const button = useButtonSize();
-  const invoices = useResource("invoices", fetchInvoices, "invoices", { live: ["invoices"] });
+  const invoices = useResource(api(), "/invoices");
 
   // The popup's word is a hint: the row is read again from banking, and only the row says paid.
   const onPaySettled = (id: string, outcome: PayOutcome) => {
@@ -27,10 +27,13 @@ export function InvoicesView() {
     if (notice === "invoices.pay.sent") toast.info(t(notice));
     else if (notice) toast.error(t(notice));
     if (!refetchesAfter(outcome)) return;
-    fetchInvoice(id).then(() => invoices.reload(), (e: unknown) => {
-      notifyFailure(e, t);
-      invoices.reload();
-    });
+    // The row read once from banking: the server stores what banking said, and the list follows its table.
+    void api()
+      .GET("/invoices/{id}", { params: { path: { id } } })
+      .then(({ error }) => {
+        if (error !== undefined) notifyFailure(error, t);
+        invoices.reload();
+      });
   };
 
   const refresh = (
@@ -42,11 +45,11 @@ export function InvoicesView() {
 
   return (
     <ScreenFrame title={t("invoices.title")} description={t("invoices.description")} actions={refresh}>
-      {may(me, "sa:sites:work:invoices:create") && <CreateInvoiceForm onCreated={invoices.reload} />}
+      {api().mayCall("post", "/invoices", me.permissions) && <CreateInvoiceForm onCreated={invoices.reload} />}
       <Settled loading={invoices.status === "loading"} skeleton={<Skeleton className="h-40 w-full" />}>
         {invoices.status === "error" && <ErrorState failure={invoices.failure} onRetry={invoices.reload} />}
-        {invoices.status === "ok" && invoices.data.length === 0 && <EmptyState title={t("invoices.empty")} description={t("invoices.empty.body")} />}
-        {invoices.status === "ok" && invoices.data.length > 0 && <InvoiceTable invoices={invoices.data} onPaySettled={onPaySettled} />}
+        {invoices.status === "ok" && invoices.data.invoices.length === 0 && <EmptyState title={t("invoices.empty")} description={t("invoices.empty.body")} />}
+        {invoices.status === "ok" && invoices.data.invoices.length > 0 && <InvoiceTable invoices={invoices.data.invoices} onPaySettled={onPaySettled} />}
       </Settled>
     </ScreenFrame>
   );

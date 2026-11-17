@@ -1,4 +1,4 @@
-import { ChannelPreview, type PlaceSettingsView, bookingText, formatHours, messengersText } from "@/entities/place";
+import { ChannelPreview, type PlaceSettingsView, bookingText, formatHours, messengersText, splitLive } from "@/entities/place";
 import { useT } from "@/shared/i18n";
 
 import { KeptFields } from "./kept-fields";
@@ -6,7 +6,7 @@ import { KeptFields } from "./kept-fields";
 /** The live data as it stands, for someone who may read it and not change it. */
 export function SettingsSummary({ place }: { place: PlaceSettingsView }) {
   const t = useT();
-  const e = place.settings.edited;
+  const { edited: e, rest } = splitLive(place.settings);
   const own = <span className="italic text-ink-soft">{t("placeSettings.siteOwn")}</span>;
   const rows = [
     { label: t("placeSettings.field.phone"), value: e.phone },
@@ -28,7 +28,7 @@ export function SettingsSummary({ place }: { place: PlaceSettingsView }) {
           </div>
         ))}
       </dl>
-      <KeptFields rest={place.settings.rest} />
+      <KeptFields rest={rest} />
       <ChannelPreview fields={e} />
     </div>
   );

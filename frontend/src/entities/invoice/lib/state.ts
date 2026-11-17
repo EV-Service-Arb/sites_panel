@@ -1,4 +1,4 @@
-import type { Invoice, InvoiceState } from "../model/invoice";
+import type { Invoice, InvoiceState } from "@/shared/api/schema";
 
 /** The shape of an id that the wallet element and its action page accept (banking `actionId`). */
 const ACTION_ID = /^[A-Za-z0-9_-]{1,128}$/;
@@ -17,7 +17,6 @@ export function stateTone(state: InvoiceState): StateTone {
       return "neutral";
     case "cancelled":
     case "expired":
-    case "unknown":
       return "ended";
   }
 }

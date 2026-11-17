@@ -3,7 +3,7 @@ import { Badge } from "@evinvest/uikit";
 import { useT } from "@/shared/i18n";
 
 import { stateTone } from "../lib/state";
-import type { InvoiceState } from "../model/invoice";
+import type { InvoiceState } from "@/shared/api/schema";
 
 /** The row's state, as the panel stored it. */
 export function InvoiceStateBadge({ state }: { state: InvoiceState }) {

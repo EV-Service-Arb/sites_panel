@@ -8,7 +8,6 @@ import { EmptyState } from "@/shared/ui/empty-state";
 import { PricingHistory } from "./pricing-history";
 import { WorkspaceLayout } from "./workspace-layout";
 
-const nowhere = () => undefined;
 
 /** An operator's screen: the model as saved, and the same preview to check a quote against. */
 export function ReadWorkspace({ item, version }: { item: PricingItem; version: number }) {
@@ -32,7 +31,7 @@ export function ReadWorkspace({ item, version }: { item: PricingItem; version: n
       aside={
         <>
           {/* A saved model has no field to show: a refusal here is the server's own, told as it came. */}
-          {item.model && <PreviewPanel brand={item.brand_id} model={item.model} onShowPath={nowhere} />}
+          {item.model && <PreviewPanel brand={item.brand_id} model={item.model} />}
           <PricingHistory brand={item.brand_id} version={version} />
         </>
       }

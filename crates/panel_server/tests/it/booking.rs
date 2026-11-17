@@ -1,8 +1,8 @@
 //! Booking end to end on the real router and a throwaway SQLite file: an operator's slot and
 //! its transitions, the Google Calendar pull against a fake Google served in-process (axum on
 //! a local port — never the network), the matching of its bookings to leads, the bookings
-//! without a lead and their attachment, the push route with a fake adapter, and what the
-//! live bus is told.
+//! without a lead and their attachment, the push route with a fake adapter, and the tables
+//! the live bus is told.
 
 use std::{
 	collections::{HashMap, VecDeque},
@@ -20,18 +20,16 @@ use jiff::{SignedDuration, Timestamp};
 use panel::{
 	Panel,
 	booking::{BookingEvent, Change, Contact, Provider, PushError, PushRequest, PushSource, PushSources},
-	live::{Signal, Topic},
 	testing::{Conductor, TestDb, batch, event, grant, panel},
 };
-use panel_core::ids::BrandId;
 use panel_server::{
 	google_calendar::{BrandCalendar, GoogleCalendar},
 	http::Limits,
 	testing::{As, Client, alias, app, app_with, raw, send},
 };
 use sa_auth::SourceKind;
+use sa_core::ids::BrandId;
 use serde_json::{Value, json};
-use tokio::sync::broadcast;
 use tower::ServiceExt;
 use uuid::Uuid;
 use zeroize::Zeroizing;
@@ -65,13 +63,12 @@ async fn site_lead(panel: &Panel, id: &str, at: Timestamp, pii: Value) {
 	assert_eq!(v[0].outcome, panel::Outcome::Accepted { unregistered: false });
 }
 
-/// What the bus says, drained: `(topic, id)`.
-fn told(rx: &mut broadcast::Receiver<Signal>) -> Vec<(Topic, Option<String>)> {
-	let mut out = Vec::new();
-	while let Ok(s) = rx.try_recv() {
-		if let Signal::Changed(c) = s {
-			out.push((c.topic, c.id));
-		}
+/// The tables the bus told, drained once it has been quiet a moment: a connection tells its
+/// writes when it goes back to the pool, which happens after the call that used it returns.
+async fn told(rx: &mut tokio::sync::broadcast::Receiver<String>) -> std::collections::BTreeSet<String> {
+	let mut out = std::collections::BTreeSet::new();
+	while let Ok(topic) = tokio::time::timeout(std::time::Duration::from_millis(100), rx.recv()).await {
+		out.insert(topic.expect("the test reads as fast as the bus is told"));
 	}
 	out
 }
@@ -114,7 +111,8 @@ async fn an_operator_books_closes_and_clears_a_slot() {
 	assert_eq!(status, StatusCode::CREATED);
 	let (status, again) = b.send(Method::POST, &format!("{lead}/booking"), Some(set), &[("idempotency-key", "k1")]).await;
 	assert_eq!((status, &again), (StatusCode::OK, &first), "a retry is the first answer");
-	assert_eq!(told(&mut rx), [(Topic::Lead, made["lead_id"].as_str().map(str::to_owned))]);
+	let topics = told(&mut rx).await;
+	assert!(topics.contains("sites.leads"), "{topics:?}");
 	assert_eq!(
 		booking(b.get(&lead).await.1),
 		json!({"status": "booked", "provider": "manual", "start_at": "2026-10-08T08:00:00Z", "end_at": "2026-10-08T09:00:00Z",
@@ -176,6 +174,18 @@ impl FakeGoogle {
 
 async fn token(State(g): State<FakeGoogle>, body: String) -> (StatusCode, Json<Value>) {
 	let form: HashMap<String, String> = url::form_urlencoded::parse(body.as_bytes()).into_owned().collect();
+	if form.get("grant_type").map(String::as_str) == Some("authorization_code") {
+		let traded = form.get("code").map(String::as_str) == Some("c0de")
+			&& form.get("code_verifier").is_some_and(|v| v.len() > 40)
+			&& form.get("client_secret").map(String::as_str) == Some("csecret");
+		return match traded {
+			true => (
+				StatusCode::OK,
+				Json(json!({"access_token": "ya29.fake", "expires_in": 3599, "refresh_token": "1//vifnet-refresh"})),
+			),
+			false => (StatusCode::BAD_REQUEST, Json(json!({"error": "invalid_grant"}))),
+		};
+	}
 	if form.get("refresh_token").map(String::as_str) != Some("1//vifnet-refresh") || form.get("client_secret").map(String::as_str) != Some("csecret") {
 		return (StatusCode::BAD_REQUEST, Json(json!({"error": "invalid_grant"})));
 	}
@@ -322,9 +332,8 @@ async fn google_bookings_are_pulled_matched_moved_and_canceled() {
 		json!({"name": "Client", "email": "twin@example.fr", "phone": "+33699999901"}),
 		"the attendee, for whoever sees PII"
 	);
-	let topics: Vec<Topic> = told(&mut rx).into_iter().map(|(t, _)| t).collect();
-	assert_eq!(topics.iter().filter(|t| **t == Topic::Lead).count(), 2, "{topics:?}");
-	assert_eq!(topics.iter().filter(|t| **t == Topic::Bookings).count(), 2, "{topics:?}");
+	let topics = told(&mut rx).await;
+	assert!(topics.contains("sites.leads") && topics.contains("sites.bookings"), "{topics:?}");
 
 	// Moved: the same event, another etag, another start; the lead's slot follows.
 	let moved = appointment("evphone1", "\"e2\"", "2026-10-09T15:00:00+02:00", "anyone@example.fr", Some("+33 6 12 34 56 78"));
@@ -338,7 +347,8 @@ async fn google_bookings_are_pulled_matched_moved_and_canceled() {
 		(Some("2026-10-09T13:00:00Z"), Some("contact")),
 		"a move, not a second booking"
 	);
-	assert_eq!(told(&mut rx), [(Topic::Lead, Some("lead-1-0000000a".to_owned()))]);
+	let topics = told(&mut rx).await;
+	assert!(topics.contains("sites.leads"), "{topics:?}");
 
 	// The same pull again changes nothing; an older revision seen again is the journal's already.
 	g.answer(StatusCode::OK, json!({"items": [moved], "nextSyncToken": "t3"}));
@@ -403,7 +413,7 @@ async fn google_bookings_are_pulled_matched_moved_and_canceled() {
 		b.post(&format!("/api/v1/bookings/{}/attach", Uuid::now_v7()), json!({"lead": "lead-3-0000000c"})).await.0,
 		StatusCode::NOT_FOUND
 	);
-	told(&mut rx);
+	told(&mut rx).await;
 	assert_eq!(b.post(&format!("/api/v1/bookings/{id}/attach"), json!({"lead": "lead-3-0000000c"})).await.0, StatusCode::CREATED);
 	assert_eq!(b.post(&format!("/api/v1/bookings/{id}/attach"), json!({"lead": "lead-3-0000000c"})).await.0, StatusCode::CONFLICT);
 	let attached = lead_booking(&b, "lead-3-0000000c").await;
@@ -413,11 +423,8 @@ async fn google_bookings_are_pulled_matched_moved_and_canceled() {
 	);
 	let left: Vec<Value> = b.get("/api/v1/bookings/unmatched").await.1["bookings"].as_array().unwrap().clone();
 	assert_eq!(left.iter().map(|x| x["external_ref"].as_str().unwrap()).collect::<Vec<_>>(), ["evnone44"]);
-	let topics = told(&mut rx);
-	assert!(
-		topics.contains(&(Topic::Lead, Some("lead-3-0000000c".to_owned()))) && topics.iter().any(|(t, _)| *t == Topic::Bookings),
-		"{topics:?}"
-	);
+	let topics = told(&mut rx).await;
+	assert!(topics.contains("sites.leads") && topics.contains("sites.bookings"), "{topics:?}");
 
 	// Re-attached elsewhere: the first lead loses it.
 	assert_eq!(b.post(&format!("/api/v1/bookings/{id}/attach"), json!({"lead": "lead-4-0000000d"})).await.0, StatusCode::CREATED);
@@ -538,4 +545,63 @@ async fn a_request_before_its_lead_is_answered_409_to_retry() {
 	let b = operator(&served, &conductor);
 	let got = lead_booking(&b, "lead-8-0000000a").await;
 	assert_eq!((got["status"].as_str(), got["provider"].as_str()), (Some("requested"), Some("google_calendar")));
+}
+
+#[tokio::test]
+async fn an_owner_consents_from_the_editor_and_the_pull_reads_their_calendar() {
+	let db = TestDb::create().await;
+	let panel = panel(&db).await;
+	let conductor = Conductor::new("k1");
+	let (g, api) = fake_google().await;
+	let redirect = url::Url::parse("https://panel.example/api/sites/bookings/google_calendar/callback").unwrap();
+	let consents = std::sync::Arc::new(panel_server::google_calendar::Consents::new(api.clone(), redirect));
+	let app = app(panel.clone(), &conductor).layer(axum::Extension(consents));
+	let admin = As::user(alias("sa:admin"));
+	let ask = |return_to: &str| json!({"return_to": return_to});
+	let consent = "/api/v1/bookings/google_calendar/vifnet/consent";
+
+	let (status, e) = send(&app, &conductor, &admin, Method::POST, consent, Some(ask("https://evil.example/sites/places")), &[]).await;
+	assert_eq!((status, &e["code"]), (StatusCode::BAD_REQUEST, &json!("bad_request")), "back to another site: {e}");
+	let operator = As::user(alias("sa:operator"));
+	assert_eq!(
+		send(&app, &conductor, &operator, Method::POST, consent, Some(ask("https://panel.example/sites/places")), &[])
+			.await
+			.0,
+		StatusCode::FORBIDDEN
+	);
+
+	let (status, asked) = send(&app, &conductor, &admin, Method::POST, consent, Some(ask("https://panel.example/sites/places?brand=vifnet")), &[]).await;
+	assert_eq!(status, StatusCode::OK, "{asked}");
+	let url = url::Url::parse(asked["url"].as_str().unwrap()).unwrap();
+	let state = url.query_pairs().find(|(k, _)| k == "state").unwrap().1.into_owned();
+	assert_eq!(
+		url.query_pairs().find(|(k, _)| k == "redirect_uri").unwrap().1,
+		"https://panel.example/api/sites/bookings/google_calendar/callback"
+	);
+
+	let callback = |state: &str, code: &str| format!("/api/v1/bookings/google_calendar/callback?state={state}&code={code}");
+	let (status, page) = raw(&app, &conductor, &admin, Method::GET, &callback(&state, "c0de"), &[], Vec::new()).await;
+	assert_eq!(status, StatusCode::OK);
+	assert!(
+		String::from_utf8(page).unwrap().contains("url=https://panel.example/sites/places?brand=vifnet\""),
+		"back to the page it was asked from"
+	);
+	let kept = panel.google_calendars().await.unwrap();
+	assert_eq!(
+		kept.iter().map(|c| (c.brand.as_str(), c.calendar_id.as_str(), c.refresh_token.as_str())).collect::<Vec<_>>(),
+		[("vifnet", "primary", "1//vifnet-refresh")]
+	);
+	let sealed: Vec<u8> = sqlx::query_scalar("SELECT refresh_sealed FROM google_calendars").fetch_one(&db.pool().await).await.unwrap();
+	assert!(!sealed.windows(7).any(|w| w == b"vifnet-"), "sealed, never in the clear");
+
+	let (status, again) = send(&app, &conductor, &admin, Method::GET, &callback(&state, "c0de"), None, &[]).await;
+	assert_eq!((status, &again["code"]), (StatusCode::CONFLICT, &json!("consent_expired")), "a state is taken once");
+
+	let google = api.of(kept);
+	assert_eq!(google.brands(), [vifnet()]);
+	panel
+		.sync_bookings(&google, &vifnet(), Uuid::now_v7(), Timestamp::now(), SignedDuration::from_mins(5), true, true)
+		.await
+		.unwrap();
+	assert_eq!(g.asked().len(), 1, "the pull read the consented calendar");
 }

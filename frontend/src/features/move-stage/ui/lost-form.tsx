@@ -2,10 +2,10 @@ import { Field, FieldLabel, Select, SelectContent, SelectItem, SelectTrigger, Se
 import { useId, useState } from "react";
 
 import type { StageMove } from "@/entities/lead";
+import { type LostReason, lostReasonValues } from "@/shared/api/schema";
 import { useT } from "@/shared/i18n";
 import { useControlSize } from "@/shared/ui/touch";
 
-import { LOST_REASONS, type LostReason } from "../model/moves";
 import { FormButtons } from "./quote-form";
 
 export function LostForm({ busy, onSubmit, onCancel }: { busy: boolean; onSubmit: (m: StageMove) => void; onCancel: () => void }) {
@@ -26,12 +26,12 @@ export function LostForm({ busy, onSubmit, onCancel }: { busy: boolean; onSubmit
     >
       <Field className="flex flex-col gap-1">
         <FieldLabel htmlFor={`${id}-reason`}>{t("move.reason")}</FieldLabel>
-        <Select value={reason} onValueChange={(v) => setReason(LOST_REASONS.find((r) => r === v) ?? "")}>
+        <Select value={reason} onValueChange={(v) => setReason(lostReasonValues.find((r) => r === v) ?? "")}>
           <SelectTrigger id={`${id}-reason`} size={size} className="w-full">
             <SelectValue placeholder={t("move.reason")} />
           </SelectTrigger>
           <SelectContent>
-            {LOST_REASONS.map((r) => (
+            {lostReasonValues.map((r) => (
               <SelectItem key={r} value={r}>
                 {t(`lost.${r}`)}
               </SelectItem>

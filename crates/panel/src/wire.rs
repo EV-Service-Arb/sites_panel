@@ -7,14 +7,14 @@
 use jiff::Timestamp;
 use panel_contracts::{SCHEMA, v1};
 use panel_core::{
-	Invalid,
 	booking::{self, BookingMatch, Closed},
 	event::{Envelope, Source, Subject, TypeKey, may_write},
 	experiment::{Declaration, Patch, check_declared, label},
 	fact::{AnalyticsId, CallOutcome, ContactChannel, Fact, LeadChannel, LeadOffer, LeadSuspect, MessageRef, Messenger, bounded, day, instant},
-	ids::{BrandId, JobId, LeadId, LocationId, parse_event_id},
+	ids::{JobId, LeadId, LocationId, parse_event_id},
 };
 use sa_auth::SourceKind;
+use sa_core::{Invalid, ids::BrandId};
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 
@@ -102,7 +102,7 @@ pub fn decode(raw: Value, now: Timestamp) -> Result<Incoming, Invalid> {
 
 	let subject = event.subject.as_ref().ok_or_else(|| Invalid::new("subject is required"))?;
 	let subject = Subject {
-		brand_id: BrandId::parse(&subject.brand_id)?,
+		brand_id: BrandId::parse(&subject.brand_id).map_err(|_| Invalid::new("subject.brand_id is not a valid id"))?,
 		location_id: subject.location_id.as_deref().map(LocationId::parse).transpose()?,
 		lead_id: subject.lead_id.as_deref().map(LeadId::parse).transpose()?,
 		job_id: subject.job_id.as_deref().map(JobId::parse).transpose()?,
@@ -464,7 +464,7 @@ mod tests {
 		for bad in [json!("honeypot"), json!("RATE_LIMITED"), json!("")] {
 			assert_eq!(
 				judge(bad.clone()),
-				Checked::Invalid(panel_core::Invalid::new("properties.suspect is not one of rate_limited, too_fast")),
+				Checked::Invalid(sa_core::Invalid::new("properties.suspect is not one of rate_limited, too_fast")),
 				"{bad}"
 			);
 		}

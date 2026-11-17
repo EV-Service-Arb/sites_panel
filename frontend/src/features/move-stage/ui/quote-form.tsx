@@ -13,7 +13,7 @@ export function QuoteForm({ busy, onSubmit, onCancel }: { busy: boolean; onSubmi
   const t = useT();
   const id = useId();
   const [amount, setAmount] = useState("");
-  const [currency, setCurrency] = useState<string>(DEFAULT_CURRENCY);
+  const [currency, setCurrency] = useState(DEFAULT_CURRENCY);
   const size = useControlSize();
   const minor = amount.trim() === "" ? null : parseMoney(amount);
   const invalid = amount.trim() !== "" && minor === null;

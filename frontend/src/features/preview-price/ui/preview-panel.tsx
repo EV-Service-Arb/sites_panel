@@ -15,7 +15,6 @@ export interface PreviewPanelProps {
   /** The model to price — the draft's, as it stands — or null while the draft does not make one. */
   model: PricingModel | null;
   /** Shows the field a model path names. */
-  onShowPath: (path: string) => void;
   /** With no model: shows what keeps the draft from making one. */
   onShowProblem?: () => void;
   /** The card's DOM id: where a phone's "Calculate" in the editor's action bar takes the reader. */
@@ -23,7 +22,7 @@ export interface PreviewPanelProps {
 }
 
 /** "Calculate": a need and the visitor's answers, priced by the server exactly as the site prices them. */
-export function PreviewPanel({ brand, model, onShowPath, onShowProblem, id }: PreviewPanelProps) {
+export function PreviewPanel({ brand, model, onShowProblem, id }: PreviewPanelProps) {
   const t = useT();
   const [pickedNeed, setPickedNeed] = useState<string | null>(null);
   const [picked, setPicked] = useState<Record<string, string>>({});
@@ -53,7 +52,7 @@ export function PreviewPanel({ brand, model, onShowPath, onShowProblem, id }: Pr
         {model && need !== null && (
           <Choices model={model} need={need} answers={answers} onNeed={setPickedNeed} onAnswer={(input, option) => setPicked((p) => ({ ...p, [input]: option }))} />
         )}
-        <PreviewResult state={state} onShowPath={onShowPath} />
+        <PreviewResult state={state} />
       </CardContent>
     </Card>
   );

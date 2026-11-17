@@ -13,6 +13,7 @@
 pub mod bookings;
 pub mod events;
 pub mod experiments;
+pub mod google;
 pub mod invoices;
 pub mod notifications;
 pub mod places;
@@ -28,8 +29,10 @@ use jiff::{Timestamp, civil::Date};
 use sqlx::{
 	Sqlite, SqliteConnection, SqlitePool, Transaction,
 	migrate::Migrator,
-	sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
+	sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous},
 };
+
+use crate::live::Bus;
 
 /// How long a statement waits for another connection's write lock before it fails. Writes are
 /// short; the longest is a rebuild of the projections, which ingest waits out up to this.
@@ -58,34 +61,33 @@ pub fn options(path: &Path) -> SqliteConnectOptions {
 		.busy_timeout(BUSY_TIMEOUT)
 }
 
-/// The panel's database.
+/// The panel's database, and the bus its committed writes are told on.
 #[derive(Clone, Debug)]
 pub struct Store {
 	pool: SqlitePool,
+	bus: Bus,
 }
 
 impl Store {
 	/// Opens (creating it if need be) the database at `path` and applies the migrations it
 	/// lacks. There is no separate migrate step: the process that owns the file migrates it.
 	pub async fn open(path: &Path) -> eyre::Result<Self> {
-		Self::open_with(options(path)).await.wrap_err_with(|| format!("opening the database at {}", path.display()))
-	}
-
-	pub async fn open_with(options: SqliteConnectOptions) -> eyre::Result<Self> {
-		// A request waits at most this long for a connection, then fails: a pool drained by a
-		// burst answers 500 quickly instead of stacking every request behind it.
-		let pool = SqlitePoolOptions::new()
-			.max_connections(8)
-			.acquire_timeout(Duration::from_secs(3))
-			.connect_with(options)
-			.await
-			.wrap_err("connecting to SQLite")?;
-		migrator().run(&pool).await.wrap_err("applying migrations")?;
-		Ok(Self { pool })
+		let bus = Bus::default();
+		let told = bus.clone();
+		// A request waits at most 3 s for a connection, then fails: a pool drained by a burst
+		// answers 500 quickly instead of stacking every request behind it.
+		let pool = ev_lib::sqlite::pool("sites", options(path), 8, Duration::from_secs(3), move |table| told.publish(table));
+		migrator().run(&pool).await.wrap_err_with(|| format!("opening the database at {}", path.display()))?;
+		Ok(Self { pool, bus })
 	}
 
 	pub fn pool(&self) -> &SqlitePool {
 		&self.pool
+	}
+
+	/// The tables each committed write touched: see [`crate::live`].
+	pub fn bus(&self) -> &Bus {
+		&self.bus
 	}
 
 	/// A transaction that will write: the write lock is taken at its start (see the module).

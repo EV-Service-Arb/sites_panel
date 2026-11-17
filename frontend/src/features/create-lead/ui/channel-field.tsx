@@ -1,7 +1,8 @@
 import { Field, FieldLabel, ToggleGroup, ToggleGroupItem } from "@evinvest/uikit";
 import { useId } from "react";
 
-import { ChannelIcon, MANUAL_CHANNELS, type ManualChannel } from "@/entities/lead";
+import { ChannelIcon, type ManualChannel } from "@/entities/lead";
+import { manualChannelValues } from "@/shared/api/schema";
 import { useT } from "@/shared/i18n";
 import { useControlSize } from "@/shared/ui/touch";
 
@@ -23,11 +24,11 @@ export function ChannelField({ value, onChange }: { value: ManualChannel; onChan
         value={value}
         // Tapping the lit item would clear the choice; a lead always has a channel.
         onValueChange={(v) => {
-          const next = MANUAL_CHANNELS.find((c) => c === v);
+          const next = manualChannelValues.find((c) => c === v);
           if (next) onChange(next);
         }}
       >
-        {MANUAL_CHANNELS.map((c) => (
+        {manualChannelValues.map((c) => (
           <ToggleGroupItem key={c} value={c} className="min-w-0 flex-1 gap-1.5">
             <ChannelIcon channel={c} className="shrink-0" />
             <span className="truncate">{t(`channel.${c}`)}</span>

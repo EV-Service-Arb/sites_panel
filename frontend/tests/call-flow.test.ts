@@ -20,7 +20,7 @@ function page(): Visibility & { set(hidden: boolean): void } {
 }
 
 function api(): CallApi & { attempt: ReturnType<typeof vi.fn>; outcome: ReturnType<typeof vi.fn> } {
-  return { attempt: vi.fn(async () => "att-1"), outcome: vi.fn(async () => undefined) };
+  return { attempt: vi.fn(async () => ({ attemptId: "att-1" })), outcome: vi.fn(async () => null) };
 }
 
 const ref = { brand: "aquafix", lead: "L-1" };
@@ -58,9 +58,9 @@ describe("calling a lead", () => {
   });
 
   it("waits for the attempt when the person is back before the backend answered", async () => {
-    let resolve: (id: string) => void = () => {};
+    let resolve: (answer: { attemptId: string }) => void = () => {};
     const a = api();
-    a.attempt.mockImplementation(() => new Promise<string>((r) => (resolve = r)));
+    a.attempt.mockImplementation(() => new Promise((r) => (resolve = r)));
     const v = page();
     const flow = new CallFlow(a, v, () => {});
     const started = flow.start(ref);
@@ -68,7 +68,7 @@ describe("calling a lead", () => {
     v.set(false);
     expect(flow.current.phase).toBe("asking");
     const answered = flow.answer("answered");
-    resolve("att-2");
+    resolve({ attemptId: "att-2" });
     await started;
     await answered;
     expect(a.outcome).toHaveBeenCalledWith(ref, "att-2", "answered");
@@ -76,10 +76,11 @@ describe("calling a lead", () => {
 
   it("forgets a call whose attempt the backend refused", async () => {
     const a = api();
-    a.attempt.mockRejectedValue(new Error("403"));
+    const refused = { code: "forbidden", error: "your permissions do not allow this" } as const;
+    a.attempt.mockResolvedValue({ failure: refused });
     const v = page();
     const flow = new CallFlow(a, v, () => {});
-    await expect(flow.start(ref)).rejects.toThrow("403");
+    expect(await flow.start(ref)).toEqual(refused);
     v.set(true);
     v.set(false);
     expect(flow.current.phase).toBe("idle");

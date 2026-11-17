@@ -5,11 +5,9 @@ use std::{collections::BTreeSet, fmt};
 
 use jiff::{SignedDuration, Timestamp};
 use sa_auth::SourceKind;
+use sa_core::{Invalid, ids::BrandId};
 
-use crate::{
-	Invalid,
-	ids::{BrandId, EventId, JobId, LeadId, LocationId},
-};
+use crate::ids::{EventId, JobId, LeadId, LocationId};
 
 /// How far in the future `occurred_at` may be: the sources' clocks are not ours.
 pub const MAX_CLOCK_SKEW: SignedDuration = SignedDuration::from_mins(5);

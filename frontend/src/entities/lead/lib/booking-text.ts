@@ -2,7 +2,7 @@ import type { T } from "@/shared/i18n";
 import { formatDay } from "@/shared/lib/format";
 import { formatSlot } from "@/shared/lib/instant";
 
-import type { LeadBooking } from "../model/booking";
+import type { LeadBooking } from "@/shared/api/schema";
 
 /** The visitor's wish as words, "6 Oct 2026, morning"; null when they asked for no day nor part. */
 export function wishText(b: LeadBooking, t: T, locale: string): string | null {

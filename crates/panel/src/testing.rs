@@ -9,8 +9,9 @@
 use std::path::{Path, PathBuf};
 
 use jiff::Timestamp;
-use panel_core::{event::KeyGrant, ids::BrandId};
+use panel_core::event::KeyGrant;
 use sa_auth::{Assertion, Keys, Principal, Service, Signer, Source, SourceKind, User};
+use sa_core::ids::BrandId;
 use serde_json::{Value, json};
 use sqlx::sqlite::SqlitePoolOptions;
 use uuid::Uuid;

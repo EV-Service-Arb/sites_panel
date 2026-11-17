@@ -9,7 +9,6 @@ pub mod booking;
 pub mod capture;
 pub mod conductor;
 pub mod experiments;
-pub mod gate;
 pub mod google_calendar;
 pub mod http;
 pub mod invoices;
@@ -18,6 +17,7 @@ pub mod pricing;
 pub mod scope_ledger;
 #[cfg(feature = "testing")]
 pub mod testing;
+mod views;
 
 /// Reports an error to Sentry and logs it — as a warning: the tracing layer would send an
 /// error-level event to Sentry a second time.

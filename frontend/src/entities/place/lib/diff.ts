@@ -46,10 +46,12 @@ const restText = (v: unknown): string | null => (v === undefined ? null : JSON.s
 
 /** The fields a change touched, edited ones first in form order, each before and after. */
 export function diffSettings(before: PlaceSettings, after: PlaceSettings, t: T): DiffLine[] {
-  const rest = [...new Set([...Object.keys(before.rest), ...Object.keys(after.rest)])].filter((k) => !isEdited(k)).sort();
+  const was: Readonly<Record<string, unknown>> = before.rest;
+  const is: Readonly<Record<string, unknown>> = after.rest;
+  const rest = [...new Set([...Object.keys(was), ...Object.keys(is)])].filter((k) => !isEdited(k)).sort();
   const lines: DiffLine[] = [
     ...EDITED_KEYS.map((field) => ({ field, before: editedText(field, before.edited, t), after: editedText(field, after.edited, t) })),
-    ...rest.map((field) => ({ field, before: restText(before.rest[field]), after: restText(after.rest[field]) })),
+    ...rest.map((field) => ({ field, before: restText(was[field]), after: restText(is[field]) })),
   ];
   return lines.filter((l) => l.before !== l.after);
 }

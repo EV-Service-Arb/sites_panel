@@ -1,7 +1,7 @@
 import { cn } from "@evinvest/uikit";
 
 import { useT } from "@/shared/i18n";
-import { type LiveStatus, useLiveStatus } from "@/shared/lib/live";
+import { type LiveStatus, useLiveStatus } from "@evinvest/api/react";
 
 type Shown = "live" | "reconnecting" | "offline";
 

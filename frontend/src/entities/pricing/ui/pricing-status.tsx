@@ -5,7 +5,7 @@ import { useLocale, useT } from "@/shared/i18n";
 import { formatDay } from "@/shared/lib/format";
 
 import { pricingStamp } from "../lib/stamp";
-import type { PricingItem } from "../model/item";
+import type { Pricing as PricingItem } from "@/shared/api/schema";
 
 export interface PricingStatusProps {
   item: PricingItem;

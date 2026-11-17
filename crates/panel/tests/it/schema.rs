@@ -10,11 +10,9 @@ use panel::{
 	store::Store,
 	testing::{TestDb, batch, event, grant},
 };
-use panel_core::{
-	ids::{BrandId, LocationId},
-	notify::Locale,
-};
+use panel_core::ids::LocationId;
 use sa_auth::{PermissionSet, SourceKind};
+use sa_core::{ids::BrandId, notify::Locale};
 use serde_json::json;
 use sqlx::{migrate::Migrator, sqlite::SqlitePoolOptions};
 
@@ -45,7 +43,7 @@ async fn the_runtime_does_its_work_on_a_fresh_database() {
 			location: LocationId::parse("paris-11").unwrap(),
 			need: "a boiler".into(),
 			phone: None,
-			channel: panel_core::fact::LeadChannel::PhoneInbound,
+			channel: panel_core::fact::ManualChannel::PhoneInbound,
 		};
 		let (lead, _) = panel.create_lead(by, new_lead(), now).await.unwrap();
 		let brand = BrandId::parse("aquafix").unwrap();

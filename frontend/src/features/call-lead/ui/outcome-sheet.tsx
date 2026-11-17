@@ -6,7 +6,8 @@ import { notifyFailure } from "@/shared/ui/notify";
 import { PanelOverlay } from "@/shared/ui/panel-overlay";
 import { useButtonSize } from "@/shared/ui/touch";
 
-import { CALL_OUTCOMES } from "../model/call-flow";
+import { type CallOutcome, callOutcomeValues } from "@/shared/api/schema";
+
 import { useCallFlow } from "../model/provider";
 
 /** "How did the call end?" — the bottom sheet that opens on coming back to the tab. */
@@ -16,16 +17,12 @@ export function OutcomeSheet({ subtitle }: { subtitle?: string }) {
   const { state, answer, dismiss } = useCallFlow();
   const [busy, setBusy] = useState(false);
 
-  const pick = async (outcome: (typeof CALL_OUTCOMES)[number]) => {
+  const pick = async (outcome: CallOutcome) => {
     setBusy(true);
-    try {
-      await answer(outcome);
-      toast.positive(t("call.saved"));
-    } catch (e) {
-      notifyFailure(e, t);
-    } finally {
-      setBusy(false);
-    }
+    const refused = await answer(outcome);
+    setBusy(false);
+    if (refused === null) toast.positive(t("call.saved"));
+    else notifyFailure(refused, t);
   };
 
   return (
@@ -37,7 +34,7 @@ export function OutcomeSheet({ subtitle }: { subtitle?: string }) {
       desktop="dialog"
     >
       <div className="grid grid-cols-2 gap-2">
-        {CALL_OUTCOMES.map((outcome, i) => (
+        {callOutcomeValues.map((outcome, i) => (
           <Button key={outcome} size={button("lg")} variant={i === 0 ? "primary" : "outline"} disabled={busy} onClick={() => pick(outcome)}>
             {t(`call.outcome.${outcome}`)}
           </Button>

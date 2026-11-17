@@ -3,7 +3,7 @@ import { ToggleGroup, ToggleGroupItem } from "@evinvest/uikit";
 import type { LeadCounts, Stage } from "@/entities/lead";
 import { useT } from "@/shared/i18n";
 
-import { SEGMENTS, segmentLabels } from "../model/params";
+import { SEGMENTS, segmentLabels } from "../model/filter";
 
 /**
  * "New · 3 | In progress · 1 | Quotes · 2": the stages an operator clears from a

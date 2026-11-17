@@ -16,17 +16,4 @@ sites_panel serve --bind 127.0.0.1:59120       # or PANEL_BIND
 
 # leads, calls and payments again from the journal, against the registry as it is now
 sites_panel rebuild-projections
-
-# A place's live settings (see "Place settings"): set some fields, clear others, the rest stay
-sites_panel place register aquafix royat       # known to the panel, nothing set; a no-op when known
-sites_panel place set aquafix royat --phone +33423500640 --whatsapp +33612345678 \
-  --hours 'Mo-Fr 08:00-19:00,Sa 09:00-12:00' --service-area 'Royat,Chamalières'
-sites_panel place set aquafix royat --clear whatsapp
-sites_panel place set aquafix royat --telegram aquafix_devis_bot --messengers whatsapp=on,telegram=off
-sites_panel place set aquafix royat --clear telegram --clear messengers
-sites_panel place show aquafix royat
-sites_panel place history aquafix royat        # every change, newest first, with its id
-sites_panel place revert aquafix royat <change id>   # the settings that change found, back
-sites_panel place withdraw aquafix royat       # the sites answer it as gone (404)
-sites_panel place restore aquafix royat
 ```

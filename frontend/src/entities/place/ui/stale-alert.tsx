@@ -4,7 +4,7 @@ import { useLocale, useT } from "@/shared/i18n";
 import { formatDateTime } from "@/shared/lib/format";
 import { useButtonSize } from "@/shared/ui/touch";
 
-import type { PlaceSettingsView } from "../model/settings";
+import type { Place as PlaceSettingsView } from "@/shared/api/schema";
 
 /**
  * Someone saved the place while this form holds edits. The edits stay; saving

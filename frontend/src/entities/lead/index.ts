@@ -1,11 +1,9 @@
-export { createLead, fetchLeadCard, fetchLeadCounts, fetchLeads, markMessaged, moveLead, recordPayment } from "./api/leads";
-export type { LeadFilter, NewLead, PaymentInput, StageMove } from "./api/leads";
-export { closeBooking, writeSlot } from "./api/booking";
-export type { CloseBody, SlotBody } from "./api/booking";
-export { BOOKING_MATCHES, NO_BOOKING, bookingActions } from "./model/booking";
-export type { BookingAction, BookingMatch, LeadBooking } from "./model/booking";
-export { CONTACT_SLA_SECONDS, LABELLED_PII, MANUAL_CHANNELS, STAGES, awaitingMessage, contactOf, extrasOf, dialable, slaAt, decodeRef, encodeRef, leadPath, reached, refOf } from "./model/lead";
-export type { Contact, LabelledPii, Lead, ManualChannel, LeadCard, LeadCounts, LeadEvent, LeadPage, LeadRef, Stage } from "./model/lead";
+export { bookingActions } from "./model/booking";
+export { MOVES } from "./model/generated";
+export type { BookingAction } from "./model/booking";
+export { LABELLED_PII, awaitingMessage, contactOf, extrasOf, fieldsOf, dialable, slaAt, reached, refOf } from "./model/lead";
+export type { Contact, LabelledPii, LeadFilter, LeadRef } from "./model/lead";
+export type { BookingSlot as SlotBody, BookingEnd as CloseBody, Lead, LeadBooking, LeadCard, LeadCounts, LeadEvent, LeadPage, LostReason, ManualChannel, Stage, StageMove } from "@/shared/api/schema";
 export { quotedPrice } from "./model/pricing";
 export { ChannelBadge, ChannelIcon, SlaBadge, StageBadge, SuspectBadge } from "./ui/badges";
 export { DealSummary, PriceText } from "./ui/deal-badges";

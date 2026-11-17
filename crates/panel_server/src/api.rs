@@ -7,42 +7,37 @@
 use std::{borrow::Cow, collections::BTreeMap};
 
 use axum::{
-	Extension, Json,
-	body::Bytes,
-	extract::{FromRequest, FromRequestParts, OptionalFromRequest, Path, Query, Request, State},
-	http::{HeaderMap, HeaderValue, StatusCode, header, request::Parts},
-	response::{IntoResponse, Response},
+	Json,
+	extract::{FromRequestParts, State},
+	http::{StatusCode, request::Parts},
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use ev_lib::api::{
-	Created, GenContext, JsonSchema, OperationInput, OperationOutput, Upserted,
-	openapi::{HeaderStyle, Operation, Parameter, ParameterData, ParameterSchemaOrContent, ReferenceOr, Response as Answer, SchemaObject, StatusCode as Status},
+	Body, Created, ErrorCode, GenContext, Ids, JsonSchema, OperationInput, Params, Refusal, Refuses, Upserted,
+	openapi::{HeaderStyle, Operation, Parameter, ParameterData, ParameterSchemaOrContent, ReferenceOr, SchemaObject},
 	schemars::{Schema, SchemaGenerator, json_schema},
 };
 use jiff::{SignedDuration, Timestamp, civil::Date, tz::TimeZone};
 use panel::{
 	Panel,
-	operator::{ActionError, Actor, CallOutcome, Done, EventView, FunnelBy, FunnelSlice, LeadQuery, LeadView, NewLead, Payment, Pii, StageMove, SuspectFilter},
+	operator::{ActionError, Actor, CallOutcome, Conflict, Done, EventView, FunnelBy, FunnelSlice, LeadQuery, LeadView, NewLead, Payment, Pii, StageMove, SuspectFilter},
+	store::events::Status as EventStatus,
 };
 use panel_core::{
-	Invalid,
 	booking::{BookingMatch, BookingStatus, DayPart, Provider},
-	fact::{LeadChannel, LeadFlow, MessageRef, Messenger},
-	funnel::{MIN_SAMPLE, Share},
-	ids::{BrandId, JobId, LeadId, LocationId},
+	fact::{self, ContactChannel, LeadChannel, LeadFlow, LeadSuspect, LostReason, ManualChannel, MessageRef, Messenger},
+	funnel::{MIN_SAMPLE, Share, Totals},
+	ids::{JobId, LeadId, LocationId},
 	lead::Stage,
+	pricing::InputId,
 };
-use sa_auth::{Leads, Pii as SeesPii, SourceKind};
-use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
+use sa_auth::{Analysis, Catalog, Denied, Gate, Leads, PermissionSet, Pii as SeesPii, Service, SourceKind, User, Work};
+use sa_core::{Invalid, ids::BrandId};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
-use ts_rs::TS;
 use uuid::Uuid;
 
-use crate::{
-	gate::Caller,
-	http::{ApiRoute, Gate, Section, api_routes},
-};
+use crate::http::ApiRoute;
 
 /// The longest span the funnel sums over.
 const MAX_FUNNEL_DAYS: i32 = 366;
@@ -53,32 +48,32 @@ const MAX_MINOR: i64 = 10_000_000_000;
 
 /// The currencies a quote or a payment may be in. Checked here, not in the registry: a rebuild
 /// must not re-judge what was journaled under an older list.
-pub const CURRENCIES: [&str; 4] = ["EUR", "USD", "GBP", "AUD"];
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize, strum::IntoStaticStr)]
+#[serde(rename_all = "UPPERCASE")]
+#[strum(serialize_all = "UPPERCASE")]
+pub(crate) enum Currency {
+	Eur,
+	Usd,
+	Gbp,
+	Aud,
+}
 
 /// The header a client sets to make a write safe to retry.
-pub const IDEMPOTENCY_KEY: &str = "idempotency-key";
+const IDEMPOTENCY_KEY: &str = "idempotency-key";
 
 fn amount(what: &str, v: i64) -> ApiResult<i64> {
 	if v.unsigned_abs() > MAX_MINOR.unsigned_abs() {
-		return Err(ApiError::BadRequest(format!("{what} is more than {MAX_MINOR} minor units")));
+		return Err(Refusal::new(Code::BadRequest, format!("{what} is more than {MAX_MINOR} minor units")));
 	}
 	Ok(v)
 }
 
-fn currency(v: &str) -> ApiResult<String> {
-	if !CURRENCIES.contains(&v) {
-		return Err(ApiError::BadRequest(format!("currency is one of {}", CURRENCIES.join(", "))));
-	}
-	Ok(v.to_owned())
-}
-
 pub(crate) fn routes() -> Vec<ApiRoute> {
 	use axum::http::Method as M;
-	let work = Gate::section(Section::Work);
-	let edit = work.may(Leads::Edit);
+	let work = Gate::USER.needs(Work::Read);
+	let edit = Gate::USER.needs(Leads::Edit);
 	vec![
 		ApiRoute::new(M::GET, "/me", Gate::USER, me),
-		ApiRoute::new(M::GET, "/openapi.json", Gate::USER.or_conductor(), openapi),
 		ApiRoute::new(M::GET, "/leads", work, list_leads),
 		ApiRoute::new(M::POST, "/leads", edit, create_lead),
 		ApiRoute::new(M::GET, "/leads/counts", work, lead_counts),
@@ -89,155 +84,145 @@ pub(crate) fn routes() -> Vec<ApiRoute> {
 		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/calls/attempt", edit, attempt_call),
 		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/calls/{attempt}/outcome", edit, call_outcome),
 		ApiRoute::new(M::POST, "/leads/{brand}/{lead}/payments", edit, record_payment),
-		ApiRoute::new(M::GET, "/funnel", Gate::section(Section::Analysis), funnel),
+		ApiRoute::new(M::GET, "/funnel", Gate::USER.needs(Analysis::Read), funnel),
 		ApiRoute::new(M::GET, "/places", work, list_places),
 	]
 }
 
-/// Why a request failed, as the front end is told.
-#[derive(Debug)]
-pub enum ApiError {
-	BadRequest(String),
-	Forbidden,
+/// Why an `/api/v1` operation refuses, beside its gate's (`sa_auth::Denied`) and its extractors'
+/// (`ev_lib::api::Malformed`): a word the front end and an agent act on, `error` for a person.
+#[derive(Clone, Copy, Debug, Serialize, strum::VariantArray)]
+#[serde(rename_all = "snake_case")]
+pub enum Code {
+	/// What was sent does not pass a check; `error` names the field.
+	BadRequest,
 	NotFound,
-	Conflict(String),
-	/// A service the request needs is not configured or not answering; the message is a
-	/// machine reason, e.g. `invoices_unavailable`.
-	Unavailable(String),
-	Internal(eyre::Report),
+	/// `expected_updated_at` is not what the place or the pricing stands at: read it again.
+	Stale,
+	PlaceExists,
+	/// Another place is the landing of that GMB.
+	GmbTaken,
+	/// A place's settings refused; `error` names each field and why.
+	InvalidSettings,
+	/// A price list refused; `error` names its first problem by its path from the model's root.
+	InvalidPricing,
+	NoWonJob,
+	/// An `Idempotency-Key` used for another action, or another invoice.
+	IdempotencyKeyTaken,
+	BookingDone,
+	NoBooking,
+	NotBooked,
+	AlreadyAttached,
+	/// No banking ScopeLedger is configured.
+	InvoicesUnavailable,
+	/// Banking has not granted the panel its scope.
+	NotGranted,
+	/// Banking could not be reached; the same request may be sent again.
+	LedgerUnavailable,
+	InvoiceNotOpen,
+	InvoiceProcessing,
+	ScopeFrozen,
+	/// Banking's own idempotency refused the request.
+	IdempotencyConflict,
+	/// Banking refused for a reason of its own, which `error` carries.
+	LedgerRefused,
+	/// No Google OAuth client is configured.
+	GoogleUnavailable,
+	/// No consent waits under this state (asked more than 10 minutes ago, or never): ask again.
+	ConsentExpired,
+	/// Google refused the consent, or gave no refresh token; `error` says which.
+	GoogleRefused,
+	Internal,
 }
 
-/// What every failed operation answers, its status saying which failure.
-#[derive(JsonSchema, Serialize)]
-#[schemars(rename = "Error")]
-pub struct ErrorDto {
-	pub error: String,
-}
-
-impl IntoResponse for ApiError {
-	fn into_response(self) -> Response {
-		let (status, msg) = match self {
-			Self::BadRequest(m) => (StatusCode::BAD_REQUEST, m),
-			Self::Forbidden => (StatusCode::FORBIDDEN, "your permissions do not allow this".to_owned()),
-			Self::NotFound => (StatusCode::NOT_FOUND, "not found".to_owned()),
-			Self::Conflict(m) => (StatusCode::CONFLICT, m),
-			Self::Unavailable(m) => (StatusCode::SERVICE_UNAVAILABLE, m),
-			Self::Internal(e) => {
-				crate::report(&e, "operator API");
-				(StatusCode::INTERNAL_SERVER_ERROR, "internal error".to_owned())
-			}
-		};
-		(status, Json(ErrorDto { error: msg })).into_response()
+impl ErrorCode for Code {
+	fn status(self) -> StatusCode {
+		match self {
+			Self::BadRequest => StatusCode::BAD_REQUEST,
+			Self::NotFound => StatusCode::NOT_FOUND,
+			Self::InvalidSettings | Self::InvalidPricing => StatusCode::UNPROCESSABLE_ENTITY,
+			Self::Stale
+			| Self::PlaceExists
+			| Self::GmbTaken
+			| Self::NoWonJob
+			| Self::IdempotencyKeyTaken
+			| Self::BookingDone
+			| Self::NoBooking
+			| Self::NotBooked
+			| Self::AlreadyAttached
+			| Self::InvoiceNotOpen
+			| Self::InvoiceProcessing
+			| Self::ScopeFrozen
+			| Self::IdempotencyConflict
+			| Self::LedgerRefused
+			| Self::ConsentExpired
+			| Self::GoogleRefused => StatusCode::CONFLICT,
+			Self::InvoicesUnavailable | Self::NotGranted | Self::LedgerUnavailable | Self::GoogleUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+			Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+		}
 	}
 }
 
-impl OperationOutput for ApiError {
-	type Inner = ErrorDto;
+pub(crate) type ApiResult<T> = Result<T, Refusal<Code>>;
 
-	fn operation_response(ctx: &mut GenContext, op: &mut Operation) -> Option<Answer> {
-		Json::<ErrorDto>::operation_response(ctx, op)
-	}
-
-	fn inferred_responses(ctx: &mut GenContext, op: &mut Operation) -> Vec<(Option<Status>, Answer)> {
-		Self::operation_response(ctx, op).map(|r| (None, r)).into_iter().collect()
+impl Refuses<eyre::Report> for Code {
+	fn refusal(e: eyre::Report) -> Refusal<Self> {
+		crate::report(&e, "operator API");
+		Refusal::new(Self::Internal, "internal error")
 	}
 }
 
-impl From<eyre::Report> for ApiError {
-	fn from(e: eyre::Report) -> Self {
-		Self::Internal(e)
+impl Refuses<Invalid> for Code {
+	fn refusal(e: Invalid) -> Refusal<Self> {
+		Refusal::new(Self::BadRequest, e.0)
 	}
 }
 
-impl From<Invalid> for ApiError {
-	fn from(e: Invalid) -> Self {
-		Self::BadRequest(e.0)
-	}
-}
-
-impl From<ActionError> for ApiError {
-	fn from(e: ActionError) -> Self {
+impl Refuses<ActionError> for Code {
+	fn refusal(e: ActionError) -> Refusal<Self> {
 		match e {
-			ActionError::NotFound => Self::NotFound,
-			ActionError::Conflict(m) => Self::Conflict(m.to_owned()),
-			ActionError::Invalid(e) => Self::BadRequest(e.0),
-			ActionError::Internal(e) => Self::Internal(e),
+			ActionError::NotFound => Refusal::new(Self::NotFound, "not found"),
+			ActionError::Conflict(c) => Refusal::new(
+				match c {
+					Conflict::NoWonJob => Self::NoWonJob,
+					Conflict::IdempotencyKeyTaken => Self::IdempotencyKeyTaken,
+					Conflict::BookingDone => Self::BookingDone,
+					Conflict::NoBooking => Self::NoBooking,
+					Conflict::NotBooked => Self::NotBooked,
+					Conflict::AlreadyAttached => Self::AlreadyAttached,
+				},
+				c.to_string(),
+			),
+			ActionError::Invalid(e) => Self::refusal(e),
+			ActionError::Internal(e) => Self::refusal(e),
 		}
 	}
 }
 
-pub(crate) type ApiResult<T> = Result<T, ApiError>;
+/// The person an `/api/v1` route's gate admitted, their `sub` as the user id it is.
+#[derive(Clone, Debug)]
+pub(crate) struct Caller {
+	pub user_id: Uuid,
+	pub email: String,
+	/// Their `sa:sites:*` permissions, and no others.
+	pub permissions: PermissionSet,
+}
 
-/// A JSON body, refused in the shape every failure has. Optional (`Option<Body<T>>`), an empty
-/// body or `null` is none, and the content type is not asked for.
-pub(crate) struct Body<T>(pub T);
+impl<S: Send + Sync> FromRequestParts<S> for Caller {
+	type Rejection = Refusal<Denied>;
 
-impl<T: DeserializeOwned, S: Send + Sync> FromRequest<S> for Body<T> {
-	type Rejection = ApiError;
-
-	async fn from_request(req: Request, state: &S) -> Result<Self, ApiError> {
-		<Json<T> as FromRequest<S>>::from_request(req, state)
-			.await
-			.map(|Json(v)| Self(v))
-			.map_err(|e| ApiError::BadRequest(e.body_text()))
+	async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Refusal<Denied>> {
+		let Ok(user) = User::from_request_parts(parts, state).await;
+		let user_id = Uuid::parse_str(&user.sub).map_err(|_| Refusal::new(Denied::Unauthenticated, format!("the assertion's sub {:?} is not a user id", user.sub)))?;
+		Ok(Self {
+			user_id,
+			email: user.email,
+			permissions: user.permissions,
+		})
 	}
 }
 
-impl<T: DeserializeOwned, S: Send + Sync> OptionalFromRequest<S> for Body<T> {
-	type Rejection = ApiError;
-
-	async fn from_request(req: Request, state: &S) -> Result<Option<Self>, ApiError> {
-		let raw = <Bytes as FromRequest<S>>::from_request(req, state).await.map_err(|e| ApiError::BadRequest(e.body_text()))?;
-		if raw.iter().all(u8::is_ascii_whitespace) {
-			return Ok(None);
-		}
-		let v: Option<T> = serde_json::from_slice(&raw).map_err(|e| ApiError::BadRequest(format!("the body: {e}")))?;
-		Ok(v.map(Self))
-	}
-}
-
-impl<T: JsonSchema> OperationInput for Body<T> {
-	fn operation_input(ctx: &mut GenContext, op: &mut Operation) {
-		Json::<T>::operation_input(ctx, op);
-	}
-}
-
-/// A query string, refused in the shape every failure has.
-pub(crate) struct Params<T>(pub T);
-
-impl<T: DeserializeOwned, S: Send + Sync> FromRequestParts<S> for Params<T> {
-	type Rejection = ApiError;
-
-	async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, ApiError> {
-		Query::<T>::from_request_parts(parts, state)
-			.await
-			.map(|Query(v)| Self(v))
-			.map_err(|e| ApiError::BadRequest(e.body_text()))
-	}
-}
-
-impl<T: JsonSchema> OperationInput for Params<T> {
-	fn operation_input(ctx: &mut GenContext, op: &mut Operation) {
-		Query::<T>::operation_input(ctx, op);
-	}
-}
-
-/// The ids in a path, by their names in it; one that is not an id at all names nothing: a 404.
-pub(crate) struct Ids<T>(pub T);
-
-impl<T: DeserializeOwned + Send, S: Send + Sync> FromRequestParts<S> for Ids<T> {
-	type Rejection = ApiError;
-
-	async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, ApiError> {
-		Path::<T>::from_request_parts(parts, state).await.map(|Path(v)| Self(v)).map_err(|_| ApiError::NotFound)
-	}
-}
-
-impl<T: JsonSchema> OperationInput for Ids<T> {
-	fn operation_input(ctx: &mut GenContext, op: &mut Operation) {
-		Path::<T>::operation_input(ctx, op);
-	}
-}
+impl OperationInput for Caller {}
 
 /// With `#[serde(default)]`: a field that is there, `null` included, apart from one left out.
 pub(crate) fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<T>, D::Error> {
@@ -245,7 +230,7 @@ pub(crate) fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> R
 }
 
 /// `{brand}/{lead}`.
-#[derive(Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema, Serialize)]
 pub(crate) struct LeadPath {
 	pub brand: BrandId,
 	pub lead: LeadId,
@@ -261,22 +246,22 @@ fn idempotency_key(parts: &Parts) -> ApiResult<Option<String>> {
 	let Some(v) = parts.headers.get(IDEMPOTENCY_KEY) else { return Ok(None) };
 	let v = v.to_str().ok().filter(|v| (1..=128).contains(&v.len()) && v.bytes().all(|b| b.is_ascii_graphic()));
 	v.map(|v| Some(v.to_owned()))
-		.ok_or_else(|| ApiError::BadRequest("Idempotency-Key is 1–128 visible ASCII characters".into()))
+		.ok_or_else(|| Refusal::new(Code::BadRequest, "Idempotency-Key is 1–128 visible ASCII characters"))
 }
 
 impl<S: Send + Sync> FromRequestParts<S> for IdempotencyKey {
-	type Rejection = ApiError;
+	type Rejection = Refusal<Code>;
 
-	async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, ApiError> {
+	async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Refusal<Code>> {
 		idempotency_key(parts).map(Self)
 	}
 }
 
 impl<S: Send + Sync> FromRequestParts<S> for RequiredIdempotencyKey {
-	type Rejection = ApiError;
+	type Rejection = Refusal<Code>;
 
-	async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, ApiError> {
-		idempotency_key(parts)?.map(Self).ok_or_else(|| ApiError::BadRequest("Idempotency-Key is required".into()))
+	async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Refusal<Code>> {
+		idempotency_key(parts)?.map(Self).ok_or_else(|| Refusal::new(Code::BadRequest, "Idempotency-Key is required"))
 	}
 }
 
@@ -342,115 +327,55 @@ fn window(from: Option<Date>, to: Option<Date>) -> ApiResult<(Date, Date)> {
 	let to = to.unwrap_or_else(|| Timestamp::now().to_zoned(TimeZone::UTC).date());
 	let from = match from {
 		Some(d) => d,
-		None => to.checked_sub(SignedDuration::from_hours(24 * 29)).map_err(|e| ApiError::Internal(e.into()))?,
+		None => to.checked_sub(SignedDuration::from_hours(24 * 29)).map_err(|e| Refusal::from(eyre::Report::from(e)))?,
 	};
 	if from > to {
-		return Err(ApiError::BadRequest("from is after to".into()));
+		return Err(Refusal::new(Code::BadRequest, "from is after to"));
 	}
 	if (to - from).get_days() >= MAX_FUNNEL_DAYS {
-		return Err(ApiError::BadRequest(format!("at most {MAX_FUNNEL_DAYS} days at once")));
+		return Err(Refusal::new(Code::BadRequest, format!("at most {MAX_FUNNEL_DAYS} days at once")));
 	}
 	Ok((from, to))
 }
 
 /// The first instant of a UTC day.
 fn day_start(d: Date) -> ApiResult<Timestamp> {
-	Ok(d.to_zoned(TimeZone::UTC).map_err(|e| ApiError::Internal(e.into()))?.timestamp())
+	Ok(d.to_zoned(TimeZone::UTC).map_err(|e| Refusal::from(eyre::Report::from(e)))?.timestamp())
 }
 
 // ── /me ─────────────────────────────────────────────────────────────────────────────────
 
 /// `GET /me`.
-#[derive(JsonSchema, Serialize, TS)]
-pub struct Me {
+#[derive(JsonSchema, Serialize)]
+struct Me {
 	/// The concierge user id: what a user's own marks are kept under.
 	sub: Uuid,
 	/// The caller's `sa:sites:*` permissions.
-	#[ts(type = "Array<Permission>")]
-	permissions: Vec<String>,
+	permissions: Vec<SitesPermission>,
 }
 
-/// The caller, as the conductor vouched for them: their user id and `sa:sites:*` permissions.
-async fn me(Extension(caller): Extension<Caller>) -> Json<Me> {
-	Json(Me {
-		sub: caller.user_id,
-		permissions: caller.permissions.iter().map(str::to_owned).collect(),
-	})
-}
+/// A `sa:sites:*` permission, one of those the conductor's catalog names.
+#[derive(Serialize)]
+#[serde(transparent)]
+struct SitesPermission(String);
 
-/// The `/api/v1` document as built at boot, and its ETag.
-#[derive(Clone)]
-pub(crate) struct Catalog {
-	json: Bytes,
-	etag: HeaderValue,
-}
-
-impl Catalog {
-	pub(crate) fn new() -> Self {
-		let doc = ev_lib::api::document("Service-Arb sites", env!("CARGO_PKG_VERSION"), "/api/v1", &api_routes(), ev_lib::api_docs!());
-		let json = serde_json::to_vec(&doc).expect("a document serializes");
-		let digest: String = Sha256::digest(&json).iter().take(8).map(|b| format!("{b:02x}")).collect();
-		Self {
-			json: json.into(),
-			etag: HeaderValue::from_str(&format!("\"{digest}\"")).expect("hex in quotes"),
-		}
-	}
-}
-
-/// The document, or the word that the caller's copy is it.
-pub(crate) enum Served {
-	Document(Catalog),
-	Unchanged(Catalog),
-}
-
-/// An OpenAPI 3.1 document.
-struct OpenApiDocument;
-
-impl JsonSchema for OpenApiDocument {
+impl JsonSchema for SitesPermission {
 	fn schema_name() -> Cow<'static, str> {
-		"OpenApi".into()
+		"Permission".into()
 	}
 
 	fn json_schema(_: &mut SchemaGenerator) -> Schema {
-		json_schema!({ "type": "object", "description": "An OpenAPI 3.1 document." })
+		let words: Vec<String> = Catalog::collect("sa", 0).permissions.into_iter().filter(|p| p.starts_with(Service::Sites.prefix())).collect();
+		json_schema!({ "type": "string", "enum": words })
 	}
 }
 
-impl IntoResponse for Served {
-	fn into_response(self) -> Response {
-		match self {
-			Self::Document(c) => ([(header::CONTENT_TYPE, HeaderValue::from_static("application/json")), (header::ETAG, c.etag)], c.json).into_response(),
-			Self::Unchanged(c) => (StatusCode::NOT_MODIFIED, [(header::ETAG, c.etag)]).into_response(),
-		}
-	}
-}
-
-impl OperationOutput for Served {
-	type Inner = ();
-
-	fn inferred_responses(ctx: &mut GenContext, op: &mut Operation) -> Vec<(Option<Status>, Answer)> {
-		let unchanged = Answer {
-			description: "The copy `If-None-Match` named is the document.".into(),
-			..Answer::default()
-		};
-		Json::<OpenApiDocument>::operation_response(ctx, op)
-			.map(|r| (Some(Status::Code(200)), r))
-			.into_iter()
-			.chain([(Some(Status::Code(304)), unchanged)])
-			.collect()
-	}
-}
-
-/// The OpenAPI document of every `/api/v1` operation, each with the permission that opens it
-/// (`x-permission`).
-///
-/// The whole of it, whoever asks; built at boot. It carries an ETag, and an `If-None-Match`
-/// naming it is answered 304. The conductor pulls it under its own assertion.
-async fn openapi(Extension(catalog): Extension<Catalog>, headers: HeaderMap) -> Served {
-	match headers.get(header::IF_NONE_MATCH) == Some(&catalog.etag) {
-		true => Served::Unchanged(catalog),
-		false => Served::Document(catalog),
-	}
+/// The caller, as the conductor vouched for them: their user id and `sa:sites:*` permissions.
+async fn me(caller: Caller) -> Json<Me> {
+	Json(Me {
+		sub: caller.user_id,
+		permissions: caller.permissions.iter().map(|p| SitesPermission(p.to_owned())).collect(),
+	})
 }
 
 // ── leads ───────────────────────────────────────────────────────────────────────────────
@@ -464,16 +389,15 @@ struct LeadDto {
 	location: Option<String>,
 	job_id: Option<String>,
 	stage: Stage,
-	/// form | phone_inbound | callback | whatsapp | telegram; null for a lead seen before its
-	/// creation.
-	channel: Option<String>,
+	/// Null for a lead seen before its creation.
+	channel: Option<LeadChannel>,
 	/// The ref the customer carries into a messenger (`AQ-7K3F`), when the landing made one.
 	message_ref: Option<String>,
 	/// When the customer first wrote on a messenger, and on which; null while they have not.
 	messaged_at: Option<Timestamp>,
 	messaged_channel: Option<Messenger>,
-	/// `rate_limited` | `too_fast` when the landing's antispam doubted it; null otherwise.
-	suspect: Option<String>,
+	/// Why the landing's antispam doubted it; null otherwise.
+	suspect: Option<LeadSuspect>,
 	/// Typed in by hand (an event of kind `panel`).
 	manual: bool,
 	/// When each stage was first reached.
@@ -484,15 +408,15 @@ struct LeadDto {
 	completed_at: Option<Timestamp>,
 	paid_at: Option<Timestamp>,
 	lost_at: Option<Timestamp>,
-	lost_reason: Option<String>,
-	/// `quote` | `estimate` | `fixed`: the landing's flow; null when it said none.
-	flow: Option<String>,
+	lost_reason: Option<LostReason>,
+	/// The landing's flow; null when it said none.
+	flow: Option<LeadFlow>,
 	/// The price an estimate or a fixed price showed, integer cents EUR TTC.
 	quoted_cents: Option<i64>,
-	/// `YYYY-MM-DD`: when the pricing model behind `quoted_cents` took effect.
-	pricing_valid_from: Option<String>,
+	/// When the pricing model behind `quoted_cents` took effect.
+	pricing_valid_from: Option<Date>,
 	/// An estimate's inputs, input id → value id.
-	estimate_inputs: Option<Value>,
+	estimate_inputs: Option<BTreeMap<InputId, InputId>>,
 	/// Its booking; `status: none` when it has none.
 	booking: LeadBookingDto,
 	last_event_at: Timestamp,
@@ -577,7 +501,7 @@ fn lead_dto(v: LeadView, now: Timestamp) -> LeadDto {
 }
 
 /// Which of the suspect leads to list.
-#[derive(Clone, Copy, Deserialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[schemars(rename = "SuspectFilter")]
 enum Suspect {
@@ -587,16 +511,14 @@ enum Suspect {
 	Exclude,
 }
 
-#[derive(Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct LeadsQuery {
+/// Which leads to list: the Leads view's query keys too.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub(crate) struct LeadsQuery {
 	stage: Option<Stage>,
 	brand: Option<BrandId>,
-	/// The conductor's selection of GMBs, ids split by commas (`3,7`): only the leads of places
-	/// linked to one of them. Empty selects none; absent narrows nothing.
-	gmb: Option<String>,
 	/// Only the leads overdue for their first contact.
-	overdue: Option<bool>,
+	#[serde(default)]
+	overdue: bool,
 	/// Created on or after this UTC day.
 	created_from: Option<Date>,
 	/// Created on or before this UTC day.
@@ -610,22 +532,47 @@ struct LeadsQuery {
 	/// A messenger ref as the customer quotes it or an operator pastes it (`Réf. aq 7k3f`:
 	/// label, case, spaces; O→0, I/L→1 in the code): the leads carrying it.
 	message_ref: Option<String>,
+}
+
+/// Which page of the leads, and of which GMBs.
+#[derive(Deserialize, JsonSchema)]
+struct LeadPage {
+	gmb: Option<Gmbs>,
 	/// `next_cursor` of the page before.
 	cursor: Option<String>,
 	/// At most 200; 50 when absent.
 	limit: Option<u32>,
 }
 
-/// `gmb` of a read: the conductor's selection, `1,7,12`; empty selects none, absent narrows nothing.
-fn gmbs(raw: Option<&str>) -> ApiResult<Option<Vec<i64>>> {
-	let Some(raw) = raw else { return Ok(None) };
-	if raw.is_empty() {
-		return Ok(Some(Vec::new()));
+/// The conductor's selection of GMBs, ids split by commas (`3,7`): only what belongs to the
+/// places linked to one of them. Empty selects none; absent narrows nothing.
+pub(crate) struct Gmbs(pub Vec<i64>);
+
+impl<'de> Deserialize<'de> for Gmbs {
+	fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+		let raw = String::deserialize(d)?;
+		if raw.is_empty() {
+			return Ok(Self(Vec::new()));
+		}
+		raw.split(',')
+			.map(|id| id.parse().map_err(|_| serde::de::Error::custom(format!("gmb is GMB ids split by commas, not {raw}"))))
+			.collect::<Result<_, _>>()
+			.map(Self)
 	}
-	raw.split(',')
-		.map(|id| id.parse().map_err(|_| ApiError::BadRequest(format!("gmb is GMB ids split by commas, not {raw}"))))
-		.collect::<ApiResult<_>>()
-		.map(Some)
+}
+
+impl JsonSchema for Gmbs {
+	fn schema_name() -> Cow<'static, str> {
+		"Gmbs".into()
+	}
+
+	fn json_schema(_: &mut SchemaGenerator) -> Schema {
+		json_schema!({
+			"type": "string",
+			"pattern": "^([0-9]+(,[0-9]+)*)?$",
+			"description": "GMB ids split by commas (`3,7`): only what belongs to the places linked to one of them; empty selects none."
+		})
+	}
 }
 
 fn cursor_encode((at, brand, lead): &(Timestamp, String, String)) -> String {
@@ -633,7 +580,7 @@ fn cursor_encode((at, brand, lead): &(Timestamp, String, String)) -> String {
 }
 
 fn cursor_decode(raw: &str) -> ApiResult<(Timestamp, String, String)> {
-	let bad = || ApiError::BadRequest("cursor is not one this API gave".into());
+	let bad = || Refusal::new(Code::BadRequest, "cursor is not one this API gave");
 	let text = String::from_utf8(URL_SAFE_NO_PAD.decode(raw).map_err(|_| bad())?).map_err(|_| bad())?;
 	let mut parts = text.splitn(3, '|');
 	let (Some(at), Some(brand), Some(lead)) = (parts.next(), parts.next(), parts.next()) else {
@@ -653,18 +600,18 @@ struct LeadPageDto {
 /// The leads, newest created first, a page at a time.
 ///
 /// Each filter narrows; `created_*` are UTC days, both included.
-async fn list_leads(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Params(q): Params<LeadsQuery>) -> ApiResult<Json<LeadPageDto>> {
+async fn list_leads(State(panel): State<Panel>, caller: Caller, Params(q): Params<LeadsQuery>, Params(page): Params<LeadPage>) -> ApiResult<Json<LeadPageDto>> {
 	if let (Some(f), Some(t)) = (q.created_from, q.created_to)
 		&& f > t
 	{
-		return Err(ApiError::BadRequest("created_from is after created_to".into()));
+		return Err(Refusal::new(Code::BadRequest, "created_from is after created_to"));
 	}
-	let next_day = |d: Date| d.tomorrow().map_err(|e| ApiError::Internal(e.into())).and_then(day_start);
+	let next_day = |d: Date| d.tomorrow().map_err(|e| Refusal::from(eyre::Report::from(e))).and_then(day_start);
 	let query = LeadQuery {
 		stage: q.stage,
 		brand: q.brand,
-		gmbs: gmbs(q.gmb.as_deref())?,
-		overdue: q.overdue.unwrap_or(false),
+		gmbs: page.gmb.map(|g| g.0),
+		overdue: q.overdue,
 		created_from: q.created_from.map(day_start).transpose()?,
 		created_before: q.created_to.map(next_day).transpose()?,
 		suspect: match q.suspect {
@@ -678,10 +625,10 @@ async fn list_leads(State(panel): State<Panel>, Extension(caller): Extension<Cal
 		message_ref: q
 			.message_ref
 			.as_deref()
-			.map(|r| MessageRef::from_typed(r).map_err(|_| ApiError::BadRequest("message_ref is not like AQ-7K3F".into())))
+			.map(|r| MessageRef::from_typed(r).map_err(|_| Refusal::new(Code::BadRequest, "message_ref is not like AQ-7K3F")))
 			.transpose()?,
-		after: q.cursor.as_deref().map(cursor_decode).transpose()?,
-		limit: q.limit.unwrap_or(50),
+		after: page.cursor.as_deref().map(cursor_decode).transpose()?,
+		limit: page.limit.unwrap_or(50),
 	};
 	let now = Timestamp::now();
 	let page = panel.leads(&query, pii(&caller), now).await?;
@@ -705,8 +652,8 @@ struct EventDto {
 	/// Typed in by hand (kind `panel`).
 	manual: bool,
 	job_id: Option<String>,
-	/// accepted | unregistered | …: how the registry judged it.
-	status: String,
+	/// How the registry judged it.
+	status: EventStatus,
 	status_reason: Option<String>,
 	/// The event's properties, as its type has them.
 	properties: Value,
@@ -742,9 +689,9 @@ struct LeadCardDto {
 }
 
 /// A lead's card: the lead and every event about it.
-async fn get_lead(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Ids(LeadPath { brand, lead }): Ids<LeadPath>) -> ApiResult<Json<LeadCardDto>> {
+async fn get_lead(State(panel): State<Panel>, caller: Caller, Ids(LeadPath { brand, lead }): Ids<LeadPath>) -> ApiResult<Json<LeadCardDto>> {
 	let now = Timestamp::now();
-	let (view, events) = panel.lead_card(&brand, &lead, pii(&caller), now).await?.ok_or(ApiError::NotFound)?;
+	let (view, events) = panel.lead_card(&brand, &lead, pii(&caller), now).await?.ok_or(Refusal::new(Code::NotFound, "not found"))?;
 	Ok(Json(LeadCardDto {
 		lead: lead_dto(view, now),
 		events: events.into_iter().map(event_dto).collect(),
@@ -759,9 +706,9 @@ struct CreateLead {
 	location: LocationId,
 	need: String,
 	phone: Option<String>,
-	/// phone_inbound (the default) | whatsapp | telegram: a customer who called, or wrote on a
-	/// messenger without the landing.
-	channel: Option<LeadChannel>,
+	/// A customer who called (`phone_inbound`, when absent), or wrote on a messenger without the
+	/// landing.
+	channel: Option<ManualChannel>,
 }
 
 #[derive(JsonSchema, Serialize)]
@@ -774,17 +721,13 @@ struct NewLeadDto {
 }
 
 /// Creates a lead by hand (`lead.created`, kind `panel`).
-async fn create_lead(State(panel): State<Panel>, Extension(caller): Extension<Caller>, IdempotencyKey(key): IdempotencyKey, Body(b): Body<CreateLead>) -> ApiResult<Upserted<NewLeadDto>> {
+async fn create_lead(State(panel): State<Panel>, caller: Caller, IdempotencyKey(key): IdempotencyKey, Body(b): Body<CreateLead>) -> ApiResult<Upserted<NewLeadDto>> {
 	let new = NewLead {
 		brand: b.brand,
 		location: b.location,
 		need: b.need,
 		phone: b.phone,
-		channel: match b.channel {
-			None => LeadChannel::PhoneInbound,
-			Some(c) if LeadChannel::MANUAL.contains(&c) => c,
-			Some(_) => return Err(ApiError::BadRequest("channel is one of phone_inbound, whatsapp, telegram".into())),
-		},
+		channel: b.channel.unwrap_or(ManualChannel::PhoneInbound),
 	};
 	let brand = new.brand.clone();
 	let done = panel.create_lead_once(Actor(caller.user_id), new, Timestamp::now(), key.as_deref()).await?;
@@ -799,21 +742,20 @@ async fn create_lead(State(panel): State<Panel>, Extension(caller): Extension<Ca
 #[derive(Deserialize, JsonSchema)]
 #[serde(tag = "stage", rename_all = "snake_case", deny_unknown_fields)]
 #[schemars(rename = "StageMove")]
-enum StageBody {
+pub(crate) enum StageBody {
 	Contacted {
-		channel: Option<String>,
+		channel: Option<ContactChannel>,
 	},
 	Quoted {
 		/// Minor units, |amount| ≤ 10^10.
 		amount: Option<i64>,
-		/// EUR | USD | GBP | AUD.
-		currency: Option<String>,
+		currency: Option<Currency>,
 	},
 	Won {
 		job_id: Option<String>,
 	},
 	Lost {
-		reason: String,
+		reason: LostReason,
 		note: Option<String>,
 	},
 	Completed,
@@ -824,9 +766,9 @@ enum StageBody {
 ///
 /// Stages move forward; `lost` from anywhere, and later progress reopens a lost lead. 409 when
 /// the move is not from where the lead stands.
-async fn move_lead(
+pub(crate) async fn move_lead(
 	State(panel): State<Panel>,
-	Extension(caller): Extension<Caller>,
+	caller: Caller,
 	Ids(LeadPath { brand, lead }): Ids<LeadPath>,
 	IdempotencyKey(key): IdempotencyKey,
 	Body(b): Body<StageBody>,
@@ -835,7 +777,7 @@ async fn move_lead(
 		StageBody::Contacted { channel } => StageMove::Contacted { channel },
 		StageBody::Quoted { amount: a, currency: c } => StageMove::Quoted {
 			amount: a.map(|a| amount("amount", a)).transpose()?,
-			currency: c.as_deref().map(currency).transpose()?,
+			currency: c.map(|c| <&str>::from(c).to_owned()),
 		},
 		StageBody::Won { job_id } => StageMove::Won {
 			job_id: job_id.as_deref().map(JobId::parse).transpose()?,
@@ -857,7 +799,7 @@ struct MessagedBody {
 /// The customer wrote on a messenger, as the operator saw it (`lead.messaged`).
 async fn mark_messaged(
 	State(panel): State<Panel>,
-	Extension(caller): Extension<Caller>,
+	caller: Caller,
 	Ids(LeadPath { brand, lead }): Ids<LeadPath>,
 	IdempotencyKey(key): IdempotencyKey,
 	Body(b): Body<MessagedBody>,
@@ -871,9 +813,9 @@ async fn mark_messaged(
 /// A call nobody answered (`call.attempted` + `call.logged{no_answer}`).
 ///
 /// A note's button: its Idempotency-Key is required, so a press repeated records nothing twice.
-async fn no_answer(
+pub(crate) async fn no_answer(
 	State(panel): State<Panel>,
-	Extension(caller): Extension<Caller>,
+	caller: Caller,
 	Ids(LeadPath { brand, lead }): Ids<LeadPath>,
 	RequiredIdempotencyKey(key): RequiredIdempotencyKey,
 ) -> ApiResult<Upserted<Journaled>> {
@@ -888,7 +830,7 @@ struct AttemptDto {
 }
 
 /// Starts a call to the customer (`call.attempted`); its outcome is logged against the attempt.
-async fn attempt_call(State(panel): State<Panel>, Extension(caller): Extension<Caller>, Ids(LeadPath { brand, lead }): Ids<LeadPath>) -> ApiResult<Created<AttemptDto>> {
+async fn attempt_call(State(panel): State<Panel>, caller: Caller, Ids(LeadPath { brand, lead }): Ids<LeadPath>) -> ApiResult<Created<AttemptDto>> {
 	let attempt = panel.attempt_call(Actor(caller.user_id), &brand, &lead, Timestamp::now()).await?;
 	Ok(Created(AttemptDto { attempt_id: attempt.raw() }))
 }
@@ -903,19 +845,13 @@ struct AttemptPath {
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[schemars(rename = "CallOutcome")]
+#[schemars(rename = "CallOutcomeBody")]
 struct OutcomeBody {
-	/// answered | no_answer | wrong_number | later
-	outcome: String,
+	outcome: fact::CallOutcome,
 }
 
 /// How an attempted call went (`call.logged`).
-async fn call_outcome(
-	State(panel): State<Panel>,
-	Extension(caller): Extension<Caller>,
-	Ids(AttemptPath { brand, lead, attempt }): Ids<AttemptPath>,
-	Body(b): Body<OutcomeBody>,
-) -> ApiResult<Created<Journaled>> {
+async fn call_outcome(State(panel): State<Panel>, caller: Caller, Ids(AttemptPath { brand, lead, attempt }): Ids<AttemptPath>, Body(b): Body<OutcomeBody>) -> ApiResult<Created<Journaled>> {
 	let call = CallOutcome { attempt, outcome: b.outcome };
 	let event = panel.log_call(Actor(caller.user_id), &brand, &lead, call, Timestamp::now()).await?;
 	Ok(Created(Journaled { event_id: event.raw() }))
@@ -929,14 +865,13 @@ struct PaymentBody {
 	billed: i64,
 	/// Minor units, |amount| ≤ 10^10.
 	commission: i64,
-	/// EUR | USD | GBP | AUD.
-	currency: String,
+	currency: Currency,
 }
 
 /// Records a payment for a lead's job, entered by hand (`payment.received`).
 async fn record_payment(
 	State(panel): State<Panel>,
-	Extension(caller): Extension<Caller>,
+	caller: Caller,
 	Ids(LeadPath { brand, lead }): Ids<LeadPath>,
 	IdempotencyKey(key): IdempotencyKey,
 	Body(b): Body<PaymentBody>,
@@ -944,7 +879,7 @@ async fn record_payment(
 	let p = Payment {
 		billed: amount("billed", b.billed)?,
 		commission: amount("commission", b.commission)?,
-		currency: currency(&b.currency)?,
+		currency: <&str>::from(b.currency).to_owned(),
 	};
 	let done = panel.record_payment_once(Actor(caller.user_id), &brand, &lead, p, Timestamp::now(), key.as_deref()).await?;
 	Ok(recorded(done, |e| Journaled { event_id: e.raw() }))
@@ -971,8 +906,7 @@ struct FunnelQuery {
 	brand: Option<BrandId>,
 	/// Absent: the whole funnel.
 	by: Option<By>,
-	/// The conductor's selection of GMBs, as `GET /leads` takes it.
-	gmb: Option<String>,
+	gmb: Option<Gmbs>,
 }
 
 /// A share as the front end may show it: `percent` only when `of` is large enough, and
@@ -998,12 +932,18 @@ impl From<Share> for ShareDto {
 }
 
 #[derive(JsonSchema, Serialize)]
-#[schemars(rename = "FunnelStep")]
+#[schemars(rename = "FunnelStep", transform = a_step_of_the_funnel)]
 struct StepDto {
 	stage: Stage,
 	reached: u64,
 	of_previous: Option<ShareDto>,
 	of_leads: ShareDto,
+}
+
+/// A step's stage is one `Totals::steps` names: `Lost` is beside the funnel, never a step of it.
+fn a_step_of_the_funnel(schema: &mut Schema) {
+	let words: Vec<&str> = Totals::default().steps().iter().map(|s| s.stage.as_str()).collect();
+	schema.get_mut("properties").and_then(Value::as_object_mut).expect("a struct's properties")["stage"] = serde_json::json!({ "type": "string", "enum": words });
 }
 
 /// What a slice's leads were paid in one currency, in its minor units; never converted.
@@ -1059,7 +999,7 @@ impl From<FunnelSlice> for SliceDto {
 #[derive(JsonSchema, Serialize)]
 #[schemars(rename = "LocationFunnel")]
 struct LocationSliceDto {
-	brand: Option<String>,
+	brand: String,
 	location: Option<String>,
 	#[serde(flatten)]
 	slice: SliceDto,
@@ -1073,7 +1013,7 @@ enum Slices {
 }
 
 #[derive(JsonSchema, Serialize)]
-#[schemars(rename = "Funnel")]
+#[schemars(rename = "Funnel", transform = common_beside_slices)]
 struct FunnelDto {
 	from: Date,
 	to: Date,
@@ -1081,9 +1021,19 @@ struct FunnelDto {
 	/// Under this many, a share has no percent.
 	min_sample: u64,
 	/// The same funnel from the visit on in PostHog; null without a project configured.
+	#[schemars(regex(pattern = r"^https?://"))]
 	posthog_url: Option<String>,
 	#[serde(flatten)]
 	slices: Slices,
+}
+
+/// `properties` beside the slices' `anyOf` reads to openapi-typescript as one more member of the union; an
+/// `allOf` of the two is the intersection the answer is.
+fn common_beside_slices(schema: &mut Schema) {
+	let o = schema.as_object_mut().expect("a struct's schema is an object");
+	let slices = o.remove("anyOf").expect("the flattened untagged slices");
+	let common: serde_json::Map<String, Value> = ["type", "properties", "required"].into_iter().map(|k| (k.to_owned(), o.remove(k).expect("a struct's"))).collect();
+	o.insert("allOf".to_owned(), Value::Array(vec![Value::Object(common), serde_json::json!({ "anyOf": slices })]));
 }
 
 /// The funnel of the leads created within a window of UTC days: each stage reached, the lost
@@ -1097,22 +1047,16 @@ async fn funnel(State(panel): State<Panel>, Params(q): Params<FunnelQuery>) -> A
 		None => FunnelBy::All,
 		Some(By::Location) => FunnelBy::Location,
 	};
-	let selected = gmbs(q.gmb.as_deref())?;
+	let selected = q.gmb.map(|g| g.0);
 	let slices = panel.funnel_slices(from, to, q.brand.as_ref(), selected.as_deref(), by).await?;
 	let slices = match by {
-		FunnelBy::All => Slices::Whole(
-			slices
-				.into_iter()
-				.next()
-				.ok_or_else(|| ApiError::Internal(eyre::eyre!("the whole funnel came back empty")))?
-				.into(),
-		),
+		FunnelBy::All => Slices::Whole(slices.into_iter().next().ok_or_else(|| Refusal::from(eyre::eyre!("the whole funnel came back empty")))?.into()),
 		FunnelBy::Location => Slices::ByLocation {
 			by: By::Location,
 			locations: slices
 				.into_iter()
 				.map(|s| LocationSliceDto {
-					brand: s.brand.clone(),
+					brand: s.brand.clone().expect("FunnelBy::Location slices by brand"),
 					location: s.location.clone(),
 					slice: s.into(),
 				})
@@ -1134,8 +1078,7 @@ async fn funnel(State(panel): State<Panel>, Params(q): Params<FunnelQuery>) -> A
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct PlacesQuery {
-	/// The conductor's selection of GMBs, as `GET /leads` takes it.
-	gmb: Option<String>,
+	gmb: Option<Gmbs>,
 }
 
 #[derive(JsonSchema, Serialize)]
@@ -1147,6 +1090,8 @@ struct PlaceRowDto {
 	/// Live settings with a field set at least.
 	has_settings: bool,
 	withdrawn: bool,
+	/// Its latest change: registered, set, reverted, withdrawn or restored; null for a place only leads name.
+	changed_at: Option<Timestamp>,
 }
 
 #[derive(JsonSchema, Serialize)]
@@ -1158,7 +1103,7 @@ struct PlacesDto {
 /// Every place the panel knows: every location a lead names, and every place registered.
 async fn list_places(State(panel): State<Panel>, Params(q): Params<PlacesQuery>) -> ApiResult<Json<PlacesDto>> {
 	let places = panel
-		.places(gmbs(q.gmb.as_deref())?.as_deref())
+		.places(q.gmb.as_ref().map(|g| g.0.as_slice()))
 		.await?
 		.into_iter()
 		.map(|p| PlaceRowDto {
@@ -1167,6 +1112,7 @@ async fn list_places(State(panel): State<Panel>, Params(q): Params<PlacesQuery>)
 			last_lead_at: p.last_lead_at,
 			has_settings: p.has_settings,
 			withdrawn: p.withdrawn,
+			changed_at: p.changed_at,
 		})
 		.collect();
 	Ok(Json(PlacesDto { places }))
@@ -1176,12 +1122,11 @@ async fn list_places(State(panel): State<Panel>, Params(q): Params<PlacesQuery>)
 #[serde(deny_unknown_fields)]
 struct CountsQuery {
 	brand: Option<BrandId>,
-	/// The conductor's selection of GMBs, as `GET /leads` takes it.
-	gmb: Option<String>,
+	gmb: Option<Gmbs>,
 }
 
 #[derive(JsonSchema, Serialize)]
-#[schemars(rename = "LeadCounts")]
+#[schemars(rename = "LeadCounts", transform = every_stage)]
 struct CountsDto {
 	/// Every stage, 0 included.
 	stages: BTreeMap<Stage, u64>,
@@ -1189,9 +1134,20 @@ struct CountsDto {
 	total: u64,
 }
 
+/// A map keyed by a closed enum lists its keys as properties; `stages` has each of them.
+fn every_stage(schema: &mut Schema) {
+	let stages = schema
+		.get_mut("properties")
+		.and_then(|p| p.get_mut("stages"))
+		.and_then(Value::as_object_mut)
+		.expect("CountsDto's stages");
+	let keys: Vec<Value> = stages["properties"].as_object().expect("a key per stage").keys().cloned().map(Value::String).collect();
+	stages.insert("required".to_owned(), Value::Array(keys));
+}
+
 /// How many leads are at each stage, and how many are overdue for their first contact.
 async fn lead_counts(State(panel): State<Panel>, Params(q): Params<CountsQuery>) -> ApiResult<Json<CountsDto>> {
-	let counts = panel.lead_counts(q.brand.as_ref(), gmbs(q.gmb.as_deref())?.as_deref(), Timestamp::now()).await?;
+	let counts = panel.lead_counts(q.brand.as_ref(), q.gmb.as_ref().map(|g| g.0.as_slice()), Timestamp::now()).await?;
 	Ok(Json(CountsDto {
 		total: counts.stages.iter().map(|(_, n)| n).sum(),
 		stages: counts.stages.into_iter().collect(),

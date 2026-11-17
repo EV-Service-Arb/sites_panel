@@ -69,19 +69,6 @@ sites_panel serve --bind 127.0.0.1:59120       # or PANEL_BIND
 
 # leads, calls and payments again from the journal, against the registry as it is now
 sites_panel rebuild-projections
-
-# A place's live settings (see "Place settings"): set some fields, clear others, the rest stay
-sites_panel place register aquafix royat       # known to the panel, nothing set; a no-op when known
-sites_panel place set aquafix royat --phone +33423500640 --whatsapp +33612345678 \
-  --hours 'Mo-Fr 08:00-19:00,Sa 09:00-12:00' --service-area 'Royat,Chamalières'
-sites_panel place set aquafix royat --clear whatsapp
-sites_panel place set aquafix royat --telegram aquafix_devis_bot --messengers whatsapp=on,telegram=off
-sites_panel place set aquafix royat --clear telegram --clear messengers
-sites_panel place show aquafix royat
-sites_panel place history aquafix royat        # every change, newest first, with its id
-sites_panel place revert aquafix royat <change id>   # the settings that change found, back
-sites_panel place withdraw aquafix royat       # the sites answer it as gone (404)
-sites_panel place restore aquafix royat
 ```
 
 ## Sending events
@@ -112,7 +99,7 @@ A landing (sites-tools) bakes its places into its build, and lays over them what
 answers for each one: phones, WhatsApp, the Telegram bot and the messenger switches, opening
 hours, service area, a review link, and for storefronts an address, a pin, a photo, a landmark,
 a rating (`PlaceLive`). Changing a number is
-an edit in the panel or a `sites_panel place set`, not a release. A site fetches at most every
+an edit in the panel, not a release. A site fetches at most every
 10 minutes; the panel being down or slow only delays a change, the site serves what it baked.
 
 ```text
@@ -128,7 +115,7 @@ devops from the contracts: `provides.internal` here, `consumes` on the landing) 
 
 `/api/internal` has no session and is not published: the public IngressRoute must exclude it,
 and the NetworkPolicy lets the landings' pods in. Admins edit in the panel (operators read);
-every change, from the panel or the CLI (`by = cli`), is journaled with what was before and
+every change is journaled with what was before and
 after, and can be reverted. The settings are checked field by field by the rules a site reads
 them with (`@evinvest/sites-contract`), refused (`422`) where a site would quietly drop them. The session API is in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#place-settings).

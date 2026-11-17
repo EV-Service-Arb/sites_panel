@@ -1,5 +1,5 @@
 import { type NewInvoice, canonicalAmount, expiresInDays, memoProblem } from "@/entities/invoice";
-import type { ApiFailure } from "@/shared/api";
+import type { Failure } from "@/shared/api";
 
 export interface InvoiceDraft {
   amount: string;
@@ -28,25 +28,19 @@ export function invoiceFrom(draft: InvoiceDraft): DraftOutcome {
 
 /**
  * Whether a failed create may be sent again under the same Idempotency-Key. A lost answer, an
- * outage or a 5xx may have reached banking, so the retry must replay it. A refusal (400, 403,
- * 409) did not create anything, and the same key would only repeat the refusal.
+ * outage, a 500 or the forward's 502 may have reached banking, so the retry must replay it. A
+ * refusal did not create anything, and the same key would only repeat the refusal.
  */
-export function keepsKey(failure: ApiFailure): boolean {
-  switch (failure.kind) {
+export function keepsKey(failure: Failure): boolean {
+  switch (failure.code) {
     case "network":
-    case "unavailable":
-    case "failed":
+    case "bad_gateway":
+    case "internal":
+    case "invoices_unavailable":
+    case "ledger_unavailable":
+    case "not_granted":
       return true;
     default:
       return false;
   }
-}
-
-/** Banking's machine reasons on a 409 (`panel_server::invoices`), as message keys. */
-export const CONFLICT_REASONS = ["invoice_not_open", "invoice_processing", "scope_frozen", "idempotency_conflict"] as const;
-export type ConflictReason = (typeof CONFLICT_REASONS)[number];
-
-export function conflictReason(failure: ApiFailure): ConflictReason | null {
-  if (failure.kind !== "conflict") return null;
-  return CONFLICT_REASONS.find((reason) => reason === failure.message) ?? null;
 }

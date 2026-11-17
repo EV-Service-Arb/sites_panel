@@ -10,8 +10,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use jiff::Timestamp;
+use sa_core::Invalid;
 
-use crate::{Invalid, ids::EventId};
+use crate::ids::EventId;
 
 /// What a landing's declaration may hold.
 #[derive(Clone, Copy, Debug, serde::Serialize)]
@@ -41,9 +42,9 @@ const MAX_VARIANTS: usize = LIMITS.max_variants;
 /// What a landing says of one experiment in its code.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Declaration {
-	pub key: String,
+	pub key: ExperimentKey,
 	/// At least two, unique; the first is the control.
-	pub variants: Vec<String>,
+	pub variants: Vec<Variant>,
 	pub weights: Vec<f64>,
 	pub enabled: bool,
 	pub holdout: Option<f64>,
@@ -54,15 +55,23 @@ pub struct Declaration {
 // Every number in one is finite (checked on parse), so equality is reflexive.
 impl Eq for Declaration {}
 
-/// `[a-z0-9_]{1,64}`.
-pub fn is_key(s: &str) -> bool {
-	(1..=64).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
-}
+checked_str!(
+	/// An experiment's key: `[a-z0-9_]{1,64}`.
+	pub struct ExperimentKey,
+	pattern = LIMITS.key,
+	example = "hero_layout",
+	refused = "not an experiment key, 1–64 of [a-z0-9_]",
+	|s| (1..=64).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+);
 
-/// A variant's name: `[a-z0-9_-]{1,32}`, what `@evinvest/experiments` takes.
-fn is_variant(s: &str) -> bool {
-	(1..=32).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
-}
+checked_str!(
+	/// A variant's name: `[a-z0-9_-]{1,32}`, what `@evinvest/experiments` takes.
+	pub struct Variant,
+	pattern = LIMITS.variant,
+	example = "control",
+	refused = "not a variant, 1–32 of [a-z0-9_-]",
+	|s| (1..=32).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
+);
 
 /// Weights a landing takes for `variants` variants (`@evinvest/experiments`' `validWeights`,
 /// `contracts/vectors/overrides.json`): as many, each a finite number ≥ 0, and their sum > 0.
@@ -78,15 +87,15 @@ pub fn holdout_ok(h: f64) -> bool {
 impl Declaration {
 	pub fn parse(key: &str, variants: Vec<String>, weights: Vec<f64>, enabled: bool, holdout: Option<f64>, summary: Option<String>) -> Result<Self, Invalid> {
 		let at = |what: &str| Invalid::new(format!("properties.experiments[{key}].{what}"));
-		if !is_key(key) {
+		let Ok(parsed) = ExperimentKey::parse(key) else {
 			return Err(Invalid::new("properties.experiments[].key is not 1–64 of [a-z0-9_]"));
-		}
+		};
 		if !(2..=MAX_VARIANTS).contains(&variants.len()) {
 			return Err(at(&format!("variants are 2 to {MAX_VARIANTS}")));
 		}
-		if !variants.iter().all(|v| is_variant(v)) {
+		let Ok(variants) = variants.iter().map(|v| Variant::parse(v)).collect::<Result<Vec<_>, _>>() else {
 			return Err(at("variants are 1–32 of [a-z0-9_-]"));
-		}
+		};
 		if variants.iter().collect::<BTreeSet<_>>().len() != variants.len() {
 			return Err(at("variants are not unique"));
 		}
@@ -101,7 +110,7 @@ impl Declaration {
 			return Err(at(&format!("summary is at most {} characters", LIMITS.max_summary)));
 		}
 		Ok(Self {
-			key: key.to_owned(),
+			key: parsed,
 			variants,
 			weights,
 			enabled,
@@ -142,9 +151,9 @@ impl<T: Clone> Field<T> {
 }
 
 /// What an admin changed of one experiment (`experiment.configured`).
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Patch {
-	pub key: String,
+	pub key: ExperimentKey,
 	pub enabled: Field<bool>,
 	pub weights: Field<Vec<f64>>,
 	pub holdout: Field<f64>,
@@ -161,9 +170,9 @@ impl Patch {
 	/// no field both set and put back. Whether the weights fit the variants is the declaration's
 	/// question ([`State::check_patch`]).
 	pub fn parse(key: &str, enabled: Option<bool>, weights: Vec<f64>, holdout: Option<f64>, reset: &[String]) -> Result<Self, Invalid> {
-		if !is_key(key) {
+		let Ok(parsed) = ExperimentKey::parse(key) else {
 			return Err(Invalid::new("properties.key is not 1–64 of [a-z0-9_]"));
-		}
+		};
 		if let Some(other) = reset.iter().find(|r| !RESETTABLE.contains(&r.as_str())) {
 			return Err(Invalid::new(format!("properties.reset names {other:?}, not one of enabled, weights, holdout")));
 		}
@@ -174,7 +183,7 @@ impl Patch {
 			return Err(Invalid::new("properties.holdout is not in [0, 1)"));
 		}
 		Ok(Self {
-			key: key.to_owned(),
+			key: parsed,
 			enabled: field(enabled, "enabled", reset)?,
 			weights: field((!weights.is_empty()).then_some(weights), "weights", reset)?,
 			holdout: field(holdout, "holdout", reset)?,
@@ -322,12 +331,12 @@ pub enum Happened {
 
 /// A brand's experiments from all its events about them, by key: the same answer in whatever
 /// order they are given (sorted by `(occurred_at, id)` here).
-pub fn fold(events: &[(Timestamp, EventId, Happened)]) -> BTreeMap<String, State> {
+pub fn fold(events: &[(Timestamp, EventId, Happened)]) -> BTreeMap<ExperimentKey, State> {
 	let mut ordered: Vec<&(Timestamp, EventId, Happened)> = events.iter().collect();
 	ordered.sort_by_key(|(at, id, _)| (*at, id.raw()));
-	let mut states: BTreeMap<String, State> = BTreeMap::new();
+	let mut states: BTreeMap<ExperimentKey, State> = BTreeMap::new();
 	for (at, _, happened) in ordered {
-		let before: BTreeMap<String, Vec<f64>> = states.iter().map(|(k, s)| (k.clone(), s.effective().weights)).collect();
+		let before: BTreeMap<ExperimentKey, Vec<f64>> = states.iter().map(|(k, s)| (k.clone(), s.effective().weights)).collect();
 		match happened {
 			Happened::Declared(declared) => {
 				let current: BTreeSet<&str> = declared.iter().map(|d| d.key.as_str()).collect();

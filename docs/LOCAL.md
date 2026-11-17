@@ -16,8 +16,9 @@ What sites_panel needs from whoever starts it:
 
 ```sh
 cargo r -p panel_server -- serve            # on PANEL_BIND, the dev shell's
-cargo r -p panel_server -- place register aquafix royat
 ```
+
+A place is `POST /api/v1/places` `{brand, slug}`; site_conductor's `nix run .#local-stack` registers its landings'.
 
 The landings read their places, pricing and experiments from `<sites_panel>/api/internal`
 (`SITES_PANEL_INTERNAL_URL`, which they extend with `/brands/<brand>/…`) and send their leads to the conductor's ingest.

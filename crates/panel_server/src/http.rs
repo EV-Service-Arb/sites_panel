@@ -1,6 +1,6 @@
 //! The HTTP API: `/health`; ingest and a bot's lookup, under a source's assertion; the operator
 //! API (`/api/v1/*`, [`crate::api`] and the others' routes) under a user's; the conductor's reads
-//! (`/api/conductor/*`, [`crate::conductor`]) under its own ([`crate::gate`]); and, open, the
+//! (`/api/conductor/*`, [`crate::conductor`]) under its own (`sa_auth`'s `Gate` and `Conductor`); and, open, the
 //! sites' reads (`/api/internal`, [`crate::places`], [`crate::pricing`], [`crate::experiments`]),
 //! the booking webhooks (`/api/hooks`) and the front end's bundle (`/mfe/*`).
 //!
@@ -30,17 +30,18 @@ use axum::{
 	Extension, Json, Router,
 	body::to_bytes,
 	error_handling::HandleErrorLayer,
-	extract::{Path, Request, State},
-	http::{HeaderValue, StatusCode, header},
+	extract::{FromRef, Path, Request, State},
+	http::{HeaderValue, StatusCode, header, request::Parts},
 	middleware::{self, Next},
 	response::{IntoResponse, Response},
 	routing::{get, post},
 };
-use ev_lib::api::{Guard, Route};
+use ev_lib::api::{Refusal, Route, serve};
 use panel::{IngestError, Outcome, Panel, booking::PushSources};
 use panel_contracts::v1::{EventResult, IngestResponse};
-use panel_core::notify::Locale;
-use sa_auth::{Analysis, Keys, Permission, PermissionSet, Work};
+use panel_core::event::KeyGrant;
+use sa_auth::{Denied, Gate, Keys, Service, Verifier};
+use sa_core::{ids::BrandId, notify::Locale};
 use serde_json::{Value, json};
 use tower::{BoxError, ServiceBuilder, limit::GlobalConcurrencyLimitLayer};
 use tower_http::{
@@ -48,87 +49,30 @@ use tower_http::{
 	timeout::{RequestBodyTimeoutLayer, TimeoutError, TimeoutLayer},
 };
 
-use crate::{
-	api::{self, Catalog},
-	booking, conductor, experiments,
-	gate::{self, UserGate},
-	invoices, places, pricing,
-};
+use crate::{api, booking, conductor, experiments, invoices, places, pricing};
 
-/// A part of the sites, as its screens are grouped, and the permission that opens it.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Section {
-	/// Leads, bookings, places, pricing, invoices: the daily work.
-	Work,
-	/// The overview's funnel, experiments.
-	Analysis,
+/// What `/api/v1` is served on: the engine, and the verifier of the conductor's assertion its
+/// gates ask.
+#[derive(Clone)]
+pub(crate) struct App {
+	panel: Panel,
+	verifier: Verifier,
 }
 
-impl Section {
-	fn permission(self) -> &'static str {
-		match self {
-			Self::Work => Work::Read.as_str(),
-			Self::Analysis => Analysis::Read.as_str(),
-		}
+impl FromRef<App> for Panel {
+	fn from_ref(app: &App) -> Self {
+		app.panel.clone()
 	}
 }
 
-/// Who passes an `/api/v1` route's gate.
-#[derive(Clone, Copy, Debug)]
-pub struct Gate {
-	/// `None`: every signed-in user.
-	section: Option<Section>,
-	/// An action's own permission, on top of its section's.
-	action: Option<&'static str>,
-	/// The conductor's own assertion passes too.
-	conductor: bool,
-}
-
-impl Gate {
-	pub(crate) const USER: Self = Self {
-		section: None,
-		action: None,
-		conductor: false,
-	};
-
-	pub(crate) const fn section(section: Section) -> Self {
-		Self {
-			section: Some(section),
-			..Self::USER
-		}
-	}
-
-	pub(crate) fn may(self, action: impl Permission) -> Self {
-		Self {
-			action: Some(action.as_str()),
-			..self
-		}
-	}
-
-	pub(crate) const fn or_conductor(self) -> Self {
-		Self { conductor: true, ..self }
-	}
-
-	pub(crate) fn admits_conductor(&self) -> bool {
-		self.conductor
-	}
-
-	pub(crate) fn admits(&self, permissions: &PermissionSet) -> bool {
-		[self.section.map(Section::permission), self.action]
-			.into_iter()
-			.flatten()
-			.all(|p| permissions.iter().any(|held| held == p))
+impl FromRef<App> for Verifier {
+	fn from_ref(app: &App) -> Self {
+		app.verifier.clone()
 	}
 }
 
-impl Guard for Gate {
-	fn permission(&self) -> Option<String> {
-		self.action.or(self.section.map(Section::permission)).map(str::to_owned)
-	}
-}
-
-/// One `/api/v1` operation, served on the engine's state.
-pub(crate) type ApiRoute = Route<Panel, Gate>;
+/// One `/api/v1` operation.
+pub(crate) type ApiRoute = Route<App, Gate>;
 
 /// Every `/api/v1` route on the engine's state.
 pub(crate) fn api_routes() -> Vec<ApiRoute> {
@@ -188,22 +132,38 @@ const INTERNAL: &str = "/api/internal";
 /// Every path the router mounts for another service to call (`--print-provided-paths`).
 pub const PROVIDED_PATHS: [&str; 1] = [INTERNAL];
 
+/// The `/api/v1` document: every operation of [`api_routes`], each with the permission that
+/// opens it (`x-permission`) and the codes it refuses with (`x-errors`).
+pub fn document() -> ev_lib::api::openapi::OpenApi {
+	ev_lib::api::document(
+		"Service-Arb sites",
+		env!("CARGO_PKG_VERSION"),
+		"/api/v1",
+		&api_routes(),
+		ev_lib::api_docs!(),
+		Some(<crate::views::View as ev_lib::views::Views>::table()),
+	)
+}
+
 pub fn router(sites: Sites, limits: Limits) -> Router {
-	let keys = Arc::new(sites.keys);
-	let v1 = api_routes().into_iter().fold(Router::new(), |routes, r| {
-		let gate = UserGate { keys: keys.clone(), gate: r.guard };
-		routes.merge(Router::new().route(r.path, r.handler()).route_layer(middleware::from_fn_with_state(gate, gate::user)))
-	});
-	let v1 = bounded(v1.with_state(sites.panel.clone()).layer(Extension(Catalog::new())), limits.api_concurrent, limits.api_timeout);
+	let verifier = Verifier::new(sites.keys, Service::Sites);
+	let app = App {
+		panel: sites.panel.clone(),
+		verifier: verifier.clone(),
+	};
+	let v1 = api_routes()
+		.into_iter()
+		.fold(Router::new(), |routes, r| routes.merge(Router::new().route(r.path, r.handler())))
+		// The whole document, to a signed-in user or the conductor's own pull; built at boot.
+		.route("/openapi.json", serve(&document(), Gate::USER.or_conductor()));
+	let v1 = bounded(v1.with_state(app), limits.api_concurrent, limits.api_timeout);
 	let internal_reads = conductor::InternalReads::new();
 	let reads = bounded(
-		conductor::reads(sites.panel.clone(), sites.locale, internal_reads.clone()),
+		conductor::reads(sites.panel.clone(), sites.locale, internal_reads.clone(), verifier.clone()),
 		limits.api_concurrent,
 		limits.api_timeout,
 	);
-	let to_conductor = reads
-		.merge(conductor::changes(sites.panel.clone()))
-		.route_layer(middleware::from_fn_with_state(keys.clone(), gate::conductor));
+	let to_conductor = reads.merge(conductor::changes(sites.panel.clone(), verifier.clone()));
 	let ingest_layers = ServiceBuilder::new()
 		// The only error the layers below raise is the shed: everything else is a response.
 		.layer(HandleErrorLayer::new(|_: BoxError| async { error(StatusCode::SERVICE_UNAVAILABLE, "busy, try again") }))
@@ -214,14 +174,17 @@ pub fn router(sites: Sites, limits: Limits) -> Router {
 	let ingest = Router::new()
 		.route("/api/ingest/v1/events", post(ingest).layer(ingest_layers.clone()))
 		.route("/api/ingest/v1/leads/by-ref/{brand}/{message_ref}", get(lead_by_ref).layer(ingest_layers))
-		.with_state(Ingest { panel: sites.panel.clone(), keys });
+		.with_state(Ingest {
+			panel: sites.panel.clone(),
+			verifier,
+		});
 	let mut app = Router::new()
 		.route("/health", get(|| async { "ok" }))
 		.merge(ingest)
 		.nest(INTERNAL, places::internal().with_state(sites.panel.clone()).layer(Extension(internal_reads)))
 		.merge(booking::hooks(sites.panel, sites.hooks))
 		.nest("/api/v1", v1)
-		.nest("/api/conductor", to_conductor);
+		.merge(to_conductor);
 	if let Some(dir) = sites.mfe {
 		app = app.nest("/mfe", Router::new().fallback_service(ServeDir::new(dir)).layer(middleware::from_fn(mfe_caching)));
 	}
@@ -249,7 +212,26 @@ async fn mfe_caching(req: Request, next: Next) -> Response {
 #[derive(Clone)]
 struct Ingest {
 	panel: Panel,
-	keys: Arc<Keys>,
+	verifier: Verifier,
+}
+
+/// The key the conductor checked the MAC of over `body`, as what it may write. A kind no key is
+/// issued for, or a brand that cannot be one, is refused like a bad assertion.
+fn grant(verifier: &Verifier, parts: &Parts, body: &[u8]) -> Result<KeyGrant, Refusal<Denied>> {
+	let source = verifier.source(parts, body)?;
+	let refuse = |why: String| {
+		tracing::warn!(key_id = source.key_id, why, "a source assertion refused");
+		Refusal::new(Denied::Unauthenticated, why)
+	};
+	if !source.kind.keyed() {
+		return Err(refuse(format!("no key is issued for kind {}", source.kind)));
+	}
+	let brands = source.brands.iter().map(|b| BrandId::parse(b)).collect::<Result<_, _>>().map_err(|e| refuse(e.to_string()))?;
+	Ok(KeyGrant {
+		key_id: source.key_id,
+		kind: source.kind,
+		brands,
+	})
 }
 
 /// At most `concurrent` at once across `routes`, past it `503` rather than a queue; at most
@@ -301,15 +283,16 @@ fn body_error(e: axum::Error) -> Response {
 /// it came, and nothing is read without one.
 async fn ingest(State(ingest): State<Ingest>, req: Request) -> Response {
 	let (parts, body) = req.into_parts();
-	if !gate::asserted(&parts.headers) {
-		return gate::unauthenticated();
+	if !parts.headers.contains_key(sa_auth::HEADER) {
+		return Refusal::new(Denied::Unauthenticated, format!("no {}", sa_auth::HEADER)).into_response();
 	}
 	let body = match to_bytes(body, MAX_BODY).await {
 		Ok(body) => body,
 		Err(e) => return body_error(e),
 	};
-	let Some(grant) = gate::source(&ingest.keys, &parts.headers, &parts.method, parts.uri.path(), &body) else {
-		return gate::unauthenticated();
+	let grant = match grant(&ingest.verifier, &parts, &body) {
+		Ok(grant) => grant,
+		Err(refused) => return refused.into_response(),
 	};
 	let now = jiff::Timestamp::now();
 	match ingest.panel.ingest(&grant, &body, now).await {
@@ -361,9 +344,10 @@ fn ingest_error(e: IngestError, what: &'static str) -> Response {
 
 /// A bot's lookup of the lead a ref names, under its key's assertion over an empty body (the
 /// conductor checked the MAC over the method and the path). Never the customer's name or phone.
-async fn lead_by_ref(State(ingest): State<Ingest>, Path((brand, message_ref)): Path<(String, String)>, req: Request) -> Response {
-	let Some(grant) = gate::source(&ingest.keys, req.headers(), req.method(), req.uri().path(), b"") else {
-		return gate::unauthenticated();
+async fn lead_by_ref(State(ingest): State<Ingest>, Path((brand, message_ref)): Path<(String, String)>, parts: Parts) -> Response {
+	let grant = match grant(&ingest.verifier, &parts, b"") {
+		Ok(grant) => grant,
+		Err(refused) => return refused.into_response(),
 	};
 	match ingest.panel.lead_by_ref(&grant, &brand, &message_ref).await {
 		Ok(Some(lead)) => {
@@ -378,7 +362,7 @@ async fn lead_by_ref(State(ingest): State<Ingest>, Path((brand, message_ref)): P
 				("need", lead.need.map(Value::from)),
 				("locality", lead.locality.map(Value::from)),
 				("quoted_cents", lead.quoted_cents.map(Value::from)),
-				("flow", lead.flow.map(Value::from)),
+				("flow", lead.flow.map(|f| Value::from(f.as_str()))),
 				("messaged_at", lead.messaged_at.map(|t| Value::from(t.to_string()))),
 				("messaged_channel", lead.messaged_channel.map(Value::from)),
 			];

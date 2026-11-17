@@ -5,9 +5,10 @@ use eyre::WrapErr;
 use jiff::Timestamp;
 use panel_core::{
 	event::{Subject, TypeKey},
-	ids::{BrandId, EventId, JobId, LeadId, LocationId},
+	ids::{EventId, JobId, LeadId, LocationId},
 };
 use sa_auth::SourceKind;
+use sa_core::ids::BrandId;
 use serde_json::Value;
 use sqlx::{SqliteConnection, types::Json};
 use uuid::Uuid;
@@ -16,7 +17,8 @@ use super::{from_db, to_db};
 use crate::wire::{Checked, Incoming, check};
 
 /// Where an event stands with the registry.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, schemars::JsonSchema, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Status {
 	Registered,
 	Unregistered,
@@ -32,7 +34,7 @@ impl Status {
 		}
 	}
 
-	fn parse(s: &str) -> eyre::Result<Self> {
+	pub(crate) fn parse(s: &str) -> eyre::Result<Self> {
 		match s {
 			"registered" => Ok(Self::Registered),
 			"unregistered" => Ok(Self::Unregistered),

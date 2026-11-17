@@ -5,7 +5,7 @@
 
 use eyre::WrapErr;
 use jiff::Timestamp;
-use panel_core::ids::BrandId;
+use sa_core::ids::BrandId;
 use serde_json::Value;
 use sqlx::{SqliteConnection, types::Json};
 use uuid::Uuid;
@@ -133,7 +133,7 @@ pub struct ChangeRecord {
 	pub after: Option<Value>,
 }
 
-pub async fn insert_change(conn: &mut SqliteConnection, brand: &BrandId, change: &ChangeRecord, by_user: Option<Uuid>) -> eyre::Result<()> {
+pub async fn insert_change(conn: &mut SqliteConnection, brand: &BrandId, change: &ChangeRecord, by_user: Uuid) -> eyre::Result<()> {
 	sqlx::query(
 		"INSERT INTO pricing_changes (id, brand_id, at, kind, changed_by, changed_by_user, before, after) \
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",

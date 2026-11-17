@@ -38,7 +38,7 @@ export function ClearPricingButton({ item, onCleared }: { item: PricingItem; onC
         toast.error(t("pricing.clear.conflict"));
         return onCleared(outcome.current ?? undefined);
       case "failed":
-        notifyFailure(outcome.error, t);
+        notifyFailure(outcome.failure, t);
         return onCleared();
     }
   };

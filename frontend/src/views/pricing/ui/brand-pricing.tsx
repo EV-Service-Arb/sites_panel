@@ -1,9 +1,10 @@
+import { useResource } from "@evinvest/api/react";
 import { Settled, Skeleton } from "@evinvest/uikit";
 import { useCallback, useState } from "react";
 
-import { type PricingItem, fetchPricing, followsPricing, pricingSavedSince } from "@/entities/pricing";
-import { may, useMe } from "@/entities/session";
-import { useResource } from "@/shared/lib/use-resource";
+import { type PricingItem, pricingSavedSince } from "@/entities/pricing";
+import { useMe } from "@/entities/session";
+import { api } from "@/shared/api";
 import { ErrorState } from "@/shared/ui/error-state";
 
 import { pinFrom } from "../model/pin";
@@ -22,16 +23,21 @@ export function BrandPricing({ brand, today }: { brand: string; today: string })
   const [pinned, setPinned] = useState<PricingItem | null>(null);
   // The pricing the person chose to load: its workspace mounts with focus on the status, not on <body>.
   const [chosen, setChosen] = useState<PricingItem | null>(null);
-  const data = useResource(`pricing:${brand}:${version}`, () => fetchPricing(brand), `pricing:${brand}`, { live: followsPricing(brand) });
+  const data = useResource(api(), "/pricing/{brand}", { params: { path: { brand } } });
+  const { reload } = data;
   const latest = data.status === "ok" ? data.data : null;
   const toPin = pinFrom(pinned, latest, data.fresh);
   if (toPin !== null) setPinned(toPin);
 
   /** After a write: `item` is what the server now holds; without one, read it again and pin that read once it lands. */
-  const written = useCallback((item?: PricingItem) => {
-    setPinned(item ?? null);
-    setVersion((v) => v + 1);
-  }, []);
+  const written = useCallback(
+    (item?: PricingItem) => {
+      setPinned(item ?? null);
+      setVersion((v) => v + 1);
+      reload();
+    },
+    [reload],
+  );
   const takeFresh = useCallback((item: PricingItem, wasChosen: boolean) => {
     setPinned(item);
     setChosen(wasChosen ? item : null);
@@ -41,7 +47,7 @@ export function BrandPricing({ brand, today }: { brand: string; today: string })
     <Settled loading={data.status === "loading"} skeleton={<Skeleton className="h-96 w-full" />}>
       {data.status === "error" && <ErrorState failure={data.failure} onRetry={data.reload} />}
       {latest !== null &&
-        (may(me, "sa:sites:work:pricing:edit") ? (
+        (api().mayCall("put", "/pricing/{brand}", me.permissions) ? (
           <EditWorkspace
             key={pinned?.updated_at ?? "never"}
             base={pinned ?? latest}

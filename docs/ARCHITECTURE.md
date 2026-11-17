@@ -27,7 +27,8 @@ contracts/proto/scope/v1/            banking's ScopeLedger, vendored: the invoic
 crates/panel_contracts/              those protos, generated at build time: prost messages + pbjson
                                      serde (protojson); tonic clients for the ledger
 crates/panel_core/                   no I/O: no database, network, clock or randomness
-  src/ids.rs                         EventId (UUIDv7, ev_lib's Id), brand/location/lead/job ids
+  src/ids.rs                         EventId (UUIDv7, ev_lib's Id), location/lead/job ids; a brand
+                                     is sa_core's BrandId, a refusal sa_core's Invalid
   src/event.rs                       Envelope, TypeKey (type@version), KeyGrant: which kind and
                                      brands a key may write
   src/fact.rs                        the registered types, typed (Fact), and what each needs of
@@ -70,8 +71,8 @@ crates/panel/                        the engine
   src/booking.rs                     operators' slots, the providers' seam (PushSource,
                                      PullSource), matching, the leased pull
   src/invoices.rs                    invoices issued through banking, mirrored, confirmed
-  src/live.rs                        the in-process bus of what changed, published after each
-                                     commit (see "The change feed")
+  src/live.rs                        the in-process bus of the tables each committed write touched
+                                     (see "The change feed")
   src/testing.rs                     (feature `testing`) throwaway SQLite files, batches, the
                                      conductor's assertions under a test key
   migrations/                        the schema: the init (`reporting_*` views and the
@@ -79,11 +80,14 @@ crates/panel/                        the engine
                                      per change, each with its `down`
 crates/panel_server/                 the `sites_panel` binary: CLI and HTTP, thin over `Panel`
   src/http.rs                        the router: what each path takes, its bounds; the /api/v1
-                                     route table (`ev_lib::api::Route`) and each route's `Gate`
-  src/gate.rs                        the conductor's assertion, verified, per kind of route
+                                     route table (`ev_lib::api::Route`, each row's `sa_auth::Gate`)
+                                     and its document; ingest's source assertion
   src/api.rs                         the operator API: JSON over the engine's `operator` module;
-                                     the extractors every route shares; the OpenAPI document
-  src/conductor.rs                   /api/conductor/*: the change feed, the notes, the receipts;
+                                     the refusal codes (`Code`) and the caller (`Caller`)
+  src/views.rs                       where a person can be on the pages (`ev_lib::views`): each
+                                     view's path, query, permission and nav key; the document's
+                                     `x-views`, the front end's `VIEWS`
+  src/conductor.rs                   sa_core::feeds: the change feed, the notes, the receipts;
                                      the fan-out's schedule
   src/places.rs                      a place's settings: the editor's routes, and the sites'
                                      GET /api/internal/…
@@ -99,22 +103,28 @@ crates/panel_server/                 the `sites_panel` binary: CLI and HTTP, thi
   src/settings.rs                    the environment (ev_lib `settings!`)
   src/testing.rs                     (feature `testing`) the router called as the conductor calls it
 crates/panel_gen/                    `nix run .#gen` (ev_lib `ts_gen`), committed, re-run by the
-                                     pre-commit hook: the front end's own mirror of Rust types
-                                     and tables (frontend/**/generated.ts), and the generated
-                                     half of ts/sites-contract (panel_core's shapes and the
-                                     protos as protojson)
+                                     pre-commit hook: /api/v1's openapi.json (and its schema.ts),
+                                     VIEWS, what no wire type says (frontend/**/generated.ts: the
+                                     contact SLA, the booking actions per status), and the
+                                     generated half of ts/sites-contract (panel_core's shapes and
+                                     the protos as protojson)
 ts/sites-contract/                   @evinvest/sites-contract (npm): the contract's one TS form
                                      — what the sites build against, the front end imports by
                                      path; released by an `@evinvest/sites-contract-v*` tag
 sa_auth (the conductor's crate)      the `sa` permissions and the assertion: verified here
+sa_core (the conductor's crate)      what both sides name alike: BrandId and its slug, Invalid, the
+                                     notes' Locale
 frontend/                            the `mfe-sites` bundle: <mfe-sites-panel> (the page, routes
                                      under `base`) and <mfe-sites-nav> (the conductor's Sites
                                      dropdown); `npm run build` → dist/ (PANEL_MFE_DIR); the
                                      element API (attributes, window events, routes) in its README
-  src/app/                           defineElement, the /me gate, the page's routes (a lazy chunk
+  src/app/                           defineElement, the /me gate, a screen per view (a lazy chunk
                                      per screen)
-  src/shared/lib/router.ts           one location for both elements under `base`
-  src/shared/lib/live/               the host's relayed socket (sa:live, sa:live-status)
+  src/shared/api/                    `api()`: @evinvest/api over the committed openapi.json; reads
+                                     follow their `x-sa-reads` over the host's relayed socket
+                                     (ev:live, ev:live-status)
+  src/shared/lib/router.ts           one location for both elements under `base`, read and
+                                     written as VIEWS' views (@evinvest/views)
 ```
 
 ## The contract with the sites
@@ -189,20 +199,22 @@ Conductor                             /api/conductor/*, GET /api/v1/openapi.json
 ```
 
 Anything else on those routes — none, another key, another service, request or body, an
-expired one, another principal — is `401 {"error": "unauthenticated"}`, its reason logged.
-`/api/internal/*`, `/api/hooks/*`, `/mfe/*` and `/health` take none. Each `/api/v1` route sits
-under a section — Work (`sa:sites:work:read`), Analysis (`sa:sites:analysis:read`) — or none
-(`/me`); outside it, `403`. Actions ask their own permission on top (`sa:sites:work:leads:edit`,
-`sa:sites:work:pii:see`, `sa:sites:work:places:edit`, `sa:sites:work:pricing:edit`,
-`sa:sites:work:invoices:create`, `sa:sites:analysis:experiments:edit`), checked by the gate
-with the section's (`http::Gate`). How fresh a permission is, CSRF, and the session are the
-conductor's. `http::api_routes` is the table the router and the document are built from.
+expired one, another principal — is `401 {"code": "unauthenticated", "error": …}`, its reason
+logged. `/api/internal/*`, `/api/hooks/*`, `/mfe/*` and `/health` take none. Each `/api/v1` row
+names the one permission its gate checks (`sa_auth::Gate`, the operation's `x-permission`): a
+read `sa:sites:work:read` or `sa:sites:analysis:read`, a write the action's own
+(`sa:sites:work:leads:edit`, `…:places:edit`, `…:pricing:edit`, `…:invoices:create`,
+`sa:sites:analysis:experiments:edit`), `/me` none; without it, `403 forbidden`.
+`sa:sites:work:pii:see` decides what a lead read shows. How fresh a permission is, CSRF, and the
+session are the conductor's. `http::api_routes` is the table the router and the document are
+built from.
 
 ## The operator API, `/api/v1`
 
 JSON; timestamps RFC 3339, money in minor units (|amount| ≤ 10^10, currency one of EUR,
 USD, GBP, AUD — checked here, not in the registry, so a rebuild never re-judges old events),
-errors `{"error": "…"}` with 400 / 403 / 404 / 409 / 503. Writes journal an event of kind
+refusals `{code, error}`: `code` one of the operation's `x-errors` (its gate's, its extractors'
+and `api::Code`, one status per word), `error` for a person. Writes journal an event of kind
 `panel` (manual), so they go through the same registry and projections as ingest.
 
 `POST /leads`, `…/stage` and `…/payments` take an optional `Idempotency-Key` header (1–128
@@ -214,13 +226,14 @@ every request is a new event (`201`).
 What each operation takes and answers, and why it refuses, is its handler's: its signature is
 the schema and its `///` the description of `GET /openapi.json`, the OpenAPI document built at
 boot from `http::api_routes` (`ev_lib::api`), each operation's `x-permission` the permission that
-opens it. The conductor pulls it under its own assertion (`ETag`, 304 to `If-None-Match`). An id
+opens it and `x-errors` the codes it refuses with. It is served beside the table, not in it
+(`ev_lib::api::serve`, to a user or the conductor's own assertion, `ETag`, 304 to
+`If-None-Match`). An id
 in a path that is not one names nothing: 404. The operations, held to the table by
 `tests/operations.rs`:
 
 ```text
 GET    /me
-GET    /openapi.json
 GET    /leads
 POST   /leads
 GET    /leads/counts
@@ -231,6 +244,8 @@ POST   /leads/{brand}/{lead}/calls/{attempt}/outcome
 POST   /leads/{brand}/{lead}/booking/status
 GET    /bookings/unmatched
 POST   /bookings/{id}/attach
+POST   /bookings/google_calendar/{brand}/consent
+GET    /bookings/google_calendar/callback
 GET    /funnel
 GET    /places
 POST   /places
@@ -244,6 +259,7 @@ GET    /gmbs
 GET    /pricing
 GET    /pricing/{brand}
 PUT    /pricing/{brand}
+PUT    /pricing/{brand}/locales
 DELETE /pricing/{brand}
 POST   /pricing/{brand}/preview
 GET    /pricing/{brand}/changes
@@ -302,8 +318,8 @@ a suspect lead that is called and won is still one the antispam doubted.
 
 Where it shows: `leads.suspect` (`TEXT`, NULL or one of the two words by CHECK), recomputed
 like every column of the row, so the rebuild restores it from the journal; `suspect` on
-`Lead` in `/api/v1` and the `suspect=only|exclude` filter of `GET /leads`; a `changed{topic:
-leads}` like any new lead. `reporting_leads` carries the column; `reporting_funnel_daily`
+`Lead` in `/api/v1` and the `suspect=only|exclude` filter of `GET /leads`; told on the change
+feed like any new lead. `reporting_leads` carries the column; `reporting_funnel_daily`
 still counts a suspect lead in `leads` and every stage it reaches, and counts it apart in
 `suspect`, so a report that wants them out subtracts. A note tells of one under `new_lead`,
 headed as suspect with its reason and with the usual buttons, and none reminds of it past the
@@ -381,39 +397,26 @@ The conductor's one live socket per screen is told when what it read may have ch
 comes from here, the data always from `/api/v1` under its checks.
 
 ```text
-GET /api/conductor/changes     application/x-ndjson, open until the process stops
-  {"type":"resync"}            first on every connection, after a rebuild in the serving
-                               process, and when the reader fell 1024 behind
-  {"type":"changed","topic","brand_id"?,"id"?,"at","permission"}   after each commit
+GET sa_core::feeds::CHANGES    application/x-ndjson of sa_core::feeds::Line, open until the
+                               process stops (sa_core::feeds::changes)
+  {"type":"resync"}            first on every connection, and when the reader fell 1024 behind
+  {"type":"changed","topic"}   sites.<table>: a table a committed write touched
   {"type":"ping"}              every 25 s: a quiet feed is told from a dead one
 ```
 
-| `topic` | when | `brand_id` | `id` | `permission` |
-| --- | --- | --- | --- | --- |
-| `leads` | a lead came in (`lead.created`: ingest, or typed in) | its brand | the lead | `sa:sites:work:read` |
-| `lead` | a stage, a call, a payment of one lead (the API or a Telegram button) | its brand | the lead | `sa:sites:work:read` |
-| `places` | a place's settings set, reverted, withdrawn, restored, or the place registered | its brand | the slug | `sa:sites:work:read` |
-| `pricing` | a brand's pricing saved or removed, or its locales set | its brand | — | `sa:sites:work:read` |
-| `experiments` | a landing's declaration, or an admin's change | its brand | the key (a change) | `sa:sites:analysis:read` |
-| `bookings` | a provider's booking without a lead came, changed, or was attached | its brand | — | `sa:sites:work:read` |
-| `invoices` | an invoice stored, read from banking (changed), dropped on a refusal, or paid / cancelled / expired by the confirmation | — | the invoice (one row); — (a confirmation page) | `sa:sites:work:read` |
-
-A booking event tells `lead` for every lead it changed — a provider's booking attached
-elsewhere tells the lead it left and the one it joined. `at` is when the write committed.
-
-- **`permission` is the read's.** `panel::live::Change::permission` is the section that reads
-  the topic, for every brand; the conductor tells a socket whose caller holds it.
-- **Published after the commit, from the engine, in one place per kind of write.** Every
-  event that reaches the projections passes through `Panel::journal`, which publishes once
-  its transaction has committed — ingest, the operator API and an admin's experiment changes
-  alike, so none of them can forget to. A duplicate, a refused event or an unregistered type
-  changed no read and says nothing. Outside the journal: a place's change (`place.rs`, after
-  its transaction), a brand's pricing (`pricing.rs`, the same), the invoices (`invoices.rs`,
-  after each commit that changed a row). A write that changes nothing publishes nothing.
+- **A topic is a table.** The store's pool (`ev_lib::sqlite::pool`) tells each table a
+  committed write touched, once its connection goes back to the pool, whoever wrote it: ingest,
+  the operator API, an admin, the booking pull, the invoices' confirmation, the fan-out, a
+  migration. A rolled-back write tells nothing; a write found at prepare is told even when it
+  matched no row. Every `/api/v1` GET answers `x-sa-reads: <its tables>`, so a screen re-reads
+  only what a change may have touched. No topic names a brand, a row or a permission: the
+  conductor tells every signed-in socket, and the data stays behind `/api/v1`'s checks.
+- **Background passes write only what is due** (the fan-out's prune looks first, the invoices'
+  cursor is written when it moved), so a quiet panel is a quiet feed.
 - **The bus is in-process** (`tokio::sync::broadcast`, one pod). Publishing never waits and
-  never fails a write. A command run in another process (`sites_panel place set`) is not on the
-  feed: the screens find it at their next read.
-- **Shutdown** ends the feed first (`Signal::GoingAway`): an open response would hold the
+  never fails a write. A command run in another process (`sites_panel rebuild-projections`) is
+  not on the feed: the screens find it at their next read.
+- **Shutdown** ends the feed first (`Bus::going_away`): an open response would hold the
   graceful shutdown forever.
 - **Not told:** time passing. A lead becomes overdue (`sla`) with no write; the screens keep
   their own clock for it.
@@ -448,16 +451,17 @@ GET /api/conductor/notifications?after=<seq>&limit=<1..500>
   is markup, no link is made of it, and no line of it can read as one of ours ("Взял: …").
   Both are sealed under `PANEL_DATA_KEY`, the rule and the event bound.
 - **`skip_user`**: whoever typed the lead in, or set or closed the slot, knows of it already.
-- **Buttons** (lead notes): `{id, label, pressed, call: {method, path, body}, leaves}`. "Взял"
-  is `POST /api/v1/leads/{brand}/{lead}/stage {stage: contacted}`, "Не дозвонился" `POST
-  …/no_answer`; the conductor makes the call as the user who pressed, with `Idempotency-Key:
+- **Buttons** (lead notes): `{id, label, pressed, call: {operation, path, body}, leaves}`, the
+  operation by its id in the table (`op_id`) and the path by its parameters (`{brand, lead}`).
+  "Взял" is `move_lead {stage: contacted}`, "Не дозвонился" `no_answer`; the conductor resolves
+  the operation in its catalog and calls it as the user who pressed, with `Idempotency-Key:
   tg/<its outbox id>/<button id>`, so a press repeated records nothing twice. Labels in
   `TELEGRAM_LOCALE` (`ru`, `en`).
 
 ### Each key's last receipt
 
-`GET /api/conductor/internal-reads` → `{since: <boot, RFC 3339>, reads: {<brand>: {locations?, pricing?,
-experiments?: <RFC 3339>}}}`: the last `/api/internal` read per brand and endpoint, kept in memory
+`GET /api/conductor/internal-reads` → `sa_core::feeds::InternalReads` (`{since, reads: {<brand>:
+{locations, pricing, experiments}}}`, null for one not read since): the last `/api/internal` read per brand and endpoint, kept in memory
 only (`conductor::InternalReads`, nothing written on the read path, so it restarts empty; `since`
 says from when). At most 256 brands: past that a new brand is not recorded and none is evicted, so
 an unauthenticated caller cannot push the real ones out. The router mounts `/api/internal` from
@@ -509,11 +513,9 @@ and restore, a hand registration, its GMB link, and `GET /gmbs`.
   speaks, which the panel does not know.
 - **A change is one write transaction**: the current settings read under the write lock,
   `expected_updated_at` compared, the new ones written, the change journaled
-  (`place_changes`: before, after, who — the user's email and id, or `cli` — and
+  (`place_changes`: before, after, who — the user's email and id — and
   when). `updated_at` only grows, a microsecond at least per change, so two edits never share
   a token. A change that changes nothing writes nothing.
-- **The CLI** (`sites_panel place set|show|history|revert|withdraw|restore`) goes through the same
-  calls, `by = cli`, patching over what is there when its transaction begins.
 - **History is append-only, places never deleted**: triggers refuse any UPDATE or DELETE of
   `place_changes`, a DELETE of `places` or `place_settings` (cleared is `{}`), and any UPDATE
   of `places` but `withdrawn` and `gmb_id`.
@@ -531,9 +533,9 @@ intermediate product rounded half up to the cent, the total to `roundToCents`, t
 
 - **A brand's locales.** Every input's and option's label must be in each locale the brand's
   sites speak, or a site refuses the whole model; the panel refuses to save one
-  (`labelMissing`, `contracts/vectors/pricing/locales.json`). The locales are `fr,en` unless set by `sites_panel pricing locales <brand>
-  fr,en` (`brand_locales`); a model saved before a locale was added is kept for the editor but
-  not served (`{}`) until saved with the labels.
+  (`labelMissing`, `contracts/vectors/pricing/locales.json`). The locales are `fr,en` unless set
+  (`PUT /api/v1/pricing/{brand}/locales`, `brand_locales`); a model saved before a locale was
+  added is kept for the editor but not served (`{}`) until saved with the labels.
 - **Problems.** A refusal names the first problem by its path from the model's root and its
   code (`PRICING_CODES`): `needs.standard.inputs[2]` `noInput`, `inputs[0].options[1].labels.en`
   `labelMissing`. JSON objects are read sorted here and in insertion order in TS, so with
@@ -549,7 +551,7 @@ GET    /api/internal/brands/{brand}/pricing?locale   no assertion; with the loca
 
 Under `/api/v1` (Work, saving and removing `sa:sites:work:pricing:edit`): every brand's
 pricing, one brand's, its changes, a save or a removal (`expected_updated_at` checked: 409
-`stale` with the current one), and the preview of a draft.
+`stale`, the editor reads the brand again), and the preview of a draft.
 
 - **A change is one write transaction**, as a place's: the current model and the brand's
   locales read under the write lock, `expected_updated_at` compared, the model checked and
@@ -557,8 +559,6 @@ pricing, one brand's, its changes, a save or a removal (`expected_updated_at` ch
   A removal keeps the row with `model` NULL and its own `updated_at`, which the next save names;
   `updated_at` only grows, a microsecond at least per change. Saving the model there is, or
   removing none, writes nothing and tells nobody.
-- **The CLI**: `sites_panel pricing show|history|set <brand> <file|->|remove|locales`, `by = cli`,
-  over whatever is there when its transaction begins.
 - **Append-only**: triggers refuse any UPDATE or DELETE of `pricing_changes` and a DELETE of
   `pricing`.
 
@@ -754,8 +754,8 @@ the `phone` / `email` of the creation PII of the brand's leads created from 14 d
 booking to 10 minutes after; one lead → `contact`, none or several → unmatched. The leads' PII
 is opened under `PANEL_DATA_KEY` only to compare.
 
-**google_calendar, pulled** (`panel_server::google_calendar`). Every minute, each brand with a
-refresh token whose sync is due (`GOOGLE_CALENDAR_SYNC_MINUTES`, 5): the refresh token → an
+**google_calendar, pulled** (`panel_server::google_calendar`). Every minute, each brand whose
+owner consented and whose sync is due (`GOOGLE_CALENDAR_SYNC_MINUTES`, 5): the refresh token → an
 access token (`oauth2.googleapis.com/token`, cached until a minute before it expires) →
 `GET www.googleapis.com/calendar/v3/calendars/{id}/events?singleEvents=true&showDeleted=true`,
 first `timeMin` = now − 7 days, then `syncToken`; pages followed (≤ 40 of 250); 410 → full
@@ -767,14 +767,16 @@ description — "Booked by" / "Réservé par", a schedule link, or a phone label
 beside) its label. Version: the event's `etag`; moved: the same id with a new start; a
 `cancelled` item is passed on by id (a sync gives its id alone).
 
-**Secrets and CLI.** `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` (one client,
-Desktop kind; both or neither), `GOOGLE_CALENDAR_REFRESH_TOKEN_<BRAND>` (secret, scope
-`calendar.events.readonly`) and `GOOGLE_CALENDAR_ID_<BRAND>` (optional, `primary`); a brand
-without a token is not pulled; a token without the client fails the boot. `sites_panel booking
-google-authorize <brand> [--port 8765]`: prints Google's consent URL (offline, prompt=consent,
-PKCE, state), waits on `127.0.0.1:<port>` for the redirect, prints
-`GOOGLE_CALENDAR_REFRESH_TOKEN_<BRAND>=…` once, for add-secrets. `sites_panel booking google-sync
-<brand> [--full]`: one pull now.
+**Consent, from the editor.** `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` (one
+client, Web kind) and `GOOGLE_OAUTH_REDIRECT_URI` (the conductor's path to the callback, as the
+client registers it), all three or none. `POST /api/v1/bookings/google_calendar/{brand}/consent`
+(`sa:sites:work:places:edit`, `{calendar_id?, return_to}`) answers Google's consent URL
+(offline, prompt=consent, PKCE, a state kept in memory 10 minutes; `return_to` on the redirect's
+origin); Google sends the owner to `GET …/callback?state&code`, which trades the code for the
+refresh token, keeps it sealed (`google_calendars`: the calendar, `primary` unless named, the
+token under `PANEL_DATA_KEY` with the brand as associated data, the key's fingerprint, who and
+when), and answers a page that goes on to `return_to`. A new consent replaces the brand's; scope
+`calendar.events.readonly`.
 
 **API** (`/api/v1`, Work, writes `sa:sites:work:leads:edit`): a lead's slot set or cleared by
 hand and its end, the providers' unmatched bookings and a hand attach; `GET /leads?booking=`
@@ -846,9 +848,11 @@ filters by where the booking stands; `Lead.booking` is the lead's booking folded
   the build is let be: that is a rollback onto a schema moved on. Timestamps are INTEGER
   microseconds since the epoch, days `YYYY-MM-DD` text, UUIDs 16-byte blobs, JSON text that
   must parse.
-- **Secrets come from the environment only** (`PANEL_DATA_KEY`, `SENTRY_DSN`,
-  `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_CALENDAR_REFRESH_TOKEN_<BRAND>`), through
-  `ev_lib::settings`; with `APP_ENV=production`, `PANEL_DB_PATH`, `PANEL_DATA_KEY` and
+- **Secrets come from the environment, or through the API and sealed at once.** The process's
+  own (`PANEL_DATA_KEY`, `SENTRY_DSN`, `GOOGLE_OAUTH_CLIENT_SECRET`) through `ev_lib::settings`;
+  a brand's Google Calendar refresh token through its owner's consent, sealed
+  (XChaCha20-Poly1305 under `PANEL_DATA_KEY`, the brand as associated data, the key's
+  fingerprint beside it) before it is stored, and opened only by the pull. With `APP_ENV=production`, `PANEL_DB_PATH`, `PANEL_DATA_KEY` and
   `PANEL_ASSERTION_KEYS` are required at boot (`sites_panel --print-required-vars` lists them).
 
 ## Deploy requirements

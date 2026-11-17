@@ -35,10 +35,11 @@
         # `@evinvest/sites-contract`'s — committed.
         gen = pkgs.writeShellApplication {
           name = "gen";
-          runtimeInputs = [ rust pkgs.git ];
+          runtimeInputs = [ rust pkgs.git pkgs.nodejs ];
           text = ''
             cd "$(git rev-parse --show-toplevel)"
-            exec cargo run -q -p panel_gen "$@"
+            cargo run -q -p panel_gen "$@"
+            cd frontend && npm run -s gen:api
           '';
         };
 
@@ -51,7 +52,7 @@
               generated = {
                 enable = true;
                 name = "regenerate derived files";
-                entry = "bash -c '${gen}/bin/gen && git add -A frontend/src/entities/lead/model/generated.ts frontend/src/shared/config/generated.ts frontend/src/shared/api/generated.ts ts/sites-contract/src/generated'";
+                entry = "bash -c '${gen}/bin/gen && git add -A frontend/src/entities/lead/model/generated.ts frontend/src/shared/api/hop.generated.ts frontend/src/shared/api/openapi.json frontend/src/shared/api/schema.ts frontend/src/shared/lib/views.generated.ts ts/sites-contract/src/generated'";
                 pass_filenames = false;
                 require_serial = true;
               };
@@ -133,7 +134,7 @@
               && (under "frontend" || under "ts/sites-contract/src" || (type == "directory" && builtins.elem rel [ "ts" "ts/sites-contract" ]));
           };
           sourceRoot = "source/frontend";
-          npmDepsHash = "sha256-j+Ggy09/vwhIzGnJCTLfDb3v+MmYEDs+WE4XhNJqFgs=";
+          npmDepsHash = "sha256-AD16fqXfI5eJ7sxoAGv2i5AFrR6RB30zy/nqKaf9lfM=";
           installPhase = ''
             runHook preInstall
             cp -r dist "$out"
@@ -159,18 +160,15 @@
             "PANEL_DATA_KEY"
             "SENTRY_DSN"
             "GOOGLE_OAUTH_CLIENT_SECRET"
-            "GOOGLE_CALENDAR_REFRESH_TOKEN_AQUAFIX"
-            "GOOGLE_CALENDAR_REFRESH_TOKEN_VIFNET"
           ];
           # PANEL_ASSERTION_KEYS: the conductor's public keys (not secret), `<kid>:<base64>`, comma-separated.
           # POSTHOG_PROJECT_API_KEY (phc_, public like the landings', not a secret; + POSTHOG_HOST):
           # serve sends the leads' life to PostHog; unset, nothing is sent (serve warns).
           # POSTHOG_PROJECT_ID (+ POSTHOG_APP_HOST): the experiments link to their funnels in
           # PostHog; unset, no links. Links are opened by the browser: no egress for them.
-          # Google Calendar booking pull (docs/ARCHITECTURE.md, Booking): the OAuth client both or
-          # neither; a brand's calendar is pulled only with its refresh token
-          # (`sites_panel booking google-authorize <brand>` makes one); its calendar id defaults to
-          # `primary`. A token without the client fails the boot.
+          # Google Calendar booking pull (docs/ARCHITECTURE.md, Booking): the OAuth client (Web kind)
+          # and its redirect, all three or none; a brand's calendar is pulled once its owner
+          # consented from the editor (the token is kept sealed in the database).
           # SCOPE_LEDGER_* (docs/ARCHITECTURE.md, Invoices): banking's ScopeLedger over mTLS, the
           # address and the three *_PEM_FILE paths all or none; unset, /api/v1/invoices answers
           # 503. The *_PEM_FILE values are literal paths (`/etc/settings/<VAR>`) to files mounted
@@ -184,11 +182,8 @@
             "POSTHOG_APP_HOST"
             "GOOGLE_OAUTH_CLIENT_ID"
             "GOOGLE_OAUTH_CLIENT_SECRET"
+            "GOOGLE_OAUTH_REDIRECT_URI"
             "GOOGLE_CALENDAR_SYNC_MINUTES"
-            "GOOGLE_CALENDAR_REFRESH_TOKEN_AQUAFIX"
-            "GOOGLE_CALENDAR_ID_AQUAFIX"
-            "GOOGLE_CALENDAR_REFRESH_TOKEN_VIFNET"
-            "GOOGLE_CALENDAR_ID_VIFNET"
             "SCOPE_LEDGER_ADDR"
             "SCOPE_LEDGER_TLS_CA_PEM_FILE"
             "SCOPE_LEDGER_TLS_CERT_PEM_FILE"
@@ -215,7 +210,7 @@
             # a source that gets a 5xx retries from its outbox; nothing is lost while down
             criticality = "normal";
             entrypoint = [ "${bin}/bin/${pname}" "serve" "--bind" "0.0.0.0:${toString port}" ];
-            # /bin/sites_panel, for `kubectl exec … sites_panel place set` and the like
+            # /bin/sites_panel, for `kubectl exec … sites_panel rebuild-projections` and the like
             contents = [ bin ];
             # the production guards (`#[required_in("production")]`) are armed wherever it runs
             # PostHog: the project the landings send to (Cloud US 614067, their
@@ -344,7 +339,6 @@
 
             env = {
               PANEL_BIND = "127.0.0.1:${toString SA_PORTS}";
-              STUB_PORT = toString (SA_PORTS + 3); # frontend/'s `npm run dev`
               RUST_BACKTRACE = 1;
               RUST_LIB_BACKTRACE = 0;
             };

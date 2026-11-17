@@ -15,6 +15,7 @@ testing = []
 [dependencies]
 base64.workspace = true
 chacha20poly1305.workspace = true
+ev_lib = { workspace = true, features = ["sqlite"] }
 eyre.workspace = true
 getrandom.workspace = true
 hex.workspace = true
@@ -24,6 +25,7 @@ panel_contracts.workspace = true
 panel_core.workspace = true
 sa_alerts.workspace = true
 sa_auth.workspace = true
+sa_core.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true

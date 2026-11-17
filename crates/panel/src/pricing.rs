@@ -1,15 +1,15 @@
 //! A brand's pricing, as the panel's editor and the CLI change it and the sites read it
 //! (`panel_core::pricing`). Every change is one write transaction: the current model and the
 //! brand's locales read, the caller's view checked, the new model checked against those locales,
-//! written and journaled; then the live topic `pricing`.
+//! written and journaled.
 
 use eyre::WrapErr;
 use jiff::Timestamp;
 use panel_core::{
-	ids::BrandId,
 	place::Editor,
-	pricing::{self, PricingInputs, PricingModel, Problem},
+	pricing::{self, ModelPart, PricingInputs, PricingModel, Problem},
 };
+use sa_core::ids::BrandId;
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -48,9 +48,12 @@ pub struct PricingChange {
 	pub needs: Option<usize>,
 	/// The model the change left; `None` for a removal.
 	pub model: Option<Value>,
+	/// What it changed of the model before it; `None` for a first save or a side removed.
+	pub changed: Option<Vec<ModelPart>>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, schemars::JsonSchema, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ChangeKind {
 	Set,
 	Remove,
@@ -72,9 +75,9 @@ impl ChangeKind {
 /// Why a change to a brand's pricing was not made.
 #[derive(Debug, thiserror::Error)]
 pub enum PricingError {
-	/// The pricing changed since the editor read it; what it is now.
+	/// The pricing changed since the editor read it.
 	#[error("the pricing changed since it was read")]
-	Stale(Box<PricingView>),
+	Stale,
 	/// Every reason the model is not one the brand's sites can show (never empty).
 	#[error("invalid pricing model: {0:?}")]
 	Invalid(Vec<Problem>),
@@ -93,15 +96,6 @@ fn view(brand: &BrandId, s: StoredPricing) -> PricingView {
 		model,
 		updated_at,
 		updated_by,
-	}
-}
-
-fn pricing_changed(brand: &BrandId, at: Timestamp) -> crate::live::Change {
-	crate::live::Change {
-		topic: crate::live::Topic::Pricing,
-		brand: Some(brand.clone()),
-		id: None,
-		at,
 	}
 }
 
@@ -158,6 +152,7 @@ impl Panel {
 					kind,
 					valid_from: after.and_then(|m| m.get("validFrom")).and_then(Value::as_str).map(str::to_owned),
 					needs: after.and_then(|m| m.get("needs")).and_then(Value::as_object).map(serde_json::Map::len),
+					changed: c.before.as_ref().zip(after).map(|(before, after)| ModelPart::changed(before, after)),
 					model: c.after,
 				})
 			})
@@ -196,7 +191,7 @@ impl Panel {
 		if let Expected::At(seen) = expected
 			&& seen.map(micros).transpose()? != current.updated_at
 		{
-			return Err(PricingError::Stale(Box::new(current)));
+			return Err(PricingError::Stale);
 		}
 		let after = to(&current)?;
 		if after == current.model {
@@ -214,15 +209,14 @@ impl Panel {
 			id: new_change_id(now),
 			at,
 			kind: kind.as_str().to_owned(),
-			by: editor.label().to_owned(),
+			by: editor.label.as_str().to_owned(),
 			before: current.model,
 			after,
 		};
-		stored::insert_change(&mut tx, brand, &change, editor.user_id()).await?;
+		stored::insert_change(&mut tx, brand, &change, editor.id).await?;
 		let saved = view(brand, stored::pricing(&mut tx, brand).await?);
 		tx.commit().await.wrap_err("committing a brand's pricing")?;
-		tracing::info!(by = editor.label(), %brand, kind = kind.as_str(), "pricing changed");
-		self.live.changed(pricing_changed(brand, at));
+		tracing::info!(by = editor.label.as_str(), %brand, kind = kind.as_str(), "pricing changed");
 		Ok(saved)
 	}
 
@@ -239,8 +233,7 @@ impl Panel {
 		stored::set_locales(&mut tx, brand, locales, now, by(editor)).await?;
 		let saved = view(brand, stored::pricing(&mut tx, brand).await?);
 		tx.commit().await.wrap_err("committing a brand's locales")?;
-		tracing::info!(by = editor.label(), %brand, locales = locales.join(","), "brand locales changed");
-		self.live.changed(pricing_changed(brand, now));
+		tracing::info!(by = editor.label.as_str(), %brand, locales = locales.join(","), "brand locales changed");
 		Ok(saved)
 	}
 }

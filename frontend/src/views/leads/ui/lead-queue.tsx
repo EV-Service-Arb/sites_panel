@@ -1,8 +1,9 @@
 import { Button, Card, CardContent, Settled, Skeleton } from "@evinvest/uikit";
 import type { ReactNode } from "react";
 
-import { type LeadFilter, type LeadRef, encodeRef, refOf } from "@/entities/lead";
+import { type LeadFilter, type LeadRef, refOf } from "@/entities/lead";
 import { useT } from "@/shared/i18n";
+import type { Gmbs } from "@/shared/lib/gmbs";
 import { DESKTOP_QUERY, useMediaQuery } from "@/shared/lib/use-media-query";
 import { ErrorState } from "@/shared/ui/error-state";
 import { notifyFailure } from "@/shared/ui/notify";
@@ -15,6 +16,7 @@ import { NewLeadsBanner } from "./new-leads-banner";
 
 export interface LeadQueueProps {
   filter: LeadFilter;
+  gmbs: Gmbs;
   /** Bumped by the person's own writes: the queue re-reads at once. */
   version: number;
   /** The lead open in the card, marked in the queue. */
@@ -25,16 +27,16 @@ export interface LeadQueueProps {
 }
 
 /** The queue itself: a table on desktop, a list on a phone, both in one card; arrivals float over it in a banner. */
-export function LeadQueue({ filter, version, selected, onOpen, empty }: LeadQueueProps) {
+export function LeadQueue({ filter, gmbs, version, selected, onOpen, empty }: LeadQueueProps) {
   const t = useT();
   const button = useButtonSize();
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
-  const { list, loadMore, reload, pending, showPending, flash } = useLeadList(filter, version);
+  const { list, loadMore, reload, pending, showPending, flash } = useLeadList(filter, gmbs, version);
 
   const leads = list.status === "ok" ? list.leads : [];
   const open = (lead: (typeof leads)[number]) => onOpen(refOf(lead));
   // Same shape as `leadKey`: brand and lead id.
-  const selectedKey = selected ? encodeRef(selected) : null;
+  const selectedKey = selected ? `${selected.brand}/${selected.lead}` : null;
   return (
     <Settled loading={list.status === "loading"} skeleton={<Skeleton className="h-64 w-full" />} className="flex flex-col gap-4">
       <NewLeadsBanner count={pending.length} suspect={pending.filter((l) => l.suspect !== null).length} onShow={showPending} />
@@ -48,7 +50,7 @@ export function LeadQueue({ filter, version, selected, onOpen, empty }: LeadQueu
         </Card>
       )}
       {list.status === "ok" && list.cursor && (
-        <Button variant="outline" size={button()} className="self-center" disabled={list.more} onClick={() => loadMore().catch((e: unknown) => notifyFailure(e, t))}>
+        <Button variant="outline" size={button()} className="self-center" disabled={list.more} onClick={() => void loadMore().then((refused) => refused && notifyFailure(refused, t))}>
           {t("leads.more")}
         </Button>
       )}

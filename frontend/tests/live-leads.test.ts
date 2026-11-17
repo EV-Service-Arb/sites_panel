@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Lead } from "@/entities/lead";
-import { NO_BOOKING } from "@/entities/lead/model/booking";
+import { NO_BOOKING } from "./fixtures";
 import { nextKnown, updatedElsewhere } from "@/views/leads/model/card-updates";
 import { addWaiting, applyUpdates, arrivals, leadKey, leftFilter, pendingOf, reveal } from "@/views/leads/model/live-merge";
 import { flashAttr } from "@/views/leads/ui/flash";

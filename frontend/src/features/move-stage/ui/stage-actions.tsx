@@ -1,12 +1,13 @@
 import { Button, toast } from "@evinvest/uikit";
 import { useState } from "react";
 
-import { type Lead, type StageMove, moveLead, refOf } from "@/entities/lead";
+import { type Lead, MOVES, type StageMove, refOf } from "@/entities/lead";
+import { api } from "@/shared/api";
 import { useT } from "@/shared/i18n";
 import { notifyFailure } from "@/shared/ui/notify";
 import { useButtonSize } from "@/shared/ui/touch";
 
-import { MOVES, type MoveKind } from "../model/moves";
+import { type MoveKind } from "../model/moves";
 import { LostForm } from "./lost-form";
 import { QuoteForm } from "./quote-form";
 
@@ -24,16 +25,12 @@ export function StageActions({ lead, onMoved }: { lead: Lead; onMoved: () => voi
 
   const save = async (move: StageMove) => {
     setBusy(true);
-    try {
-      await moveLead(refOf(lead), move);
-      toast.positive(t("move.saved"));
-      setOpen(null);
-      onMoved();
-    } catch (e) {
-      notifyFailure(e, t);
-    } finally {
-      setBusy(false);
-    }
+    const { error } = await api().POST("/leads/{brand}/{lead}/stage", { params: { path: refOf(lead) }, body: move });
+    setBusy(false);
+    if (error !== undefined) return notifyFailure(error, t);
+    toast.positive(t("move.saved"));
+    setOpen(null);
+    onMoved();
   };
 
   const tap = (kind: MoveKind) => {

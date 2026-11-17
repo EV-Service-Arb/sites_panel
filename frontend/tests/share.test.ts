@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { biggestLoss, type FunnelStep } from "@/entities/funnel/model/funnel";
+import { biggestLoss } from "@/entities/funnel/model/funnel";
+import type { FunnelStep } from "@/shared/api/schema";
 import { translator } from "@/shared/i18n/translate";
 import { type Share, formatShare } from "@/shared/lib/share";
 

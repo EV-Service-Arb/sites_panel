@@ -13,7 +13,8 @@ import {
   toast,
 } from "@evinvest/uikit";
 
-import { type PlaceSettingsView, setPlaceWithdrawn } from "@/entities/place";
+import type { PlaceSettingsView } from "@/entities/place";
+import { api } from "@/shared/api";
 import { useT } from "@/shared/i18n";
 import { notifyFailure } from "@/shared/ui/notify";
 import { useButtonSize } from "@/shared/ui/touch";
@@ -27,13 +28,11 @@ export function WithdrawButton({ place, onChanged }: { place: PlaceSettingsView;
   const button = useButtonSize();
   const action = place.withdrawn ? "restore" : "withdraw";
   const run = async () => {
-    try {
-      const view = await setPlaceWithdrawn(place, !place.withdrawn);
-      toast.positive(t(`placeSettings.${action}.done`));
-      onChanged(view);
-    } catch (e) {
-      notifyFailure(e, t);
-    }
+    const init = { params: { path: { brand: place.brand, slug: place.slug } } };
+    const { data, error } = place.withdrawn ? await api().POST("/places/{brand}/{slug}/restore", init) : await api().POST("/places/{brand}/{slug}/withdraw", init);
+    if (error !== undefined) return notifyFailure(error, t);
+    toast.positive(t(`placeSettings.${action}.done`));
+    onChanged(data);
   };
   return (
     <AlertDialog>

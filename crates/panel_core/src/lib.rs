@@ -33,14 +33,72 @@ macro_rules! vocabulary {
 				}
 			}
 
-			pub fn parse(raw: &str) -> Result<Self, $crate::Invalid> {
-				Self::ALL.into_iter().find(|v| v.as_str() == raw).ok_or_else(|| $crate::Invalid::new($refused))
+			pub fn parse(raw: &str) -> Result<Self, ::sa_core::Invalid> {
+				Self::ALL.into_iter().find(|v| v.as_str() == raw).ok_or_else(|| ::sa_core::Invalid::new($refused))
 			}
 		}
 
 		impl std::fmt::Display for $ty {
 			fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 				f.write_str(self.as_str())
+			}
+		}
+	};
+}
+
+/// A string one rule admits: `parse` is the rule, and serde and the schema's `pattern` go through
+/// it, so a value of the type is one the rule took.
+macro_rules! checked_str {
+	($(#[$doc:meta])* pub struct $name:ident, pattern = $pattern:expr, example = $example:literal, refused = $refused:literal, |$s:ident| $rule:expr) => {
+		$(#[$doc])*
+		#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Deserialize, serde::Serialize)]
+		#[serde(try_from = "String", into = "String")]
+		pub struct $name(String);
+
+		impl $name {
+			pub fn parse(raw: &str) -> Result<Self, ::sa_core::Invalid> {
+				let $s = raw;
+				if $rule { Ok(Self(raw.to_owned())) } else { Err(::sa_core::Invalid::new($refused)) }
+			}
+
+			pub fn as_str(&self) -> &str {
+				&self.0
+			}
+		}
+
+		impl TryFrom<String> for $name {
+			type Error = ::sa_core::Invalid;
+
+			fn try_from(raw: String) -> Result<Self, ::sa_core::Invalid> {
+				Self::parse(&raw)
+			}
+		}
+
+		impl From<$name> for String {
+			fn from(v: $name) -> Self {
+				v.0
+			}
+		}
+
+		impl std::borrow::Borrow<str> for $name {
+			fn borrow(&self) -> &str {
+				&self.0
+			}
+		}
+
+		impl std::fmt::Display for $name {
+			fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+				f.write_str(&self.0)
+			}
+		}
+
+		impl schemars::JsonSchema for $name {
+			fn schema_name() -> std::borrow::Cow<'static, str> {
+				stringify!($name).into()
+			}
+
+			fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+				schemars::json_schema!({ "type": "string", "pattern": $pattern, "examples": [$example] })
 			}
 		}
 	};
@@ -74,22 +132,4 @@ pub(crate) fn safe_integer(v: &serde_json::Value) -> Option<i64> {
 	let f = n.as_f64()?;
 	// A float within ±2^53 with no fraction is exactly an integer, so the cast is exact.
 	(f.fract() == 0.0 && f.abs() <= MAX_SAFE as f64).then_some(f as i64)
-}
-
-/// Why an event (or a part of one) cannot be accepted. The message is what the source is
-/// told, so it names the field and never echoes a secret or PII.
-#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
-#[error("{0}")]
-pub struct Invalid(pub String);
-
-impl Invalid {
-	pub fn new(msg: impl Into<String>) -> Self {
-		Self(msg.into())
-	}
-}
-
-impl From<sa_auth::UnknownKind> for Invalid {
-	fn from(e: sa_auth::UnknownKind) -> Self {
-		Self(e.to_string())
-	}
 }

@@ -1,10 +1,9 @@
 import type { PricingInputs, PricingModel } from "@evinvest/sites-contract";
 import { useEffect, useState } from "react";
 
-import { previewPrice } from "@/entities/pricing";
-import { ApiError } from "@/shared/api";
+import { type Failure, api } from "@/shared/api";
 
-import { type Runner, type Settled, createRunner } from "./runner";
+import { type Runner, createRunner } from "./runner";
 
 export const PREVIEW_DEBOUNCE_MS = 300;
 
@@ -12,9 +11,11 @@ export type PreviewState =
   | { kind: "idle" }
   | { kind: "pending" }
   | { kind: "priced"; cents: number | null }
-  /** The server refused the model: `path` names the field. */
-  | { kind: "invalid"; path: string; message: string }
-  | { kind: "failed"; error: unknown };
+  /** The server refused the model, in its own words. */
+  | { kind: "invalid"; message: string }
+  | { kind: "failed"; failure: Failure };
+
+type Answered = Exclude<PreviewState, { kind: "idle" } | { kind: "pending" }>;
 
 interface Payload {
   brand: string;
@@ -23,12 +24,13 @@ interface Payload {
   answers: PricingInputs;
 }
 
-const stateOf = (result: Settled<number | null>): PreviewState => {
-  if (result.ok) return { kind: "priced", cents: result.value };
-  const e = result.error;
-  if (e instanceof ApiError && e.failure.kind === "invalid_path") return { kind: "invalid", path: e.failure.path, message: e.failure.message };
-  return { kind: "failed", error: e };
-};
+/** The server prices `model` as the site would: the editor never computes a price itself. */
+async function preview({ brand, model, need, answers }: Payload): Promise<Answered> {
+  const { data, error } = await api().POST("/pricing/{brand}/preview", { params: { path: { brand } }, body: { model, need, inputs: answers } });
+  if (error === undefined) return { kind: "priced", cents: data.cents };
+  if (error.code === "invalid_pricing") return { kind: "invalid", message: error.error };
+  return { kind: "failed", failure: error };
+}
 
 /**
  * The server's price for the draft as it stands (`/preview`, the site's own
@@ -38,10 +40,15 @@ const stateOf = (result: Settled<number | null>): PreviewState => {
 export function usePreview(brand: string, model: PricingModel | null, need: string | null, answers: PricingInputs): PreviewState {
   const [answered, setAnswered] = useState<{ key: string; state: PreviewState } | null>(null);
   const [runner] = useState<Runner<Payload>>(() =>
-    createRunner<Payload, number | null>({
+    createRunner<Payload, Answered>({
       delayMs: PREVIEW_DEBOUNCE_MS,
-      run: (p) => previewPrice(p.brand, p.model, p.need, p.answers),
-      onSettled: (key, result) => setAnswered({ key, state: stateOf(result) }),
+      run: preview,
+      // A rejection is a broken contract (an answer off the document): thrown in render, as a read's is.
+      onSettled: (key, result) =>
+        setAnswered(() => {
+          if (!result.ok) throw result.error;
+          return { key, state: result.value };
+        }),
     }),
   );
 

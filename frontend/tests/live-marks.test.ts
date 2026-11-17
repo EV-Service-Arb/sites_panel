@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { followsPlace, savedSince } from "@/entities/place/lib/live";
-import type { ChangedEvent } from "@/shared/lib/live/protocol";
-import { NOTHING_UNSEEN, newLeads, noteChanges, parseSeen, visit } from "@/views/nav/model/unseen";
-
-const at = "2026-10-03T10:00:00Z";
-const ev = (topic: ChangedEvent["topic"], brand_id: string | null = "aquafix", id: string | null = null): ChangedEvent => ({ topic, brand_id, id, at });
+import { savedSince } from "@/entities/place/lib/live";
+import { newLeads, parseSeen, seenAfter, unseen } from "@/views/nav/model/unseen";
 
 describe("the nav's badges", () => {
   it("count new leads as the growth of the total since the screen was seen", () => {
@@ -16,34 +12,26 @@ describe("the nav's badges", () => {
     expect(newLeads(5, 9)).toBe(0);
   });
 
-  it("count changed places once each, not once per save", () => {
-    const s = noteChanges(NOTHING_UNSEEN, [ev("places", "aquafix", "lyon-3"), ev("places", "aquafix", "lyon-3"), ev("places", "vifnet", "paris-11")], "leads");
-    expect(s.places).toHaveLength(2);
+  /** The marks a screen shows over a run of answers, each `[times its items changed at, whether the screen is open]`. */
+  const marks = (answers: [number[], boolean][]) => {
+    let seen: number | null = null;
+    return answers.map(([times, open]) => {
+      seen = seenAfter(seen, times, open);
+      return unseen(times, seen);
+    });
+  };
+
+  it("take the first answer as seen, and count what changed after it", () => {
+    expect(marks([[[1, 5], false], [[1, 5, 7], false], [[1, 8, 9], false]])).toEqual([0, 1, 2]);
   });
 
-  it("mark experiments with a dot, and nothing for the other topics", () => {
-    const s = noteChanges(NOTHING_UNSEEN, [ev("experiments"), ev("pricing"), ev("invoices")], "overview");
-    expect(s).toEqual({ places: [], experiments: true, bookings: false });
+  it("clear when their screen opens, and count from there", () => {
+    expect(marks([[[1], false], [[1, 4], false], [[1, 4], true], [[1, 4, 6], false]])).toEqual([0, 1, 0, 1]);
   });
 
-  it("mark bookings without a lead with a dot on Leads, cleared by opening Leads", () => {
-    const s = noteChanges(NOTHING_UNSEEN, [ev("bookings")], "overview");
-    expect(s.bookings).toBe(true);
-    expect(noteChanges(NOTHING_UNSEEN, [ev("bookings")], "leads")).toBe(NOTHING_UNSEEN);
-    expect(visit(s, "leads").bookings).toBe(false);
-    expect(visit(s, "places")).toBe(s);
-  });
-
-  it("do not mark the screen that is open", () => {
-    expect(noteChanges(NOTHING_UNSEEN, [ev("places", "aquafix", "lyon-3")], "places")).toBe(NOTHING_UNSEEN);
-    expect(noteChanges(NOTHING_UNSEEN, [ev("experiments")], "experiments")).toBe(NOTHING_UNSEEN);
-  });
-
-  it("clear when their screen opens, and only theirs", () => {
-    const s = { places: ["aquafix/lyon-3"], experiments: true, bookings: false };
-    expect(visit(s, "places")).toEqual({ places: [], experiments: true, bookings: false });
-    expect(visit(s, "experiments").experiments).toBe(false);
-    expect(visit(s, null)).toBe(s);
+  it("do not mark the screen that is open, and count from an empty list too", () => {
+    expect(marks([[[], false], [[3], true], [[3, 4], false]])).toEqual([0, 0, 1]);
+    expect(marks([[[], false], [[3], false]])).toEqual([0, 1]);
   });
 
   it("keep the leads baseline only when storage holds a count", () => {
@@ -63,17 +51,6 @@ describe("the nav's badges", () => {
 });
 
 describe("a place's live changes", () => {
-  const key = { brand: "aquafix", slug: "lyon-3" };
-
-  it("follow that place, or any when the event names none", () => {
-    const follows = followsPlace(key);
-    expect(follows(ev("places", "aquafix", "lyon-3"))).toBe(true);
-    expect(follows(ev("places", "aquafix", null))).toBe(true);
-    expect(follows(ev("places", null, null))).toBe(true);
-    expect(follows(ev("places", "aquafix", "lyon-7"))).toBe(false);
-    expect(follows(ev("leads", "aquafix", "lyon-3"))).toBe(false);
-  });
-
   it("count as someone else's only when strictly newer than what the form was read at", () => {
     const base = { updated_at: "2026-10-03T10:00:00Z" };
     expect(savedSince({ updated_at: "2026-10-03T10:01:00Z" }, base)).toBe(true);

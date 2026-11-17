@@ -5,13 +5,13 @@
 use std::{collections::BTreeMap, fmt};
 
 use jiff::{Timestamp, civil::Date};
+use sa_core::Invalid;
 
 use crate::{
-	Invalid,
 	booking::{BookingMatch, Closed, DayPart, Provider},
 	event::Subject,
 	experiment::{Declaration, Patch},
-	ids::is_slug,
+	pricing::InputId,
 };
 
 /// ISO 4217 code: three uppercase letters.
@@ -81,9 +81,6 @@ vocabulary! {
 }
 
 impl LeadChannel {
-	/// The channels an operator takes a lead in by hand: a call, or a conversation a customer
-	/// started on a messenger without the landing. A form and a callback are the landing's.
-	pub const MANUAL: [Self; 3] = [Self::PhoneInbound, Self::Whatsapp, Self::Telegram];
 	/// The channels a landing sends: the panel's `phone_inbound` is for the calls it records.
 	pub const SITE: [Self; 4] = [Self::Form, Self::Callback, Self::Whatsapp, Self::Telegram];
 
@@ -225,7 +222,7 @@ pub struct LeadOffer {
 	pub price: Option<QuotedPrice>,
 	/// What the visitor picked for an estimate, input id → value id; empty for any other flow.
 	/// Slugs, never free text: no PII.
-	pub estimate_inputs: BTreeMap<String, String>,
+	pub estimate_inputs: BTreeMap<InputId, InputId>,
 }
 
 impl LeadOffer {
@@ -252,24 +249,21 @@ impl LeadOffer {
 			(false, true) => return Err(Invalid::new("properties.quoted_cents and properties.pricing_valid_from are only for flow estimate or fixed")),
 			_ => {}
 		}
-		let estimate_inputs: BTreeMap<String, String> = inputs.into_iter().collect();
-		if !estimate_inputs.is_empty() && flow != Some(LeadFlow::Estimate) {
+		let inputs: BTreeMap<String, String> = inputs.into_iter().collect();
+		if !inputs.is_empty() && flow != Some(LeadFlow::Estimate) {
 			return Err(Invalid::new("properties.estimate_inputs is only for flow estimate"));
 		}
-		if estimate_inputs.len() > MAX_ESTIMATE_INPUTS {
+		if inputs.len() > MAX_ESTIMATE_INPUTS {
 			return Err(Invalid::new(format!("properties.estimate_inputs holds more than {MAX_ESTIMATE_INPUTS} inputs")));
 		}
 		// The words, never the value: it may be anything a source put there.
-		if !estimate_inputs.iter().all(|(k, v)| is_input_slug(k) && is_input_slug(v)) {
-			return Err(Invalid::new("properties.estimate_inputs keys and values are 1–40 of [a-z0-9_-]"));
-		}
+		let estimate_inputs = inputs
+			.iter()
+			.map(|(k, v)| Ok((InputId::parse(k)?, InputId::parse(v)?)))
+			.collect::<Result<_, Invalid>>()
+			.map_err(|_| Invalid::new("properties.estimate_inputs keys and values are 1–40 of [a-z0-9_-]"))?;
 		Ok(Self { flow, price, estimate_inputs })
 	}
-}
-
-/// 1–40 of `[a-z0-9_-]`: an estimate's input or value id, as a pricing model names it.
-fn is_input_slug(s: &str) -> bool {
-	(1..=40).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
 }
 
 /// `YYYY-MM-DD`, a real day: RFC 3339's full-date, nothing looser.
@@ -279,35 +273,47 @@ fn rfc3339_date(raw: &str) -> Option<Date> {
 	shaped.then(|| raw.parse().ok()).flatten()
 }
 
-/// How the customer was reached.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ContactChannel {
-	Phone,
-	Whatsapp,
-	Email,
-	Telegram,
-	Other,
+vocabulary! {
+	/// How the customer was reached.
+	pub enum ContactChannel, "properties.channel is not one of phone, whatsapp, email, telegram, other" {
+		Phone => "phone",
+		Whatsapp => "whatsapp",
+		Email => "email",
+		Telegram => "telegram",
+		Other => "other",
+	}
 }
 
-impl ContactChannel {
-	pub fn as_str(self) -> &'static str {
-		match self {
-			Self::Phone => "phone",
-			Self::Whatsapp => "whatsapp",
-			Self::Email => "email",
-			Self::Telegram => "telegram",
-			Self::Other => "other",
-		}
+vocabulary! {
+	/// Why an operator says a lead was lost: the panel's words, kept few so the reports compare.
+	/// The registry takes any slug (`lead.lost` events journaled before the list).
+	pub enum LostReason, "reason is not one of too_expensive, no_answer, went_elsewhere, out_of_area, not_needed, spam, other" {
+		TooExpensive => "too_expensive",
+		NoAnswer => "no_answer",
+		WentElsewhere => "went_elsewhere",
+		OutOfArea => "out_of_area",
+		NotNeeded => "not_needed",
+		Spam => "spam",
+		Other => "other",
 	}
+}
 
-	pub fn parse(raw: &str) -> Result<Self, Invalid> {
-		match raw {
-			"phone" => Ok(Self::Phone),
-			"whatsapp" => Ok(Self::Whatsapp),
-			"email" => Ok(Self::Email),
-			"telegram" => Ok(Self::Telegram),
-			"other" => Ok(Self::Other),
-			_ => Err(Invalid::new("properties.channel is not one of phone, whatsapp, email, telegram, other")),
+vocabulary! {
+	/// The channels an operator takes a lead in by hand: a call, or a conversation a customer
+	/// started on a messenger without the landing. A form and a callback are the landing's.
+	pub enum ManualChannel, "channel is not one of phone_inbound, whatsapp, telegram" {
+		PhoneInbound => "phone_inbound",
+		Whatsapp => "whatsapp",
+		Telegram => "telegram",
+	}
+}
+
+impl From<ManualChannel> for LeadChannel {
+	fn from(c: ManualChannel) -> Self {
+		match c {
+			ManualChannel::PhoneInbound => Self::PhoneInbound,
+			ManualChannel::Whatsapp => Self::Whatsapp,
+			ManualChannel::Telegram => Self::Telegram,
 		}
 	}
 }
@@ -333,35 +339,15 @@ impl AnalyticsId {
 	}
 }
 
-/// How a call ended, as the operator tells it. Only what a person can know without
-/// telephony: no durations, no missed calls (spec §10.1).
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum CallOutcome {
-	Answered,
-	NoAnswer,
-	WrongNumber,
-	/// The customer asked to be called back.
-	Later,
-}
-
-impl CallOutcome {
-	pub fn as_str(self) -> &'static str {
-		match self {
-			Self::Answered => "answered",
-			Self::NoAnswer => "no_answer",
-			Self::WrongNumber => "wrong_number",
-			Self::Later => "later",
-		}
-	}
-
-	pub fn parse(raw: &str) -> Result<Self, Invalid> {
-		match raw {
-			"answered" => Ok(Self::Answered),
-			"no_answer" => Ok(Self::NoAnswer),
-			"wrong_number" => Ok(Self::WrongNumber),
-			"later" => Ok(Self::Later),
-			_ => Err(Invalid::new("properties.outcome is not one of answered, no_answer, wrong_number, later")),
-		}
+vocabulary! {
+	/// How a call ended, as the operator tells it. Only what a person can know without
+	/// telephony: no durations, no missed calls (spec §10.1).
+	pub enum CallOutcome, "properties.outcome is not one of answered, no_answer, wrong_number, later" {
+		Answered => "answered",
+		NoAnswer => "no_answer",
+		WrongNumber => "wrong_number",
+		/// The customer asked to be called back.
+		Later => "later",
 	}
 }
 
@@ -393,9 +379,8 @@ pub enum Fact {
 		quote: Option<Money>,
 	},
 	JobWon,
-	/// `reason` is a lowercase slug, so the reports can group by it.
 	LeadLost {
-		reason: String,
+		reason: LostReason,
 		note: Option<String>,
 	},
 	JobCompleted,
@@ -527,11 +512,8 @@ impl Fact {
 
 	/// `lead.lost`.
 	pub fn lost(reason: &str, note: Option<String>) -> Result<Self, Invalid> {
-		if !is_slug(reason) {
-			return Err(Invalid::new("properties.reason is not a lowercase slug, e.g. \"too_expensive\""));
-		}
 		Ok(Self::LeadLost {
-			reason: reason.to_owned(),
+			reason: LostReason::parse(reason).map_err(|e| Invalid::new(format!("properties.{}", e.0)))?,
 			note: bounded("properties.note", note)?,
 		})
 	}
@@ -621,8 +603,10 @@ pub fn bounded(field: &str, text: Option<String>) -> Result<Option<String>, Inva
 
 #[cfg(test)]
 mod tests {
+	use sa_core::ids::BrandId;
+
 	use super::*;
-	use crate::ids::{BrandId, JobId, LeadId};
+	use crate::ids::{JobId, LeadId};
 
 	#[test]
 	fn payments_and_quotes() {
@@ -778,10 +762,16 @@ mod tests {
 	}
 
 	#[test]
-	fn lost_reasons_are_slugs() {
-		assert!(Fact::lost("too_expensive", None).is_ok());
+	fn a_lost_reason_is_one_of_the_panels_words() {
 		assert!(Fact::lost("Too expensive", None).is_err());
-		assert!(Fact::lost("x", Some("a".repeat(1001))).is_err());
-		assert_eq!(Fact::lost("x", Some("  ".into())).unwrap(), Fact::LeadLost { reason: "x".into(), note: None });
+		assert!(Fact::lost("x", None).is_err());
+		assert!(Fact::lost("other", Some("a".repeat(1001))).is_err());
+		assert_eq!(
+			Fact::lost("other", Some("  ".into())).unwrap(),
+			Fact::LeadLost {
+				reason: LostReason::Other,
+				note: None
+			}
+		);
 	}
 }
