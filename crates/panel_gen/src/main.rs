@@ -10,7 +10,7 @@ use std::{fs, path::Path};
 use ev_lib::ts_gen::Ts;
 use panel::experiment::LiveExperiments;
 use panel_core::{
-	booking::{self, BookingMatch, BookingStatus, DayPart, PageProvider, Provider},
+	booking::{self, BookingMatch, BookingStatus, DayPart, OperatorAction, PageProvider, Provider},
 	event::may_write,
 	experiment,
 	fact::{self, LeadChannel, LeadFlow, LeadSuspect, ManualChannel, Messenger},
@@ -193,6 +193,17 @@ fn frontend(root: &Path) {
 			Ts::Value {
 				name: "CONTACT_SLA_SECONDS",
 				value: CONTACT_SLA.as_secs().into(),
+			},
+			Ts::Value {
+				name: "BOOKING_ACTIONS",
+				value: BookingStatus::ALL
+					.iter()
+					.map(|&status| {
+						let allowed = OperatorAction::ALL.into_iter().filter(|&a| status.allows(a)).map(OperatorAction::as_str);
+						(status.as_str().to_owned(), allowed.collect::<Vec<_>>().into())
+					})
+					.collect::<serde_json::Map<_, _>>()
+					.into(),
 			},
 		],
 	);

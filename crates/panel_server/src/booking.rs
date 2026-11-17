@@ -25,11 +25,14 @@ use panel::{
 	booking::{BookingView, Provider, PushError, PushRequest, PushSources, SlotAction},
 	operator::Actor,
 };
-use panel_core::{booking::BookingMatch, ids::LeadId};
+use panel_core::{
+	booking::{BookingMatch, Closed},
+	ids::LeadId,
+};
 use sa_auth::{Gate, Leads, Places, Work};
 use sa_core::ids::BrandId;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::json;
 use tokio::sync::Semaphore;
 use tower::{BoxError, ServiceBuilder, limit::GlobalConcurrencyLimitLayer};
 use tower_http::timeout::TimeoutLayer;
@@ -245,8 +248,7 @@ async fn book_lead(
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "BookingEnd")]
 struct CloseBody {
-	/// done | no_show | canceled
-	status: String,
+	status: Closed,
 }
 
 /// How a lead's booking ended (`booking.status_changed`).
@@ -259,9 +261,7 @@ async fn close_booking(
 	IdempotencyKey(key): IdempotencyKey,
 	Body(b): Body<CloseBody>,
 ) -> ApiResult<Upserted<Journaled>> {
-	let done = panel
-		.close_booking_once(Actor(caller.user_id), &brand, &lead, &b.status, Timestamp::now(), key.as_deref())
-		.await?;
+	let done = panel.close_booking_once(Actor(caller.user_id), &brand, &lead, b.status, Timestamp::now(), key.as_deref()).await?;
 	Ok(recorded(done, |e| Journaled { event_id: e.raw() }))
 }
 
@@ -281,8 +281,7 @@ struct ProviderBookingDto {
 	brand: BrandId,
 	provider: Provider,
 	external_ref: String,
-	/// booked | canceled
-	status: &'static str,
+	status: ProviderBookingStatus,
 	start_at: Timestamp,
 	end_at: Option<Timestamp>,
 	booked_at: Option<Timestamp>,
@@ -293,7 +292,28 @@ struct ProviderBookingDto {
 	r#match: Option<BookingMatch>,
 	/// The attendee, for a caller who sees PII.
 	#[serde(skip_serializing_if = "Option::is_none")]
-	contact: Option<Value>,
+	contact: Option<AttendeeDto>,
+}
+
+/// Where a provider's booking stands.
+#[derive(JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ProviderBookingStatus {
+	Booked,
+	Canceled,
+}
+
+/// What the provider gave of who booked.
+#[derive(Deserialize, JsonSchema, Serialize)]
+#[serde(deny_unknown_fields)]
+#[schemars(rename = "Attendee")]
+struct AttendeeDto {
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	name: Option<String>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	email: Option<String>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	phone: Option<String>,
 }
 
 impl From<BookingView> for ProviderBookingDto {
@@ -305,14 +325,14 @@ impl From<BookingView> for ProviderBookingDto {
 			brand: r.brand_id,
 			provider: r.provider,
 			external_ref: r.external_ref,
-			status: if r.booked { "booked" } else { "canceled" },
+			status: if r.booked { ProviderBookingStatus::Booked } else { ProviderBookingStatus::Canceled },
 			start_at: r.start_at,
 			end_at: r.end_at,
 			booked_at: r.booked_at,
 			last_event_at: r.last_event_at,
 			lead_id,
 			r#match,
-			contact: v.contact,
+			contact: v.contact.map(|c| serde_json::from_value(c).expect("sealed by contact_pii: name, email, phone")),
 		}
 	}
 }

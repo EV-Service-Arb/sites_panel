@@ -35,9 +35,9 @@ pub(crate) enum View {
 	/// The funnel over a period, of every brand or one.
 	#[view("/overview", needs = Analysis::Read, key = 'o')]
 	Overview { period: Option<Period>, brand: Option<BrandId> },
-	/// The landings' experiments and their overrides.
+	/// The landings' experiments and their overrides, of every brand or one.
 	#[view("/experiments", needs = Analysis::Read, key = 'e')]
-	Experiments,
+	Experiments { brand: Option<BrandId> },
 }
 
 /// The days the overview's funnel spans, ending today; absent, the funnel's own window.
@@ -72,7 +72,9 @@ mod tests {
 				period: Some(Period::Quarter),
 				brand: None,
 			},
-			View::Experiments,
+			View::Experiments {
+				brand: Some(BrandId::parse("aquafix").unwrap()),
+			},
 		] {
 			assert_eq!(View::parse(&view.href()).unwrap(), view, "{}", view.href());
 		}

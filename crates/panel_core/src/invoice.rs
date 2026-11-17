@@ -27,6 +27,8 @@ pub const MAX_EXPIRES_IN_DAYS: u32 = 30;
 /// most 6 decimals (a micro-USDT). Banking would take 18; nobody bills a fraction finer.
 pub const MAX_INTEGER_DIGITS: usize = 9;
 pub const MAX_FRACTION_DIGITS: usize = 6;
+/// What [`canonical_amount`] answers: 1–9 digits, no leading zero, at most 6 decimals without a trailing zero, never zero.
+pub const AMOUNT_PATTERN: &str = r"^([1-9][0-9]{0,8}(\.[0-9]{0,5}[1-9])?|0\.[0-9]{0,5}[1-9])$";
 
 vocabulary! {
 	/// Where an invoice stands, as the panel stores it.
@@ -127,6 +129,7 @@ mod tests {
 
 	#[test]
 	fn amounts_come_out_canonical() {
+		let pattern = regex::Regex::new(AMOUNT_PATTERN).expect("a regex");
 		for (raw, canonical) in [
 			("12.5", "12.5"),
 			("12.50", "12.5"),
@@ -139,6 +142,10 @@ mod tests {
 			("999999999.999999", "999999999.999999"),
 		] {
 			assert_eq!(canonical_amount(raw).as_deref(), Ok(canonical), "{raw}");
+			assert!(pattern.is_match(canonical), "{canonical} is AMOUNT_PATTERN's");
+		}
+		for written in ["12.50", "0012.05", "0", "0.0", ".5", "1000000000", "0.0000001"] {
+			assert!(!pattern.is_match(written), "{written:?} is not canonical");
 		}
 		for raw in ["", ".", "0", "0.0", "00", "-1", "+1", "1e3", "1,5", "1.2.3", "0.0000001", "1000000000", "١٢", "1 000", "NaN"] {
 			assert!(canonical_amount(raw).is_err(), "{raw:?} is refused");

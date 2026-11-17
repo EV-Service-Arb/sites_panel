@@ -26,7 +26,7 @@ use panel::{
 };
 use panel_core::{
 	ids::LocationId,
-	place::{Editor, FieldErrors, PlaceLive, PlaceSettings},
+	place::{ChangeKind, Editor, FieldErrors, PlaceLive, PlaceSettings},
 };
 use sa_auth::{Gate, Places, Work};
 use sa_core::ids::BrandId;
@@ -169,8 +169,7 @@ struct ChangeDto {
 	at: Timestamp,
 	/// The user's email, else their id; `cli` from the pod.
 	by: String,
-	/// register | set | revert | withdraw | restore
-	kind: &'static str,
+	kind: ChangeKind,
 	#[schemars(with = "PlaceLive")]
 	before: Value,
 	#[schemars(with = "PlaceLive")]
@@ -195,7 +194,7 @@ async fn place_history(State(panel): State<Panel>, Ids(PlacePath { brand, slug }
 			id: c.id,
 			at: c.at,
 			by: c.by,
-			kind: c.kind.as_str(),
+			kind: c.kind,
 			before: c.before.as_json(),
 			after: c.after.as_json(),
 			reverts: c.reverts,

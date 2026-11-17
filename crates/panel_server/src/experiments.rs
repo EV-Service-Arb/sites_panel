@@ -93,6 +93,7 @@ struct ExperimentDto {
 	/// Its landing no longer declares it.
 	retired: bool,
 	/// Its funnel in PostHog; null without a project configured.
+	#[schemars(regex(pattern = r"^https?://"))]
 	posthog_url: Option<String>,
 }
 

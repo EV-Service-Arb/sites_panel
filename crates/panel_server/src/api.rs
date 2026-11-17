@@ -848,7 +848,7 @@ struct AttemptPath {
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[schemars(rename = "CallOutcome")]
+#[schemars(rename = "CallOutcomeBody")]
 struct OutcomeBody {
 	outcome: fact::CallOutcome,
 }
@@ -1010,7 +1010,7 @@ enum Slices {
 }
 
 #[derive(JsonSchema, Serialize)]
-#[schemars(rename = "Funnel")]
+#[schemars(rename = "Funnel", transform = common_beside_slices)]
 struct FunnelDto {
 	from: Date,
 	to: Date,
@@ -1018,9 +1018,19 @@ struct FunnelDto {
 	/// Under this many, a share has no percent.
 	min_sample: u64,
 	/// The same funnel from the visit on in PostHog; null without a project configured.
+	#[schemars(regex(pattern = r"^https?://"))]
 	posthog_url: Option<String>,
 	#[serde(flatten)]
 	slices: Slices,
+}
+
+/// `properties` beside the slices' `anyOf` reads to openapi-typescript as one more member of the union; an
+/// `allOf` of the two is the intersection the answer is.
+fn common_beside_slices(schema: &mut Schema) {
+	let o = schema.as_object_mut().expect("a struct's schema is an object");
+	let slices = o.remove("anyOf").expect("the flattened untagged slices");
+	let common: serde_json::Map<String, Value> = ["type", "properties", "required"].into_iter().map(|k| (k.to_owned(), o.remove(k).expect("a struct's"))).collect();
+	o.insert("allOf".to_owned(), Value::Array(vec![Value::Object(common), serde_json::json!({ "anyOf": slices })]));
 }
 
 /// The funnel of the leads created within a window of UTC days: each stage reached, the lost
@@ -1077,6 +1087,8 @@ struct PlaceRowDto {
 	/// Live settings with a field set at least.
 	has_settings: bool,
 	withdrawn: bool,
+	/// Its latest change: registered, set, reverted, withdrawn or restored; null for a place only leads name.
+	changed_at: Option<Timestamp>,
 }
 
 #[derive(JsonSchema, Serialize)]
@@ -1097,6 +1109,7 @@ async fn list_places(State(panel): State<Panel>, Params(q): Params<PlacesQuery>)
 			last_lead_at: p.last_lead_at,
 			has_settings: p.has_settings,
 			withdrawn: p.withdrawn,
+			changed_at: p.changed_at,
 		})
 		.collect();
 	Ok(Json(PlacesDto { places }))

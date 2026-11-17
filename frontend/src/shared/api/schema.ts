@@ -670,9 +670,20 @@ export interface components {
             postalCode: string;
             street: string;
         };
+        /** @description What the provider gave of who booked. */
+        Attendee: {
+            email?: string | null;
+            name?: string | null;
+            phone?: string | null;
+        };
         BookingAttach: {
             lead: components["schemas"]["LeadId"];
         };
+        /**
+         * @description How a booked slot ended, as an operator says (`booking.status_changed`).
+         * @enum {string}
+         */
+        BookingClosed: "done" | "no_show" | "canceled";
         /**
          * @description A place's `booking` setting: the providers it has a page on, and the one it offers by
          *     default — `manual` or one of them. `manual` is always there, so never configured.
@@ -686,8 +697,7 @@ export interface components {
             };
         };
         BookingEnd: {
-            /** @description done | no_show | canceled */
-            status: string;
+            status: components["schemas"]["BookingClosed"];
         };
         /**
          * @description How a provider's booking was joined to its lead.
@@ -728,9 +738,6 @@ export interface components {
             /** Format: uuid */
             attempt_id: string;
         };
-        CallOutcome: {
-            outcome: components["schemas"]["CallOutcome2"];
-        };
         /**
          * @description How a call ended, as the operator tells it. Only what a person can know without
          *     telephony: no durations, no missed calls (spec §10.1).
@@ -738,7 +745,10 @@ export interface components {
          *     - `later`: The customer asked to be called back.
          * @enum {string}
          */
-        CallOutcome2: "answered" | "no_answer" | "wrong_number" | "later";
+        CallOutcome: "answered" | "no_answer" | "wrong_number" | "later";
+        CallOutcomeBody: {
+            outcome: components["schemas"]["CallOutcome"];
+        };
         /** @enum {string} */
         ChangeKind: "set" | "remove";
         /**
@@ -871,10 +881,10 @@ export interface components {
             posthog_url: string | null;
             /** Format: date */
             to: string;
-        } | components["schemas"]["FunnelSlice"] | {
+        } & (components["schemas"]["FunnelSlice"] | {
             by: components["schemas"]["FunnelBy"];
             locations: components["schemas"]["LocationFunnel"][];
-        };
+        });
         /**
          * @description How the funnel is cut.
          *
@@ -1338,14 +1348,24 @@ export interface components {
             by: string;
             /** Format: uuid */
             id: string;
-            /** @description register | set | revert | withdraw | restore */
-            kind: string;
+            kind: components["schemas"]["PlaceChangeKind"];
             /**
              * Format: uuid
              * @description The change a revert went back before.
              */
             reverts: string | null;
         };
+        /**
+         * @description What a change did to a place.
+         *
+         *     - `register`: Registered by hand (it may not have had a lead yet).
+         *     - `set`: Its settings replaced.
+         *     - `revert`: The settings an earlier change found, put back.
+         *     - `withdraw`: Taken off the sites: they answer it as gone.
+         *     - `restore`: Back on the sites.
+         * @enum {string}
+         */
+        PlaceChangeKind: "register" | "set" | "revert" | "withdraw" | "restore";
         PlaceHistory: {
             changes: components["schemas"]["PlaceChange"][];
         };
@@ -1354,32 +1374,37 @@ export interface components {
          *     config.
          */
         PlaceLive: {
-            address?: components["schemas"]["Address"] | null;
-            booking?: components["schemas"]["BookingConfig"] | null;
-            geo?: components["schemas"]["Geo"] | null;
-            hours?: components["schemas"]["OpeningHours"][] | null;
+            address?: components["schemas"]["Address"];
+            booking?: components["schemas"]["BookingConfig"];
+            geo?: components["schemas"]["Geo"];
+            hours?: components["schemas"]["OpeningHours"][];
             /** @description A text per locale; a site keeps it only when every locale it speaks is there. */
             landmark?: {
                 [key: string]: string;
-            } | null;
+            };
             /** @description The landing's messenger buttons switched off where `false`; a messenger left out is on. */
             messengers?: {
                 telegram?: boolean;
                 whatsapp?: boolean;
-            } | null;
-            phone?: string | null;
-            rating?: components["schemas"]["Rating"] | null;
+            };
+            phone?: string;
+            rating?: components["schemas"]["Rating"];
             /** @description Where the place asks for a Google review. */
-            reviewUrl?: string | null;
+            reviewUrl?: string;
             /** @description Commune names. */
-            serviceArea?: string[] | null;
-            storefrontPhoto?: string | null;
+            serviceArea?: string[];
+            storefrontPhoto?: string;
             /** @description The place's Telegram bot: its username, without the `@`. */
-            telegram?: string | null;
-            whatsapp?: string | null;
+            telegram?: string;
+            whatsapp?: string;
         };
         PlaceSummary: {
             brand: string;
+            /**
+             * Format: date-time
+             * @description Its latest change: registered, set, reverted, withdrawn or restored; null for a place only leads name.
+             */
+            changed_at: string | null;
             /** @description Live settings with a field set at least. */
             has_settings: boolean;
             /** Format: date-time */
@@ -1529,7 +1554,7 @@ export interface components {
             booked_at: string | null;
             brand: components["schemas"]["BrandId"];
             /** @description The attendee, for a caller who sees PII. */
-            contact?: unknown;
+            contact?: components["schemas"]["Attendee"] | null;
             /** Format: date-time */
             end_at: string | null;
             external_ref: string;
@@ -1544,9 +1569,13 @@ export interface components {
             provider: components["schemas"]["Provider"];
             /** Format: date-time */
             start_at: string;
-            /** @description booked | canceled */
-            status: string;
+            status: components["schemas"]["ProviderBookingStatus"];
         };
+        /**
+         * @description Where a provider's booking stands.
+         * @enum {string}
+         */
+        ProviderBookingStatus: "booked" | "canceled";
         ProviderBookings: {
             bookings: components["schemas"]["ProviderBooking"][];
         };
@@ -1686,7 +1715,9 @@ export interface components {
 }
 export type AddOption = components['schemas']['AddOption'];
 export type Address = components['schemas']['Address'];
+export type Attendee = components['schemas']['Attendee'];
 export type BookingAttach = components['schemas']['BookingAttach'];
+export type BookingClosed = components['schemas']['BookingClosed'];
 export type BookingConfig = components['schemas']['BookingConfig'];
 export type BookingEnd = components['schemas']['BookingEnd'];
 export type BookingMatch = components['schemas']['BookingMatch'];
@@ -1696,7 +1727,7 @@ export type BookingStatus = components['schemas']['BookingStatus'];
 export type BrandId = components['schemas']['BrandId'];
 export type CallAttempt = components['schemas']['CallAttempt'];
 export type CallOutcome = components['schemas']['CallOutcome'];
-export type CallOutcome2 = components['schemas']['CallOutcome2'];
+export type CallOutcomeBody = components['schemas']['CallOutcomeBody'];
 export type ChangeKind = components['schemas']['ChangeKind'];
 export type ContactChannel = components['schemas']['ContactChannel'];
 export type Currency = components['schemas']['Currency'];
@@ -1757,6 +1788,7 @@ export type Payment = components['schemas']['Payment'];
 export type Permission = components['schemas']['Permission'];
 export type Place = components['schemas']['Place'];
 export type PlaceChange = components['schemas']['PlaceChange'];
+export type PlaceChangeKind = components['schemas']['PlaceChangeKind'];
 export type PlaceHistory = components['schemas']['PlaceHistory'];
 export type PlaceLive = components['schemas']['PlaceLive'];
 export type PlaceSummary = components['schemas']['PlaceSummary'];
@@ -1773,6 +1805,7 @@ export type PricingModel = components['schemas']['PricingModel'];
 export type Pricings = components['schemas']['Pricings'];
 export type Provider = components['schemas']['Provider'];
 export type ProviderBooking = components['schemas']['ProviderBooking'];
+export type ProviderBookingStatus = components['schemas']['ProviderBookingStatus'];
 export type ProviderBookings = components['schemas']['ProviderBookings'];
 export type Rating = components['schemas']['Rating'];
 export type RegisterPlace = components['schemas']['RegisterPlace'];
@@ -3660,7 +3693,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CallOutcome"];
+                "application/json": components["schemas"]["CallOutcomeBody"];
             };
         };
         responses: {
@@ -5870,9 +5903,10 @@ type ReadonlyArray<T> = [
 ] extends [
     unknown[]
 ] ? Readonly<Exclude<T, undefined>> : Readonly<Exclude<T, undefined>[]>;
+export const bookingClosedValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["BookingClosed"]> = ["done", "no_show", "canceled"];
 export const bookingMatchValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["BookingMatch"]> = ["ref", "contact", "manual"];
 export const bookingStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["BookingStatus"]> = ["none", "booked", "canceled", "done", "no_show", "requested"];
-export const callOutcome2Values: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CallOutcome2"]> = ["answered", "no_answer", "wrong_number", "later"];
+export const callOutcomeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CallOutcome"]> = ["answered", "no_answer", "wrong_number", "later"];
 export const changeKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ChangeKind"]> = ["set", "remove"];
 export const contactChannelValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ContactChannel"]> = ["phone", "whatsapp", "email", "telegram", "other"];
 export const currencyValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Currency"]> = ["EUR", "USD", "GBP", "AUD"];
@@ -5889,7 +5923,9 @@ export const manualChannelValues: ReadonlyArray<FlattenedDeepRequired<components
 export const messengerValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Messenger"]> = ["whatsapp", "telegram"];
 export const modelPartValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ModelPart"]> = ["validFrom", "inputs", "needs", "general"];
 export const permissionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Permission"]> = ["sa:sites:analysis:experiments:edit", "sa:sites:analysis:read", "sa:sites:work:invoices:create", "sa:sites:work:leads:edit", "sa:sites:work:pii:see", "sa:sites:work:places:edit", "sa:sites:work:pricing:edit", "sa:sites:work:read"];
+export const placeChangeKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["PlaceChangeKind"]> = ["register", "set", "revert", "withdraw", "restore"];
 export const providerValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Provider"]> = ["manual", "link", "google_calendar", "cal_com"];
+export const providerBookingStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ProviderBookingStatus"]> = ["booked", "canceled"];
 export const stageValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Stage"]> = ["created", "contacted", "quoted", "won", "completed", "paid", "lost"];
 export const statusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Status"]> = ["registered", "unregistered", "invalid"];
 export const suspectFilterValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SuspectFilter"]> = ["only", "exclude"];

@@ -115,6 +115,7 @@ pub struct Rating {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[ts(optional_fields)]
+#[schemars(transform = skipped_not_null)]
 pub struct PlaceLive {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub phone: Option<String>,
@@ -681,8 +682,29 @@ pub fn hours_from_spec(spec: &str) -> Result<Value, String> {
 	Ok(Value::Array(rows))
 }
 
+/// A field skipped when none is absent, never `null`: an `Option` alone documents both.
+fn skipped_not_null(schema: &mut schemars::Schema) {
+	let fields = schema.get_mut("properties").and_then(Value::as_object_mut).expect("a struct's properties");
+	for field in fields.values_mut() {
+		let field = field.as_object_mut().expect("a field's schema");
+		if let Some(Value::Array(types)) = field.get("type") {
+			let types: Vec<Value> = types.iter().filter(|t| *t != "null").cloned().collect();
+			assert_eq!(types.len(), 1, "an Option of one type");
+			field.insert("type".into(), types[0].clone());
+		}
+		if let Some(Value::Array(any)) = field.remove("anyOf") {
+			let mut rest = any.into_iter().filter(|s| s.get("type").is_none_or(|t| t != "null"));
+			let Some(Value::Object(only)) = rest.next() else { panic!("an Option of one schema") };
+			assert!(rest.next().is_none(), "an Option of one schema");
+			field.extend(only);
+		}
+	}
+}
+
 /// What a change did to a place.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(rename = "PlaceChangeKind")]
 pub enum ChangeKind {
 	/// Registered by hand (it may not have had a lead yet).
 	Register,

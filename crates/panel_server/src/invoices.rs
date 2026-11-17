@@ -12,7 +12,7 @@ use panel::{
 	invoices::{Invoice, InvoiceError, LedgerError, NewInvoice},
 	operator::Actor,
 };
-use panel_core::invoice::{CURRENCY, InvoiceState, MAX_EXPIRES_IN_DAYS, MAX_MEMO_CHARS};
+use panel_core::invoice::{AMOUNT_PATTERN, CURRENCY, InvoiceState, MAX_EXPIRES_IN_DAYS, MAX_MEMO_CHARS};
 use sa_auth::{Gate, Invoices, Work};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -132,6 +132,7 @@ impl From<Invoice> for InvoiceDto {
 struct CreateBody {
 	/// Decimal USDT as a string, a JSON number would round it: whole USDT up to 999 999 999, at
 	/// most 6 decimals.
+	#[schemars(regex(pattern = AMOUNT_PATTERN))]
 	amount: String,
 	/// Banking refuses links.
 	#[serde(default)]

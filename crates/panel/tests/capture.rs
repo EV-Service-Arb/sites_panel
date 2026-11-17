@@ -150,7 +150,10 @@ async fn a_booking_is_told_under_its_lead_and_never_without_one() {
 	assert_eq!(got.written, 2, "{got:?}");
 	let by = Actor(uuid::Uuid::now_v7());
 	let l1 = LeadId::parse("L-1").unwrap();
-	panel.close_booking_once(by, &brand, &l1, "done", later + SignedDuration::from_mins(1), None).await.unwrap();
+	panel
+		.close_booking_once(by, &brand, &l1, panel_core::booking::Closed::Done, later + SignedDuration::from_mins(1), None)
+		.await
+		.unwrap();
 
 	let queued = outbox(&panel).await;
 	let names: Vec<(&str, &str)> = queued.iter().map(|(e, d, _)| (e.as_str(), d.as_str())).collect();

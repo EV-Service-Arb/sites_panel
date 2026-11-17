@@ -411,8 +411,7 @@ impl Panel {
 	}
 
 	/// Closes a lead's booked slot: done, no_show or canceled (`booking.status_changed`).
-	pub async fn close_booking_once(&self, by: Actor, brand: &BrandId, lead: &LeadId, status: &str, now: Timestamp, key: Option<&str>) -> Result<Done<EventId>, ActionError> {
-		let closed = Closed::parse(status).map_err(ActionError::Invalid)?;
+	pub async fn close_booking_once(&self, by: Actor, brand: &BrandId, lead: &LeadId, closed: Closed, now: Timestamp, key: Option<&str>) -> Result<Done<EventId>, ActionError> {
 		let id = key.map(|k| idempotent_id(by, &format!("booking_status/{brand}/{lead}"), k));
 		if let Some(done) = self.replayed(by, id).await? {
 			return Ok(done.map(|(_, e)| e));

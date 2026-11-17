@@ -10,3 +10,12 @@ export const BOOKING_MATCHES = ["ref", "contact", "manual"] as const;
 export type BookingMatch = (typeof BOOKING_MATCHES)[number];
 
 export const CONTACT_SLA_SECONDS = 1800;
+
+export const BOOKING_ACTIONS = {
+  "booked": ["set", "done", "no_show", "canceled", "clear"],
+  "canceled": ["set", "clear"],
+  "done": [],
+  "no_show": ["set", "clear"],
+  "none": ["set"],
+  "requested": ["set", "clear"],
+} as const;

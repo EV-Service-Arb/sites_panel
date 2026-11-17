@@ -46,6 +46,31 @@
         ],
         "type": "object"
       },
+      "Attendee": {
+        "additionalProperties": false,
+        "description": "What the provider gave of who booked.",
+        "properties": {
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "BookingAttach": {
         "additionalProperties": false,
         "properties": {
@@ -57,6 +82,15 @@
           "lead"
         ],
         "type": "object"
+      },
+      "BookingClosed": {
+        "description": "How a booked slot ended, as an operator says (`booking.status_changed`).",
+        "enum": [
+          "done",
+          "no_show",
+          "canceled"
+        ],
+        "type": "string"
       },
       "BookingConfig": {
         "description": "A place's `booking` setting: the providers it has a page on, and the one it offers by\ndefault — `manual` or one of them. `manual` is always there, so never configured.",
@@ -90,8 +124,7 @@
         "additionalProperties": false,
         "properties": {
           "status": {
-            "description": "done | no_show | canceled",
-            "type": "string"
+            "$ref": "#/components/schemas/BookingClosed"
           }
         },
         "required": [
@@ -196,18 +229,6 @@
         "type": "object"
       },
       "CallOutcome": {
-        "additionalProperties": false,
-        "properties": {
-          "outcome": {
-            "$ref": "#/components/schemas/CallOutcome2"
-          }
-        },
-        "required": [
-          "outcome"
-        ],
-        "type": "object"
-      },
-      "CallOutcome2": {
         "description": "How a call ended, as the operator tells it. Only what a person can know without\ntelephony: no durations, no missed calls (spec §10.1).\n\n- `later`: The customer asked to be called back.",
         "enum": [
           "answered",
@@ -216,6 +237,18 @@
           "later"
         ],
         "type": "string"
+      },
+      "CallOutcomeBody": {
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "$ref": "#/components/schemas/CallOutcome"
+          }
+        },
+        "required": [
+          "outcome"
+        ],
+        "type": "object"
       },
       "ChangeKind": {
         "enum": [
@@ -375,6 +408,7 @@
           },
           "posthog_url": {
             "description": "Its funnel in PostHog; null without a project configured.",
+            "pattern": "^https?://",
             "type": [
               "string",
               "null"
@@ -586,70 +620,77 @@
         "type": "object"
       },
       "Funnel": {
-        "anyOf": [
-          {
-            "$ref": "#/components/schemas/FunnelSlice"
-          },
+        "allOf": [
           {
             "properties": {
-              "by": {
-                "$ref": "#/components/schemas/FunnelBy"
+              "brand": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/BrandId"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
-              "locations": {
-                "items": {
-                  "$ref": "#/components/schemas/LocationFunnel"
-                },
-                "type": "array"
+              "from": {
+                "format": "date",
+                "type": "string"
+              },
+              "min_sample": {
+                "description": "Under this many, a share has no percent.",
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "posthog_url": {
+                "description": "The same funnel from the visit on in PostHog; null without a project configured.",
+                "pattern": "^https?://",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "to": {
+                "format": "date",
+                "type": "string"
               }
             },
             "required": [
-              "by",
-              "locations"
+              "from",
+              "to",
+              "brand",
+              "min_sample",
+              "posthog_url"
             ],
             "type": "object"
-          }
-        ],
-        "properties": {
-          "brand": {
+          },
+          {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/BrandId"
+                "$ref": "#/components/schemas/FunnelSlice"
               },
               {
-                "type": "null"
+                "properties": {
+                  "by": {
+                    "$ref": "#/components/schemas/FunnelBy"
+                  },
+                  "locations": {
+                    "items": {
+                      "$ref": "#/components/schemas/LocationFunnel"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "by",
+                  "locations"
+                ],
+                "type": "object"
               }
             ]
-          },
-          "from": {
-            "format": "date",
-            "type": "string"
-          },
-          "min_sample": {
-            "description": "Under this many, a share has no percent.",
-            "format": "uint64",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "posthog_url": {
-            "description": "The same funnel from the visit on in PostHog; null without a project configured.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "to": {
-            "format": "date",
-            "type": "string"
           }
-        },
-        "required": [
-          "from",
-          "to",
-          "brand",
-          "min_sample",
-          "posthog_url"
-        ],
-        "type": "object"
+        ]
       },
       "FunnelBy": {
         "description": "How the funnel is cut.\n\n- `location`: One slice per brand's location; `location` null for the leads naming none.",
@@ -1711,6 +1752,7 @@
         "properties": {
           "amount": {
             "description": "Decimal USDT as a string, a JSON number would round it: whole USDT up to 999 999 999, at\nmost 6 decimals.",
+            "pattern": "^([1-9][0-9]{0,8}(\\.[0-9]{0,5}[1-9])?|0\\.[0-9]{0,5}[1-9])$",
             "type": "string"
           },
           "expires_in_days": {
@@ -1930,8 +1972,7 @@
             "type": "string"
           },
           "kind": {
-            "description": "register | set | revert | withdraw | restore",
-            "type": "string"
+            "$ref": "#/components/schemas/PlaceChangeKind"
           },
           "reverts": {
             "description": "The change a revert went back before.",
@@ -1953,6 +1994,17 @@
         ],
         "type": "object"
       },
+      "PlaceChangeKind": {
+        "description": "What a change did to a place.\n\n- `register`: Registered by hand (it may not have had a lead yet).\n- `set`: Its settings replaced.\n- `revert`: The settings an earlier change found, put back.\n- `withdraw`: Taken off the sites: they answer it as gone.\n- `restore`: Back on the sites.",
+        "enum": [
+          "register",
+          "set",
+          "revert",
+          "withdraw",
+          "restore"
+        ],
+        "type": "string"
+      },
       "PlaceHistory": {
         "properties": {
           "changes": {
@@ -1971,53 +2023,26 @@
         "description": "A place's live settings: only the fields that are set. Empty: the site serves its baked\nconfig.",
         "properties": {
           "address": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Address"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/Address"
           },
           "booking": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/BookingConfig"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/BookingConfig"
           },
           "geo": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Geo"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/Geo"
           },
           "hours": {
             "items": {
               "$ref": "#/components/schemas/OpeningHours"
             },
-            "type": [
-              "array",
-              "null"
-            ]
+            "type": "array"
           },
           "landmark": {
             "additionalProperties": {
               "type": "string"
             },
             "description": "A text per locale; a site keeps it only when every locale it speaks is there.",
-            "type": [
-              "object",
-              "null"
-            ]
+            "type": "object"
           },
           "messengers": {
             "additionalProperties": false,
@@ -2030,62 +2055,34 @@
                 "type": "boolean"
               }
             },
-            "type": [
-              "object",
-              "null"
-            ]
+            "type": "object"
           },
           "phone": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "rating": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Rating"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/Rating"
           },
           "reviewUrl": {
             "description": "Where the place asks for a Google review.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "serviceArea": {
             "description": "Commune names.",
             "items": {
               "type": "string"
             },
-            "type": [
-              "array",
-              "null"
-            ]
+            "type": "array"
           },
           "storefrontPhoto": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "telegram": {
             "description": "The place's Telegram bot: its username, without the `@`.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "whatsapp": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           }
         },
         "type": "object"
@@ -2094,6 +2091,14 @@
         "properties": {
           "brand": {
             "type": "string"
+          },
+          "changed_at": {
+            "description": "Its latest change: registered, set, reverted, withdrawn or restored; null for a place only leads name.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "has_settings": {
             "description": "Live settings with a field set at least.",
@@ -2118,7 +2123,8 @@
           "location",
           "last_lead_at",
           "has_settings",
-          "withdrawn"
+          "withdrawn",
+          "changed_at"
         ],
         "type": "object"
       },
@@ -2492,6 +2498,14 @@
             "$ref": "#/components/schemas/BrandId"
           },
           "contact": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Attendee"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "description": "The attendee, for a caller who sees PII."
           },
           "end_at": {
@@ -2542,8 +2556,7 @@
             "type": "string"
           },
           "status": {
-            "description": "booked | canceled",
-            "type": "string"
+            "$ref": "#/components/schemas/ProviderBookingStatus"
           }
         },
         "required": [
@@ -2560,6 +2573,14 @@
           "match"
         ],
         "type": "object"
+      },
+      "ProviderBookingStatus": {
+        "description": "Where a provider's booking stands.",
+        "enum": [
+          "booked",
+          "canceled"
+        ],
+        "type": "string"
       },
       "ProviderBookings": {
         "properties": {
@@ -6076,7 +6097,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CallOutcome"
+                "$ref": "#/components/schemas/CallOutcomeBody"
               }
             }
           },
@@ -9514,7 +9535,7 @@
     },
     "views": {
       "experiments": {
-        "description": "The landings' experiments and their overrides.",
+        "description": "The landings' experiments and their overrides, of every brand or one.",
         "key": "e",
         "needs": "sa:sites:analysis:read",
         "params": {
@@ -9524,7 +9545,19 @@
         },
         "path": "/experiments",
         "query": {
-          "properties": {},
+          "properties": {
+            "brand": {
+              "description": "A brand: a lowercase slug, 1–64 of `[a-z0-9_-]`, starting alphanumeric.",
+              "examples": [
+                "aquafix"
+              ],
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
           "required": [],
           "type": "object"
         }

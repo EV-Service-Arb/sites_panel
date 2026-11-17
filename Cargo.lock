@@ -2182,6 +2182,7 @@ version = "0.1.0"
 dependencies = [
  "ev_lib 0.33.0",
  "jiff",
+ "regex",
  "sa_alerts",
  "sa_auth",
  "sa_core",
