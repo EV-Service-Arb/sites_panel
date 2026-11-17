@@ -26,7 +26,7 @@ A landing (sites-tools) bakes its places into its build, and lays over them what
 answers for each one: phones, WhatsApp, the Telegram bot and the messenger switches, opening
 hours, service area, a review link, and for storefronts an address, a pin, a photo, a landmark,
 a rating (`PlaceLive`). Changing a number is
-an edit in the panel or a `panel place set`, not a release. A site fetches at most every
+an edit in the panel or a `sites_panel place set`, not a release. A site fetches at most every
 10 minutes; the panel being down or slow only delays a change, the site serves what it baked.
 
 ```text
