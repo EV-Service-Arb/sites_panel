@@ -688,7 +688,7 @@ FORM-VARIANTS-SPEC, "Booking providers contract" (2026-10-04). Providers, a clos
 `manual | link | google_calendar | cal_com` (`calendly` next, same seams). The rules are
 normative in `contracts/vectors/booking/README.md`: `panel_core::booking::check_config` and the
 package's `checkBookingConfig` are held to `valid/`, `invalid/` and `urls.json`, the registry
-(`crates/panel/tests/booking.rs`) and `bookingRequested` to `requested/`. Which provider a
+(`crates/panel/tests/it/booking.rs`) and `bookingRequested` to `requested/`. Which provider a
 visitor is offered and the link a page opens are the site's (sites-tools).
 
 **A place's `booking`** (place settings, `PlaceLive.booking` in `/api/internal/…/locations`):
