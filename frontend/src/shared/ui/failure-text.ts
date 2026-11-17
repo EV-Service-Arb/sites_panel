@@ -6,9 +6,13 @@ export function failureText(failure: Failure, t: T): string {
   switch (failure.code) {
     case "network":
       return t("state.network");
+    case "csrf":
+      return t("state.csrf");
     case "unauthenticated":
     case "forbidden":
       return t("state.forbidden");
+    case "unavailable":
+    case "bad_gateway":
     case "invoices_unavailable":
     case "ledger_unavailable":
     case "google_unavailable":

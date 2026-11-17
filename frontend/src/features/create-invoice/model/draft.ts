@@ -28,12 +28,13 @@ export function invoiceFrom(draft: InvoiceDraft): DraftOutcome {
 
 /**
  * Whether a failed create may be sent again under the same Idempotency-Key. A lost answer, an
- * outage or a 500 may have reached banking, so the retry must replay it. A refusal did not
- * create anything, and the same key would only repeat the refusal.
+ * outage, a 500 or the forward's 502 may have reached banking, so the retry must replay it. A
+ * refusal did not create anything, and the same key would only repeat the refusal.
  */
 export function keepsKey(failure: Failure): boolean {
   switch (failure.code) {
     case "network":
+    case "bad_gateway":
     case "internal":
     case "invoices_unavailable":
     case "ledger_unavailable":

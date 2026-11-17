@@ -72,12 +72,12 @@ describe("invoiceFrom", () => {
 
 describe("keepsKey", () => {
   it("replays the idempotency key after a failure that may have reached banking", () => {
-    const keeps = (["network", "internal", "invoices_unavailable", "ledger_unavailable", "not_granted"] as const).map((code): Failure => ({ code, error: "" }));
+    const keeps = (["network", "bad_gateway", "internal", "invoices_unavailable", "ledger_unavailable", "not_granted"] as const).map((code): Failure => ({ code, error: "" }));
     expect(keeps.map(keepsKey)).toEqual(keeps.map(() => true));
   });
 
   it("drops the key after a refusal, which created nothing", () => {
-    const drops = (["unauthenticated", "forbidden", "not_found", "invoice_not_open", "scope_frozen", "idempotency_conflict", "ledger_refused", "bad_request"] as const).map(
+    const drops = (["unauthenticated", "csrf", "unavailable", "forbidden", "not_found", "invoice_not_open", "scope_frozen", "idempotency_conflict", "ledger_refused", "bad_request"] as const).map(
       (code): Failure => ({ code, error: "" }),
     );
     expect(drops.map(keepsKey)).toEqual(drops.map(() => false));
