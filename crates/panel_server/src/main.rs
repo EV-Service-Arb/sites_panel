@@ -11,17 +11,8 @@ use std::{net::SocketAddr, sync::Arc};
 use clap::{Parser, Subcommand};
 use ev_lib::error_monitoring;
 use eyre::WrapErr;
-use panel::{
-	Panel,
-	place::{Expected, PlaceError, PlaceView},
-	pricing::{PricingError, PricingView},
-	seal::DataKey,
-	store::Store,
-};
-use panel_core::{
-	ids::LocationId,
-	place::{self, Editor},
-};
+use panel::{Panel, seal::DataKey, store::Store};
+use panel_core::{ids::LocationId, place::Editor};
 use panel_server::{
 	capture::{self, CaptureApi},
 	conductor, google_calendar, http,
@@ -59,9 +50,6 @@ enum Cmd {
 	/// A place's live settings, what the sites lay over their baked config.
 	#[command(subcommand)]
 	Place(PlaceCmd),
-	/// A brand's pricing, what the sites price estimates and fixed jobs by.
-	#[command(subcommand)]
-	Pricing(PricingCmd),
 	/// Print a fresh PANEL_DATA_KEY.
 	GenDataKey,
 }
@@ -71,57 +59,6 @@ enum PlaceCmd {
 	/// Make a place known to the panel, as adding it on the Locations screen does; nothing
 	/// changes for one it knows. Journaled as `by = cli`.
 	Register { brand: String, slug: String },
-	/// Set some fields, clear others; the rest stay. Journaled as `by = cli`.
-	Set {
-		brand: String,
-		slug: String,
-		/// E.164, e.g. +33612345678.
-		#[arg(long)]
-		phone: Option<String>,
-		#[arg(long)]
-		whatsapp: Option<String>,
-		/// Rows split by commas: 'Mo-Fr 08:00-19:00,Sa 09:00-12:00'.
-		#[arg(long)]
-		hours: Option<String>,
-		/// Commune names split by commas: 'Royat,Chamalières'.
-		#[arg(long = "service-area")]
-		service_area: Option<String>,
-		/// The place's Telegram bot, its username without the @: aquafix_devis_bot.
-		#[arg(long)]
-		telegram: Option<String>,
-		/// Messengers switched on or off, split by commas: 'whatsapp=on,telegram=off'.
-		#[arg(long)]
-		messengers: Option<String>,
-		/// A field to clear (the site's baked value takes over); repeat for several.
-		#[arg(long = "clear", value_name = "FIELD")]
-		clear: Vec<String>,
-	},
-	/// The settings as the sites get them, and who set them when.
-	Show { brand: String, slug: String },
-	/// Every change, newest first.
-	History { brand: String, slug: String },
-	/// Put back the settings a change found; journaled as a change of its own.
-	Revert { brand: String, slug: String, id: uuid::Uuid },
-	/// Take the place off the sites: they answer it as gone (404).
-	Withdraw { brand: String, slug: String },
-	/// Put a withdrawn place back.
-	Restore { brand: String, slug: String },
-}
-
-#[derive(Subcommand)]
-enum PricingCmd {
-	/// The model as saved, its locales, and who saved it when.
-	Show { brand: String },
-	/// The last changes, newest first.
-	History { brand: String },
-	/// Save a model (its JSON, from a file or `-` for stdin), checked as the editor's is.
-	/// Journaled as `by = cli`.
-	Set { brand: String, file: std::path::PathBuf },
-	/// Take the model off the sites: they go back to their baked one. Journaled as `by = cli`.
-	Remove { brand: String },
-	/// The locales the brand's sites speak, split by commas (`fr,en`, the default): every label
-	/// of its model must be in each.
-	Locales { brand: String, locales: String },
 }
 
 // Sentry must be initialised before the async runtime starts, hence no #[tokio::main].
@@ -204,7 +141,6 @@ async fn run(cli: Cli, settings: Settings) -> eyre::Result<()> {
 			Ok(())
 		}
 		Cmd::Place(cmd) => place(&connect().await?, cmd).await,
-		Cmd::Pricing(cmd) => pricing(&connect().await?, cmd).await,
 		Cmd::GenDataKey => {
 			println!("{}", DataKey::generate_hex()?);
 			Ok(())
@@ -212,162 +148,14 @@ async fn run(cli: Cli, settings: Settings) -> eyre::Result<()> {
 	}
 }
 
-/// A place's change refused, said field by field.
-fn refused(e: PlaceError) -> eyre::Report {
-	match e {
-		PlaceError::Invalid(fields) => {
-			let lines: Vec<String> = fields.iter().map(|(field, why)| format!("  {field}: {why}")).collect();
-			eyre::eyre!("invalid settings:\n{}", lines.join("\n"))
-		}
-		PlaceError::NotFound => eyre::eyre!("no such change of this place"),
-		PlaceError::Conflict => eyre::eyre!("the settings changed meanwhile; run it again"),
-		PlaceError::GmbTaken => eyre::eyre!("the GMB is linked to another place"),
-		PlaceError::Internal(e) => e,
-	}
-}
-
-fn print_place(v: &PlaceView) -> eyre::Result<()> {
-	let state = if v.withdrawn { "withdrawn: the sites answer 404" } else { "live" };
-	match (v.updated_at, &v.updated_by) {
-		(Some(at), Some(by)) => println!("{}/{}  {state}; set {at} by {by}", v.brand, v.slug),
-		_ => println!("{}/{}  {state}; never set, the sites serve their baked config", v.brand, v.slug),
-	}
-	println!("{}", serde_json::to_string_pretty(&v.settings.as_json())?);
-	Ok(())
-}
-
 async fn place(panel: &Panel, cmd: PlaceCmd) -> eyre::Result<()> {
-	let ids = |brand: &str, slug: &str| eyre::Ok((BrandId::parse(brand)?, LocationId::parse(slug)?));
-	let now = jiff::Timestamp::now();
-	let cli = Editor::Cli;
-	let view = match cmd {
-		PlaceCmd::Register { brand, slug } => {
-			let (brand, slug) = ids(&brand, &slug)?;
-			let (view, added) = panel.register_place(&cli, &brand, &slug, now).await?;
-			if !added {
-				eprintln!("{brand}/{slug} was known already: nothing changed");
-			}
-			view
-		}
-		PlaceCmd::Set {
-			brand,
-			slug,
-			phone,
-			whatsapp,
-			hours,
-			service_area,
-			telegram,
-			messengers,
-			clear,
-		} => {
-			let (brand, slug) = ids(&brand, &slug)?;
-			let mut set = serde_json::Map::new();
-			if let Some(p) = phone {
-				set.insert("phone".into(), p.into());
-			}
-			if let Some(w) = whatsapp {
-				set.insert("whatsapp".into(), w.into());
-			}
-			if let Some(h) = hours {
-				set.insert("hours".into(), place::hours_from_spec(&h).map_err(|e| eyre::eyre!("--hours {e}"))?);
-			}
-			if let Some(a) = service_area {
-				set.insert("serviceArea".into(), a.split(',').map(str::trim).collect::<Vec<_>>().into());
-			}
-			if let Some(t) = telegram {
-				set.insert("telegram".into(), t.into());
-			}
-			if let Some(m) = messengers {
-				set.insert("messengers".into(), place::messengers_from_spec(&m).map_err(|e| eyre::eyre!("--messengers {e}"))?);
-			}
-			eyre::ensure!(!set.is_empty() || !clear.is_empty(), "nothing to set: give a field, or --clear one");
-			panel.patch_place(&cli, &brand, &slug, set, &clear, now).await.map_err(refused)?
-		}
-		PlaceCmd::Show { brand, slug } => {
-			let (brand, slug) = ids(&brand, &slug)?;
-			panel.place(&brand, &slug).await?
-		}
-		PlaceCmd::History { brand, slug } => {
-			let (brand, slug) = ids(&brand, &slug)?;
-			for c in panel.place_history(&brand, &slug).await? {
-				println!("{}  {:<8}  {:<24}  {}", c.at, c.kind.as_str(), c.by, c.id);
-				println!("  before {}\n  after  {}", c.before.as_json(), c.after.as_json());
-			}
-			return Ok(());
-		}
-		PlaceCmd::Revert { brand, slug, id } => {
-			let (brand, slug) = ids(&brand, &slug)?;
-			panel.revert_place(&cli, &brand, &slug, id, Expected::Any, now).await.map_err(refused)?
-		}
-		PlaceCmd::Withdraw { brand, slug } => {
-			let (brand, slug) = ids(&brand, &slug)?;
-			panel.withdraw_place(&cli, &brand, &slug, true, now).await.map_err(refused)?
-		}
-		PlaceCmd::Restore { brand, slug } => {
-			let (brand, slug) = ids(&brand, &slug)?;
-			panel.withdraw_place(&cli, &brand, &slug, false, now).await.map_err(refused)?
-		}
-	};
-	print_place(&view)
-}
-
-fn print_pricing(v: &PricingView) -> eyre::Result<()> {
-	let locales = v.locales.join(",");
-	match (v.updated_at, &v.updated_by, &v.model) {
-		(Some(at), Some(by), Some(_)) => println!("{}  locales {locales}; saved {at} by {by}", v.brand),
-		(Some(at), Some(by), None) => println!("{}  locales {locales}; removed {at} by {by}, the sites serve their baked model", v.brand),
-		_ => println!("{}  locales {locales}; never set, the sites serve their baked model", v.brand),
-	}
-	if let Some(model) = &v.model {
-		println!("{}", serde_json::to_string_pretty(model)?);
+	let PlaceCmd::Register { brand, slug } = cmd;
+	let (brand, slug) = (BrandId::parse(&brand)?, LocationId::parse(&slug)?);
+	let (_, added) = panel.register_place(&Editor::Cli, &brand, &slug, jiff::Timestamp::now()).await?;
+	if !added {
+		eprintln!("{brand}/{slug} was known already: nothing changed");
 	}
 	Ok(())
-}
-
-/// A brand's pricing change refused, said problem by problem.
-fn refused_pricing(e: PricingError) -> eyre::Report {
-	match e {
-		PricingError::Invalid(problems) => {
-			let lines: Vec<String> = problems.iter().map(|p| format!("  {p}")).collect();
-			eyre::eyre!("invalid pricing model:\n{}", lines.join("\n"))
-		}
-		PricingError::Stale(_) => eyre::eyre!("the pricing changed meanwhile; run it again"),
-		PricingError::Internal(e) => e,
-	}
-}
-
-async fn pricing(panel: &Panel, cmd: PricingCmd) -> eyre::Result<()> {
-	let now = jiff::Timestamp::now();
-	let cli = Editor::Cli;
-	let view = match cmd {
-		PricingCmd::Show { brand } => panel.pricing(&BrandId::parse(&brand)?).await?,
-		PricingCmd::History { brand } => {
-			for c in panel.pricing_history(&BrandId::parse(&brand)?).await? {
-				let what = match (&c.valid_from, c.needs) {
-					(Some(from), Some(n)) => format!("valid from {from}, {n} needs"),
-					_ => "removed".to_owned(),
-				};
-				println!("{}  {:<6}  {:<24}  {what}  {}", c.at, c.kind.as_str(), c.by, c.id);
-			}
-			return Ok(());
-		}
-		PricingCmd::Set { brand, file } => {
-			let brand = BrandId::parse(&brand)?;
-			let raw = if file.as_os_str() == "-" {
-				std::io::read_to_string(std::io::stdin()).wrap_err("reading the model from stdin")?
-			} else {
-				std::fs::read_to_string(&file).wrap_err_with(|| format!("reading the model at {}", file.display()))?
-			};
-			let model: serde_json::Value = serde_json::from_str(&raw).wrap_err("the model is not JSON")?;
-			panel.set_pricing(&cli, &brand, &model, Expected::Any, now).await.map_err(refused_pricing)?
-		}
-		PricingCmd::Remove { brand } => panel.remove_pricing(&cli, &BrandId::parse(&brand)?, Expected::Any, now).await.map_err(refused_pricing)?,
-		PricingCmd::Locales { brand, locales } => {
-			let locales = panel_core::pricing::parse_locales(locales.split(','))?;
-			panel.set_brand_locales(&cli, &BrandId::parse(&brand)?, &locales, now).await?
-		}
-	};
-	print_pricing(&view)
 }
 
 /// The Google Calendar adapter, how often it pulls, and the owners' consents, when configured.

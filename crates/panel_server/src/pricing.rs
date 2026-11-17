@@ -54,7 +54,7 @@ pub(crate) fn routes() -> Vec<ApiRoute> {
 impl Refuses<PricingError> for Code {
 	fn refusal(e: PricingError) -> Refusal<Self> {
 		match e {
-			PricingError::Stale(_) => Refusal::new(Self::Stale, e.to_string()),
+			PricingError::Stale => Refusal::new(Self::Stale, e.to_string()),
 			PricingError::Invalid(problems) => match problems.first() {
 				Some(first) => Refusal::new(Self::InvalidPricing, first.to_string()),
 				None => Self::refusal(eyre::eyre!("a model refused with no problem named")),

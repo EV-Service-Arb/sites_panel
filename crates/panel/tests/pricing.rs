@@ -65,8 +65,7 @@ async fn a_model_is_saved_whole_and_checked_against_what_was_read() {
 	let mut cheaper = cleaning();
 	cheaper["minimumCents"] = json!(3900);
 	let stale = panel.set_pricing(&admin(), &brand, &cheaper, Expected::At(None), now()).await.unwrap_err();
-	let PricingError::Stale(current) = stale else { panic!("{stale:?}") };
-	assert_eq!(current.updated_at, saved.updated_at, "what it is now, for the editor to show");
+	assert!(matches!(stale, PricingError::Stale), "{stale:?}");
 	let next = panel.set_pricing(&admin(), &brand, &cheaper, Expected::At(saved.updated_at), now()).await.unwrap();
 	assert!(next.updated_at > saved.updated_at, "a later token even within the same microsecond");
 

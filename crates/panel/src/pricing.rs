@@ -75,9 +75,9 @@ impl ChangeKind {
 /// Why a change to a brand's pricing was not made.
 #[derive(Debug, thiserror::Error)]
 pub enum PricingError {
-	/// The pricing changed since the editor read it; what it is now.
+	/// The pricing changed since the editor read it.
 	#[error("the pricing changed since it was read")]
-	Stale(Box<PricingView>),
+	Stale,
 	/// Every reason the model is not one the brand's sites can show (never empty).
 	#[error("invalid pricing model: {0:?}")]
 	Invalid(Vec<Problem>),
@@ -191,7 +191,7 @@ impl Panel {
 		if let Expected::At(seen) = expected
 			&& seen.map(micros).transpose()? != current.updated_at
 		{
-			return Err(PricingError::Stale(Box::new(current)));
+			return Err(PricingError::Stale);
 		}
 		let after = to(&current)?;
 		if after == current.model {

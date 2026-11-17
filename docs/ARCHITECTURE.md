@@ -512,8 +512,6 @@ and restore, a hand registration, its GMB link, and `GET /gmbs`.
   (`place_changes`: before, after, who — the user's email and id, or `cli` — and
   when). `updated_at` only grows, a microsecond at least per change, so two edits never share
   a token. A change that changes nothing writes nothing.
-- **The CLI** (`sites_panel place set|show|history|revert|withdraw|restore`) goes through the same
-  calls, `by = cli`, patching over what is there when its transaction begins.
 - **History is append-only, places never deleted**: triggers refuse any UPDATE or DELETE of
   `place_changes`, a DELETE of `places` or `place_settings` (cleared is `{}`), and any UPDATE
   of `places` but `withdrawn` and `gmb_id`.
@@ -557,8 +555,6 @@ pricing, one brand's, its changes, a save or a removal (`expected_updated_at` ch
   A removal keeps the row with `model` NULL and its own `updated_at`, which the next save names;
   `updated_at` only grows, a microsecond at least per change. Saving the model there is, or
   removing none, writes nothing and tells nobody.
-- **The CLI**: `sites_panel pricing show|history|set <brand> <file|->|remove|locales`, `by = cli`,
-  over whatever is there when its transaction begins.
 - **Append-only**: triggers refuse any UPDATE or DELETE of `pricing_changes` and a DELETE of
   `pricing`.
 

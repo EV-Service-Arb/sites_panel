@@ -210,7 +210,7 @@
             # a source that gets a 5xx retries from its outbox; nothing is lost while down
             criticality = "normal";
             entrypoint = [ "${bin}/bin/${pname}" "serve" "--bind" "0.0.0.0:${toString port}" ];
-            # /bin/sites_panel, for `kubectl exec … sites_panel place set` and the like
+            # /bin/sites_panel, for `kubectl exec … sites_panel rebuild-projections` and the like
             contents = [ bin ];
             # the production guards (`#[required_in("production")]`) are armed wherever it runs
             # PostHog: the project the landings send to (Cloud US 614067, their
