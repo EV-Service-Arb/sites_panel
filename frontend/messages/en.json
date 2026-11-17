@@ -456,6 +456,8 @@
   "booking.provider.link": "Booking link",
   "booking.provider.google_calendar": "Google Calendar",
   "booking.provider.cal_com": "Cal.com",
+  "calendar.connect": "Connect Google Calendar",
+  "calendar.connect.hint": "The owner of {brand}'s calendar signs in at Google: the panel then reads its bookings.",
   "booking.part.morning": "morning",
   "booking.part.afternoon": "afternoon",
   "booking.part.evening": "evening",

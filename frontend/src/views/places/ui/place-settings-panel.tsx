@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 
 import { type PlaceKey, type PlaceSettingsView, savedSince } from "@/entities/place";
 import { useMe } from "@/entities/session";
+import { ConnectCalendarButton } from "@/features/connect-calendar";
 import { SettingsForm, SettingsSummary } from "@/features/edit-place-settings";
 import { WithdrawButton } from "@/features/withdraw-place";
 import { api } from "@/shared/api";
@@ -76,6 +77,9 @@ function PlacePanes({ base, latest, version, saved, onWritten, onReload, onTakeF
   const t = useT();
   const me = useMe();
   const fresher = savedSince(latest, base) ? latest : null;
+  const { booking } = latest.settings;
+  // The consent is the brand's, asked where a place of it books through its Google Calendar.
+  const offersGoogle = booking !== undefined && (booking.default === "google_calendar" || booking.providers.google_calendar !== undefined);
   return (
     <div className="flex flex-col gap-4">
       <PlaceStatus view={latest} />
@@ -89,13 +93,14 @@ function PlacePanes({ base, latest, version, saved, onWritten, onReload, onTakeF
           <TabsTrigger value="edit">{t("placeSettings.tab.edit")}</TabsTrigger>
           <TabsTrigger value="history">{t("placeSettings.tab.history")}</TabsTrigger>
         </TabsList>
-        <TabsContent value="edit" className="pt-3">
+        <TabsContent value="edit" className="flex flex-col gap-4 pt-3">
           {base.can_edit ? (
             <SettingsForm key={base.updated_at ?? "never"} place={base} onSaved={onWritten} onReload={() => onReload()} fresher={fresher} onTakeFresh={onTakeFresh} />
           ) : (
             // Nothing typed to protect: a reader sees the newest at once.
             <SettingsSummary place={latest} />
           )}
+          {offersGoogle && api().mayCall("post", "/bookings/google_calendar/{brand}/consent", me.permissions) && <ConnectCalendarButton brand={latest.brand} />}
         </TabsContent>
         <TabsContent value="history" className="pt-3">
           <PlaceHistory view={base} version={version} onChanged={onWritten} onReload={() => onReload()} />

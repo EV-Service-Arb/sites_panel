@@ -99,7 +99,8 @@ The form runs the contract's own checks before saving; a refusal still shows the
 server's own words above it. The history
 reads each change as before → after, with a revert guarded the same way; an admin can withdraw a
 point (the site then answers 404 for it) and add one by hand, under a brand some place or price list already names.
-An operator reads.
+Where a place books through Google Calendar, an admin connects the brand's calendar from there (Google's consent,
+back to the same page). An operator reads.
 
 The preview of the contact channels assumes the places' hours are Paris time
 (`entities/place/config/time-zone.ts`): the live data carries no zone.

@@ -456,6 +456,8 @@
   "booking.provider.link": "Ссылка на запись",
   "booking.provider.google_calendar": "Google Календарь",
   "booking.provider.cal_com": "Cal.com",
+  "calendar.connect": "Подключить Google Календарь",
+  "calendar.connect.hint": "Владелец календаря {brand} входит в Google: после этого панель читает его записи.",
   "booking.part.morning": "утро",
   "booking.part.afternoon": "день",
   "booking.part.evening": "вечер",
