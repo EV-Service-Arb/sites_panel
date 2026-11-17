@@ -15,6 +15,7 @@ use panel_core::{
 	experiment,
 	fact::{self, LeadChannel, LeadFlow, LeadSuspect, Messenger},
 	funnel::CONTACT_SLA,
+	lead::Stage,
 	place::{self, DayOfWeek, FIELDS, PlaceLive},
 	pricing::{self, InputKind, PricingModel},
 };
@@ -192,6 +193,14 @@ fn frontend(root: &Path) {
 			Ts::Value {
 				name: "CONTACT_SLA_SECONDS",
 				value: CONTACT_SLA.as_secs().into(),
+			},
+			Ts::Value {
+				name: "MOVES",
+				value: Stage::ALL
+					.iter()
+					.map(|&stage| (stage.as_str().to_owned(), stage.moves().iter().map(|s| s.as_str()).collect::<Vec<_>>().into()))
+					.collect::<serde_json::Map<_, _>>()
+					.into(),
 			},
 			Ts::Value {
 				name: "BOOKING_ACTIONS",

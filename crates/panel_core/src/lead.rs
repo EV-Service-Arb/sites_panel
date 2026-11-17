@@ -10,7 +10,7 @@ use sa_core::ids::BrandId;
 
 use crate::{
 	event::Subject,
-	fact::{AnalyticsId, Fact, LeadChannel, LeadOffer, LeadSuspect, MessageRef, Messenger},
+	fact::{AnalyticsId, Fact, LeadChannel, LeadOffer, LeadSuspect, LostReason, MessageRef, Messenger},
 	ids::{EventId, JobId, LeadId, LocationId},
 };
 
@@ -29,6 +29,19 @@ vocabulary! {
 }
 
 impl Stage {
+	/// The steps an operator is offered from here: forward, `lost` until the job is done, a lost
+	/// lead reopened by progress. Narrower than what `fold` takes, which judges any source.
+	pub const fn moves(self) -> &'static [Self] {
+		match self {
+			Self::Created => &[Self::Contacted, Self::Quoted, Self::Lost],
+			Self::Contacted => &[Self::Quoted, Self::Won, Self::Lost],
+			Self::Quoted => &[Self::Won, Self::Lost],
+			Self::Won => &[Self::Completed, Self::Lost],
+			Self::Completed | Self::Paid => &[],
+			Self::Lost => &[Self::Contacted, Self::Quoted, Self::Won],
+		}
+	}
+
 	/// The stage a fact moves a lead to; `None` for facts that are about the lead without
 	/// moving it (calls).
 	pub fn of(fact: &Fact) -> Option<Self> {
@@ -111,7 +124,7 @@ pub struct LeadState {
 	pub stage: Stage,
 	pub times: StageTimes,
 	/// Set while the lead is lost: the reason of the loss that put it there.
-	pub lost_reason: Option<String>,
+	pub lost_reason: Option<LostReason>,
 	/// How it came in, from its `lead.created`; `None` when that was never registered.
 	pub channel: Option<LeadChannel>,
 	/// Why the landing's antispam doubted it, from its `lead.created`; `None` for an ordinary
@@ -211,7 +224,7 @@ pub fn fold(events: &[Recorded]) -> Option<LeadState> {
 				(current, progress) => current.max(progress),
 			};
 			state.lost_reason = match &e.fact {
-				Fact::LeadLost { reason, .. } => Some(reason.clone()),
+				Fact::LeadLost { reason, .. } => Some(*reason),
 				_ if state.stage == Stage::Lost => state.lost_reason,
 				_ => None,
 			};
@@ -316,7 +329,7 @@ mod tests {
 		reversed.reverse();
 		assert_eq!(fold(&reversed).unwrap(), forward);
 		assert_eq!(forward.stage, Stage::Lost);
-		assert_eq!(forward.lost_reason.as_deref(), Some("no_answer"));
+		assert_eq!(forward.lost_reason, Some(LostReason::NoAnswer));
 		assert!(forward.manual, "typed in from the panel");
 	}
 

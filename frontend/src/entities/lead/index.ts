@@ -1,10 +1,40 @@
 export { bookingActions } from "./model/booking";
+export { MOVES } from "./model/generated";
 export type { BookingAction } from "./model/booking";
-export { LABELLED_PII, awaitingMessage, contactOf, extrasOf, fieldsOf, dialable, slaAt, reached, refOf } from "./model/lead";
+export {
+  LABELLED_PII,
+  awaitingMessage,
+  contactOf,
+  extrasOf,
+  fieldsOf,
+  dialable,
+  slaAt,
+  reached,
+  refOf,
+} from "./model/lead";
 export type { Contact, LabelledPii, LeadFilter, LeadRef } from "./model/lead";
-export type { BookingSlot as SlotBody, BookingEnd as CloseBody, Lead, LeadBooking, LeadCard, LeadCounts, LeadEvent, LeadPage, ManualChannel, Stage, StageMove } from "@/shared/api/schema";
+export type {
+  BookingSlot as SlotBody,
+  BookingEnd as CloseBody,
+  Lead,
+  LeadBooking,
+  LeadCard,
+  LeadCounts,
+  LeadEvent,
+  LeadPage,
+  LostReason,
+  ManualChannel,
+  Stage,
+  StageMove,
+} from "@/shared/api/schema";
 export { quotedPrice } from "./model/pricing";
-export { ChannelBadge, ChannelIcon, SlaBadge, StageBadge, SuspectBadge } from "./ui/badges";
+export {
+  ChannelBadge,
+  ChannelIcon,
+  SlaBadge,
+  StageBadge,
+  SuspectBadge,
+} from "./ui/badges";
 export { DealSummary, PriceText } from "./ui/deal-badges";
 export { BookingBadge, BookingLine } from "./ui/booking-badge";
 export { bookingWhen, wishText } from "./lib/booking-text";

@@ -7,7 +7,7 @@ use eyre::WrapErr;
 use jiff::{Timestamp, civil::Date};
 use panel_core::{
 	booking::{BookingMatch, BookingState, BookingStatus, DayPart, Provider},
-	fact::{LeadChannel, LeadFlow, LeadSuspect, MessageRef, Messenger},
+	fact::{LeadChannel, LeadFlow, LeadSuspect, LostReason, MessageRef, Messenger},
 	funnel::Totals,
 	ids::LeadId,
 	lead::Stage,
@@ -39,7 +39,7 @@ pub struct LeadRow {
 	pub completed_at: Option<Timestamp>,
 	pub paid_at: Option<Timestamp>,
 	pub lost_at: Option<Timestamp>,
-	pub lost_reason: Option<String>,
+	pub lost_reason: Option<LostReason>,
 	/// From its `lead.created`; `None` when that said none.
 	pub flow: Option<LeadFlow>,
 	/// The price an estimate or a fixed price showed, integer cents EUR TTC.
@@ -171,7 +171,12 @@ impl TryFrom<Row> for LeadRow {
 				.transpose()
 				.wrap_err_with(|| format!("stored suspect of lead {lead}"))?,
 			manual: r.manual,
-			lost_reason: r.lost_reason,
+			lost_reason: r
+				.lost_reason
+				.as_deref()
+				.map(LostReason::parse)
+				.transpose()
+				.wrap_err_with(|| format!("stored lost reason of lead {lead}"))?,
 		})
 	}
 }

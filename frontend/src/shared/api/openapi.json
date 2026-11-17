@@ -1092,10 +1092,13 @@
             ]
           },
           "lost_reason": {
-            "description": "A slug: the panel's `LostReason` words, or another a `lead.lost` of before them said.",
-            "type": [
-              "string",
-              "null"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LostReason"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "manual": {

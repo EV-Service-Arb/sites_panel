@@ -1030,8 +1030,7 @@ export interface components {
             location: string | null;
             /** Format: date-time */
             lost_at: string | null;
-            /** @description A slug: the panel's `LostReason` words, or another a `lead.lost` of before them said. */
-            lost_reason: string | null;
+            lost_reason: components["schemas"]["LostReason"] | null;
             /** @description Typed in by hand (an event of kind `panel`). */
             manual: boolean;
             /** @description The ref the customer carries into a messenger (`AQ-7K3F`), when the landing made one. */

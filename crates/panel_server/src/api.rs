@@ -408,8 +408,7 @@ struct LeadDto {
 	completed_at: Option<Timestamp>,
 	paid_at: Option<Timestamp>,
 	lost_at: Option<Timestamp>,
-	/// A slug: the panel's `LostReason` words, or another a `lead.lost` of before them said.
-	lost_reason: Option<String>,
+	lost_reason: Option<LostReason>,
 	/// The landing's flow; null when it said none.
 	flow: Option<LeadFlow>,
 	/// The price an estimate or a fixed price showed, integer cents EUR TTC.

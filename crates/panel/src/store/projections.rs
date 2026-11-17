@@ -10,7 +10,7 @@
 use eyre::WrapErr;
 use panel_core::{
 	booking::{self, BookingItem, BookingState},
-	fact::Fact,
+	fact::{Fact, LostReason},
 	ids::{EventId, JobId, LeadId, LocationId},
 	lead::{self, LeadState, Recorded},
 };
@@ -238,7 +238,7 @@ async fn upsert_lead(conn: &mut SqliteConnection, s: &LeadState, b: &BookingStat
 	.bind(t(s.times.completed))
 	.bind(t(s.times.paid))
 	.bind(t(s.times.lost))
-	.bind(s.lost_reason.as_deref())
+	.bind(s.lost_reason.map(LostReason::as_str))
 	.bind(s.last_event_id.raw())
 	.bind(to_db(s.last_event_at))
 	.bind(s.suspect.map(|m| m.as_str()))

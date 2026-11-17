@@ -2,6 +2,16 @@
 
 export const CONTACT_SLA_SECONDS = 1800;
 
+export const MOVES = {
+  "completed": [],
+  "contacted": ["quoted", "won", "lost"],
+  "created": ["contacted", "quoted", "lost"],
+  "lost": ["contacted", "quoted", "won"],
+  "paid": [],
+  "quoted": ["won", "lost"],
+  "won": ["completed", "lost"],
+} as const;
+
 export const BOOKING_ACTIONS = {
   "booked": ["set", "done", "no_show", "canceled", "clear"],
   "canceled": ["set", "clear"],

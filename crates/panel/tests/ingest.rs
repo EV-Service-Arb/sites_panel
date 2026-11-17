@@ -193,6 +193,21 @@ async fn a_suspect_lead_is_kept_and_marked() {
 /// The suspect migration adds a column and remakes the views: undone, the column is gone and
 /// the leads are not; applied again, the rebuild brings the marks back from the journal.
 #[tokio::test]
+async fn a_lost_reason_outside_the_panels_words_stops_the_migration() {
+	const WORDS: i64 = 20261117120000;
+	let db = TestDb::create().await;
+	let panel = panel(&db).await;
+	send(&panel, &site(), &[event("lead.created", at(0), "site", lead("L-1"), json!({"channel": "form"}))]).await;
+	let pool = db.pool().await;
+	let migrator = sqlx::migrate!("./migrations");
+	migrator.undo(&pool, WORDS - 1).await.unwrap();
+	sqlx::query("UPDATE leads SET lost_reason = 'price'").execute(&pool).await.unwrap();
+	assert!(migrator.run(&pool).await.is_err(), "a slug of no word stops it");
+	sqlx::query("UPDATE leads SET lost_reason = 'too_expensive'").execute(&pool).await.unwrap();
+	migrator.run(&pool).await.unwrap();
+}
+
+#[tokio::test]
 async fn the_suspect_migration_keeps_the_leads_both_ways() {
 	const SUSPECT: i64 = 20261003140000;
 	let db = TestDb::create().await;

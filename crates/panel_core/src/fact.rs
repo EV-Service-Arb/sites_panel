@@ -5,7 +5,7 @@
 use std::{collections::BTreeMap, fmt};
 
 use jiff::{Timestamp, civil::Date};
-use sa_core::{Invalid, ids::is_slug};
+use sa_core::Invalid;
 
 use crate::{
 	booking::{BookingMatch, Closed, DayPart, Provider},
@@ -379,9 +379,8 @@ pub enum Fact {
 		quote: Option<Money>,
 	},
 	JobWon,
-	/// `reason` is a lowercase slug, so the reports can group by it.
 	LeadLost {
-		reason: String,
+		reason: LostReason,
 		note: Option<String>,
 	},
 	JobCompleted,
@@ -513,11 +512,8 @@ impl Fact {
 
 	/// `lead.lost`.
 	pub fn lost(reason: &str, note: Option<String>) -> Result<Self, Invalid> {
-		if !is_slug(reason) {
-			return Err(Invalid::new("properties.reason is not a lowercase slug, e.g. \"too_expensive\""));
-		}
 		Ok(Self::LeadLost {
-			reason: reason.to_owned(),
+			reason: LostReason::parse(reason).map_err(|e| Invalid::new(format!("properties.{}", e.0)))?,
 			note: bounded("properties.note", note)?,
 		})
 	}
@@ -766,10 +762,16 @@ mod tests {
 	}
 
 	#[test]
-	fn lost_reasons_are_slugs() {
-		assert!(Fact::lost("too_expensive", None).is_ok());
+	fn a_lost_reason_is_one_of_the_panels_words() {
 		assert!(Fact::lost("Too expensive", None).is_err());
-		assert!(Fact::lost("x", Some("a".repeat(1001))).is_err());
-		assert_eq!(Fact::lost("x", Some("  ".into())).unwrap(), Fact::LeadLost { reason: "x".into(), note: None });
+		assert!(Fact::lost("x", None).is_err());
+		assert!(Fact::lost("other", Some("a".repeat(1001))).is_err());
+		assert_eq!(
+			Fact::lost("other", Some("  ".into())).unwrap(),
+			Fact::LeadLost {
+				reason: LostReason::Other,
+				note: None
+			}
+		);
 	}
 }
