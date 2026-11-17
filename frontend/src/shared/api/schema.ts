@@ -719,7 +719,10 @@ export interface components {
          * @enum {string}
          */
         BookingStatus: "none" | "booked" | "canceled" | "done" | "no_show" | "requested";
-        /** @description A brand: a lowercase slug, 1–64 of `[a-z0-9_-]`, starting alphanumeric. */
+        /**
+         * @description A brand: a lowercase slug, 1–64 of `[a-z0-9_-]`, starting alphanumeric.
+         * @example aquafix
+         */
         BrandId: string;
         CallAttempt: {
             /** Format: uuid */
@@ -828,6 +831,7 @@ export interface components {
             /** @description One per variant. */
             weights: number[];
         };
+        /** @example hero_layout */
         ExperimentKey: string;
         /** @description What an admin set over the declaration; a field null is the declaration's. */
         ExperimentOverride: {
@@ -936,6 +940,7 @@ export interface components {
             /** @description Google's consent page, for the brand's calendar owner to open. */
             url: string;
         };
+        /** @example bedrooms */
         InputId: string;
         /** @description An invoice the panel asked banking for. */
         Invoice: {
@@ -1152,7 +1157,10 @@ export interface components {
          * @enum {string}
          */
         LeadFlow: "quote" | "estimate" | "fixed";
-        /** @description A lead, unique within its brand. */
+        /**
+         * @description A lead, unique within its brand.
+         * @example L-1
+         */
         LeadId: string;
         LeadPage: {
             leads: components["schemas"]["Lead"][];
@@ -1168,6 +1176,7 @@ export interface components {
          * @enum {string}
          */
         LeadSuspect: "rate_limited" | "too_fast";
+        /** @example fr */
         LocaleTag: string;
         /** @description A slice's funnel: its steps, the lost and manual shares, and its payments. */
         LocationFunnel: {
@@ -1178,7 +1187,10 @@ export interface components {
             payments: components["schemas"]["Paid"][];
             stages: components["schemas"]["FunnelStep"][];
         };
-        /** @description A location: a GBP listing plus its landing subdomain. */
+        /**
+         * @description A location: a GBP listing plus its landing subdomain.
+         * @example royat
+         */
         LocationId: string;
         /**
          * @description Why an operator says a lead was lost: the panel's words, kept few so the reports compare.
@@ -1663,6 +1675,7 @@ export interface components {
          * @enum {string}
          */
         SuspectFilter: "only" | "exclude";
+        /** @example control */
         Variant: string;
     };
     responses: never;
@@ -2890,23 +2903,23 @@ export interface operations {
                 created_from?: string | null;
                 /** @description Created on or before this UTC day. */
                 created_to?: string | null;
-                /** @description `next_cursor` of the page before. */
-                cursor?: string | null;
                 /** @description Absent: every lead; a lead that said no flow is under none of the three. */
                 flow?: components["schemas"]["LeadFlow"] | null;
-                gmb?: components["schemas"]["Gmbs"] | null;
-                /** @description At most 200; 50 when absent. */
-                limit?: number | null;
                 /**
                  * @description A messenger ref as the customer quotes it or an operator pastes it (`Réf. aq 7k3f`:
                  *     label, case, spaces; O→0, I/L→1 in the code): the leads carrying it.
                  */
                 message_ref?: string | null;
                 /** @description Only the leads overdue for their first contact. */
-                overdue?: boolean | null;
+                overdue?: boolean;
                 stage?: components["schemas"]["Stage"] | null;
                 /** @description Absent: every lead. */
                 suspect?: components["schemas"]["SuspectFilter"] | null;
+                /** @description `next_cursor` of the page before. */
+                cursor?: string | null;
+                gmb?: components["schemas"]["Gmbs"] | null;
+                /** @description At most 200; 50 when absent. */
+                limit?: number | null;
             };
             header?: never;
             path?: never;

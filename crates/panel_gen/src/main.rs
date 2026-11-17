@@ -160,10 +160,17 @@ fn contract(dir: &Path) {
 /// The panel's own: what only its front end reads. `/api/v1`'s document, from which the front end's
 /// client is generated (`npm run gen:api`) and which the conductor vendors.
 fn frontend(root: &Path) {
-	let document = serde_json::to_string_pretty(&panel_server::http::document()).expect("a document serializes") + "\n";
+	let document = serde_json::to_value(panel_server::http::document()).expect("a document serializes");
 	let path = root.join("shared/api/openapi.json");
-	fs::write(&path, document).expect("write the document");
+	fs::write(&path, serde_json::to_string_pretty(&document).expect("JSON") + "\n").expect("write the document");
 	println!("wrote {}", path.display());
+	Ts::write(
+		&root.join("shared/lib/views.generated.ts"),
+		&[Ts::Value {
+			name: "VIEWS",
+			value: document["x-views"].clone(),
+		}],
+	);
 	let catalog = Catalog::collect("sa", 0);
 	Ts::write(
 		&root.join("entities/lead/model/generated.ts"),

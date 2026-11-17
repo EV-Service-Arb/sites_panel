@@ -22,10 +22,11 @@ pub fn parse_event_id(raw: &str) -> Result<EventId, Invalid> {
 }
 
 macro_rules! opaque_id {
-	($(#[$doc:meta])* $name:ident, $what:literal, $check:path) => {
+	($(#[$doc:meta])* $name:ident, $what:literal, $example:literal, $check:path) => {
 		$(#[$doc])*
 		#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Deserialize, schemars::JsonSchema, serde::Serialize)]
 		#[serde(try_from = "String")]
+		#[schemars(example = &$example)]
 		pub struct $name(String);
 
 		impl TryFrom<String> for $name {
@@ -58,18 +59,21 @@ opaque_id!(
 	/// A location: a GBP listing plus its landing subdomain.
 	LocationId,
 	"subject.location_id",
+	"royat",
 	is_opaque
 );
 opaque_id!(
 	/// A lead, unique within its brand.
 	LeadId,
 	"subject.lead_id",
+	"L-1",
 	is_opaque
 );
 opaque_id!(
 	/// A job won from a lead.
 	JobId,
 	"subject.job_id",
+	"J-1",
 	is_opaque
 );
 

@@ -59,6 +59,7 @@ checked_str!(
 	/// An experiment's key: `[a-z0-9_]{1,64}`.
 	pub struct ExperimentKey,
 	pattern = LIMITS.key,
+	example = "hero_layout",
 	refused = "not an experiment key, 1–64 of [a-z0-9_]",
 	|s| (1..=64).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 );
@@ -67,6 +68,7 @@ checked_str!(
 	/// A variant's name: `[a-z0-9_-]{1,32}`, what `@evinvest/experiments` takes.
 	pub struct Variant,
 	pattern = LIMITS.variant,
+	example = "control",
 	refused = "not a variant, 1–32 of [a-z0-9_-]",
 	|s| (1..=32).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
 );

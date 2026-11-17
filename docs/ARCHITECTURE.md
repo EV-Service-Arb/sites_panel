@@ -84,6 +84,9 @@ crates/panel_server/                 the `sites_panel` binary: CLI and HTTP, thi
                                      and its document; ingest's source assertion
   src/api.rs                         the operator API: JSON over the engine's `operator` module;
                                      the refusal codes (`Code`) and the caller (`Caller`)
+  src/views.rs                       where a person can be on the pages (`ev_lib::views`): each
+                                     view's path, query, permission and nav key; the document's
+                                     `x-views`, the front end's `VIEWS`
   src/conductor.rs                   sa_core::feeds: the change feed, the notes, the receipts;
                                      the fan-out's schedule
   src/places.rs                      a place's settings: the editor's routes, and the sites'

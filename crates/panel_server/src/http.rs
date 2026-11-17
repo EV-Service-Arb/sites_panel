@@ -135,7 +135,14 @@ pub const PROVIDED_PATHS: [&str; 1] = [INTERNAL];
 /// The `/api/v1` document: every operation of [`api_routes`], each with the permission that
 /// opens it (`x-permission`) and the codes it refuses with (`x-errors`).
 pub fn document() -> ev_lib::api::openapi::OpenApi {
-	ev_lib::api::document("Service-Arb sites", env!("CARGO_PKG_VERSION"), "/api/v1", &api_routes(), ev_lib::api_docs!(), None)
+	ev_lib::api::document(
+		"Service-Arb sites",
+		env!("CARGO_PKG_VERSION"),
+		"/api/v1",
+		&api_routes(),
+		ev_lib::api_docs!(),
+		Some(<crate::views::View as ev_lib::views::Views>::table()),
+	)
 }
 
 pub fn router(sites: Sites, limits: Limits) -> Router {

@@ -341,6 +341,7 @@ checked_str!(
 	/// values: `^[a-z0-9_-]{1,40}$`.
 	pub struct InputId,
 	pattern = LIMITS.slug,
+	example = "bedrooms",
 	refused = "not a slug, [a-z0-9_-]{1,40}",
 	|s| (1..=40).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
 );
@@ -349,6 +350,7 @@ checked_str!(
 	/// A label's locale: `fr`, `en`, `fr-FR`.
 	pub struct LocaleTag,
 	pattern = LIMITS.locale,
+	example = "fr",
 	refused = "not a locale like fr, en or fr-FR",
 	|s| {
 		let b = s.as_bytes();

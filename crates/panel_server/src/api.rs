@@ -504,7 +504,7 @@ fn lead_dto(v: LeadView, now: Timestamp) -> LeadDto {
 }
 
 /// Which of the suspect leads to list.
-#[derive(Clone, Copy, Deserialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[schemars(rename = "SuspectFilter")]
 enum Suspect {
@@ -514,14 +514,14 @@ enum Suspect {
 	Exclude,
 }
 
-#[derive(Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct LeadsQuery {
+/// Which leads to list: the Leads view's query keys too.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub(crate) struct LeadsQuery {
 	stage: Option<Stage>,
 	brand: Option<BrandId>,
-	gmb: Option<Gmbs>,
 	/// Only the leads overdue for their first contact.
-	overdue: Option<bool>,
+	#[serde(default)]
+	overdue: bool,
 	/// Created on or after this UTC day.
 	created_from: Option<Date>,
 	/// Created on or before this UTC day.
@@ -535,6 +535,12 @@ struct LeadsQuery {
 	/// A messenger ref as the customer quotes it or an operator pastes it (`Réf. aq 7k3f`:
 	/// label, case, spaces; O→0, I/L→1 in the code): the leads carrying it.
 	message_ref: Option<String>,
+}
+
+/// Which page of the leads, and of which GMBs.
+#[derive(Deserialize, JsonSchema)]
+struct LeadPage {
+	gmb: Option<Gmbs>,
 	/// `next_cursor` of the page before.
 	cursor: Option<String>,
 	/// At most 200; 50 when absent.
@@ -597,7 +603,7 @@ struct LeadPageDto {
 /// The leads, newest created first, a page at a time.
 ///
 /// Each filter narrows; `created_*` are UTC days, both included.
-async fn list_leads(State(panel): State<Panel>, caller: Caller, Params(q): Params<LeadsQuery>) -> ApiResult<Json<LeadPageDto>> {
+async fn list_leads(State(panel): State<Panel>, caller: Caller, Params(q): Params<LeadsQuery>, Params(page): Params<LeadPage>) -> ApiResult<Json<LeadPageDto>> {
 	if let (Some(f), Some(t)) = (q.created_from, q.created_to)
 		&& f > t
 	{
@@ -607,8 +613,8 @@ async fn list_leads(State(panel): State<Panel>, caller: Caller, Params(q): Param
 	let query = LeadQuery {
 		stage: q.stage,
 		brand: q.brand,
-		gmbs: q.gmb.map(|g| g.0),
-		overdue: q.overdue.unwrap_or(false),
+		gmbs: page.gmb.map(|g| g.0),
+		overdue: q.overdue,
 		created_from: q.created_from.map(day_start).transpose()?,
 		created_before: q.created_to.map(next_day).transpose()?,
 		suspect: match q.suspect {
@@ -624,8 +630,8 @@ async fn list_leads(State(panel): State<Panel>, caller: Caller, Params(q): Param
 			.as_deref()
 			.map(|r| MessageRef::from_typed(r).map_err(|_| Refusal::new(Code::BadRequest, "message_ref is not like AQ-7K3F")))
 			.transpose()?,
-		after: q.cursor.as_deref().map(cursor_decode).transpose()?,
-		limit: q.limit.unwrap_or(50),
+		after: page.cursor.as_deref().map(cursor_decode).transpose()?,
+		limit: page.limit.unwrap_or(50),
 	};
 	let now = Timestamp::now();
 	let page = panel.leads(&query, pii(&caller), now).await?;

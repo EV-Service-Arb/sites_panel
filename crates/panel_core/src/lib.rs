@@ -49,7 +49,7 @@ macro_rules! vocabulary {
 /// A string one rule admits: `parse` is the rule, and serde and the schema's `pattern` go through
 /// it, so a value of the type is one the rule took.
 macro_rules! checked_str {
-	($(#[$doc:meta])* pub struct $name:ident, pattern = $pattern:expr, refused = $refused:literal, |$s:ident| $rule:expr) => {
+	($(#[$doc:meta])* pub struct $name:ident, pattern = $pattern:expr, example = $example:literal, refused = $refused:literal, |$s:ident| $rule:expr) => {
 		$(#[$doc])*
 		#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Deserialize, serde::Serialize)]
 		#[serde(try_from = "String", into = "String")]
@@ -98,7 +98,7 @@ macro_rules! checked_str {
 			}
 
 			fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
-				schemars::json_schema!({ "type": "string", "pattern": $pattern })
+				schemars::json_schema!({ "type": "string", "pattern": $pattern, "examples": [$example] })
 			}
 		}
 	};
