@@ -7,7 +7,7 @@ mod wire;
 
 use std::{fs, path::Path};
 
-use ev_lib::ts_gen::Ts;
+use ev_lib::{api::ErrorCode, ts_gen::Ts};
 use panel::experiment::LiveExperiments;
 use panel_core::{
 	booking::{self, BookingStatus, DayPart, OperatorAction, PageProvider, Provider},
@@ -18,7 +18,8 @@ use panel_core::{
 	place::{self, DayOfWeek, FIELDS, PlaceLive},
 	pricing::{self, InputKind, PricingModel},
 };
-use sa_auth::SourceKind;
+use sa_auth::{Hop, SourceKind};
+use strum::VariantArray;
 
 /// `export const NAME = [...] as const;`: the words of a vocabulary whose type ts-rs declares.
 fn words(name: &'static str, items: impl IntoIterator<Item = &'static str>) -> Ts {
@@ -162,6 +163,22 @@ fn frontend(root: &Path) {
 	let path = root.join("shared/api/openapi.json");
 	fs::write(&path, serde_json::to_string_pretty(&document).expect("JSON") + "\n").expect("write the document");
 	println!("wrote {}", path.display());
+	Ts::write(
+		&root.join("shared/api/hop.generated.ts"),
+		&[Ts::Value {
+			name: "HOP",
+			value: Hop::VARIANTS
+				.iter()
+				.map(|&code| {
+					(
+						serde_json::to_value(code).expect("a code is its word").as_str().expect("snake_case words").to_owned(),
+						code.status().as_u16().into(),
+					)
+				})
+				.collect::<serde_json::Map<_, _>>()
+				.into(),
+		}],
+	);
 	Ts::write(
 		&root.join("shared/lib/views.generated.ts"),
 		&[Ts::Value {
