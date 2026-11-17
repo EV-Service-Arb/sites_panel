@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import { bookingWrite, bookingsRoute } from "../scripts/stub-bookings.ts";
 import { unmatchedListParser } from "@/entities/booking/model/booking";
 import { bookingWhen } from "@/entities/lead/lib/booking-text";
 import { NO_BOOKING, bookingActions } from "@/entities/lead/model/booking";
@@ -195,30 +194,5 @@ describe("picking the lead to attach", () => {
     expect(typedId(" lead-42-0a1b2c3d ")).toBe("lead-42-0a1b2c3d");
     expect(typedId("Camille Martin")).toBeNull();
     expect(typedId("  ")).toBeNull();
-  });
-});
-
-describe("the dev stub's bookings", () => {
-  it("refuses a close from anywhere but booked, and replays a retry under its key", () => {
-    expect(bookingWrite("aquafix", "stub-1", "/booking/status", { status: "done" }, undefined).status).toBe(409);
-    const first = bookingWrite("aquafix", "stub-3", "/booking/status", { status: "done" }, "k-done");
-    expect(first.status).toBe(201);
-    expect(bookingWrite("aquafix", "stub-3", "/booking/status", { status: "done" }, "k-done").status).toBe(200);
-    expect(bookingWrite("aquafix", "stub-3", "/booking/status", { status: "done" }, "k-other").status).toBe(409);
-    expect(bookingWrite("aquafix", "stub-3", "/booking", { action: "set", start_at: "2026-10-06T10:00:00+02:00" }, undefined).status).toBe(409);
-  });
-
-  it("refuses an instant without an offset", () => {
-    expect(bookingWrite("aquafix", "stub-9", "/booking", { action: "set", start_at: "2026-10-06T10:00" }, undefined).status).toBe(400);
-    expect(bookingWrite("aquafix", "stub-9", "/booking", { action: "set", start_at: "2026-10-06T10:00:00+02:00" }, undefined).status).toBe(201);
-  });
-
-  it("attaches a booking once: 404 for a lead the brand lacks, 409 for the same again", () => {
-    const list = bookingsRoute("GET", "/bookings/unmatched", new URLSearchParams("brand=aquafix"), {}, () => true)?.body as { bookings: { id: string }[] };
-    const id = list.bookings[0]?.id ?? "";
-    const exists = (brand: string, lead: string) => brand === "aquafix" && lead === "stub-3";
-    expect(bookingsRoute("POST", `/bookings/${id}/attach`, new URLSearchParams(), { lead: "nope" }, exists)?.status).toBe(404);
-    expect(bookingsRoute("POST", `/bookings/${id}/attach`, new URLSearchParams(), { lead: "stub-3" }, exists)?.status).toBe(201);
-    expect(bookingsRoute("POST", `/bookings/${id}/attach`, new URLSearchParams(), { lead: "stub-3" }, exists)?.status).toBe(409);
   });
 });

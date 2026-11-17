@@ -30,7 +30,6 @@ src/shared/          api/ (fetch onto `api`, CSRF, the gate's answers), config/h
                      page), lib/router.ts (one location for both elements), lib/live/ (the host's relayed socket), i18n/, ui/
 messages/            en.json (the source of keys) and ru.json
 scripts/build.mjs    esbuild + Tailwind → dist/mfe-sites.{js,css} and dist/chunks/*-[hash].js
-scripts/dev-stub.ts  the conductor and sites stood in for: dev/index.html, dist/, /api/sites, the live socket
 tests/               vitest, in Node: the rules the screens obey live in plain modules
 ```
 
@@ -38,12 +37,10 @@ tests/               vitest, in Node: the rules the screens obey live in plain m
 
 ```sh
 npm ci
-npm run dev          # build, then on STUB_PORT (the dev shell's) — open /sites; STUB_ROLE=admin, STUB_ME=401|403|503,
-                     # STUB_MIN_SAMPLE=2, STUB_POSTHOG=off, STUB_PLACES_CONFLICT=1, STUB_LIVE=off,
-                     # STUB_LIVE_EVERY=5, STUB_BOOKING_CONFLICT=1 (scripts/dev-stub.ts says what each does)
 ```
 
-After a change under `src/`, `npm run build` and reload. Checks: `npm run typecheck`, `npm run lint`, `npm test`,
+Against the real stack: site_conductor's `nix run .#local-stack` (`SITES_DIR` names this checkout, `SITES_MFE_DIR` its
+`dist/`). After a change under `src/`, `npm run build` and reload. Checks: `npm run typecheck`, `npm run lint`, `npm test`,
 `npm run build`.
 
 ## How it is served

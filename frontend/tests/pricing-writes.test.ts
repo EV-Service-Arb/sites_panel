@@ -9,8 +9,6 @@ import { answersFor, needFor } from "@/features/preview-price/model/answers";
 import { type Timers, createRunner } from "@/features/preview-price/model/runner";
 import { PREVIEW_DEBOUNCE_MS } from "@/features/preview-price/model/use-preview";
 
-import { pricingRoute } from "../scripts/stub-pricing.ts";
-
 const cleaning = JSON.parse(readFileSync(new URL("../../contracts/vectors/pricing/valid/cleaning.json", import.meta.url), "utf8")) as PricingModel;
 const item = (updated_at: string | null, by: string | null = "someone@example.test") => ({ brand_id: "vifnet", locales: ["fr", "en"], model: cleaning, updated_at, updated_by: by });
 
@@ -139,34 +137,5 @@ describe("the preview's debounce", () => {
     runner.request("b", 2);
     await vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS);
     expect(run).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe("the dev stub", () => {
-  const route = (method: string, path: string, body: Record<string, unknown> = {}, role = "admin") => pricingRoute(method, path, body, role, "t@example.test");
-
-  it("lists vifnet with the vectors' cleaning model and aquafix with none", () => {
-    const list = route("GET", "/pricing")?.body as { items: { brand_id: string; model: unknown }[] };
-    expect(list.items.map((i) => [i.brand_id, i.model === null])).toEqual([
-      ["aquafix", true],
-      ["vifnet", false],
-    ]);
-  });
-
-  it("refuses a save at a stale updated_at with the current pricing, and takes it at the current one", () => {
-    const current = route("GET", "/pricing/vifnet")?.body as { updated_at: string };
-    expect(route("PUT", "/pricing/vifnet", { model: cleaning, expected_updated_at: null })).toMatchObject({ status: 409, body: { error: "stale", current } });
-    expect(route("PUT", "/pricing/vifnet", { model: cleaning, expected_updated_at: current.updated_at })).toMatchObject({ status: 200, changed: "vifnet" });
-  });
-
-  it("answers 422 with a path the editor can show", () => {
-    const model = { ...cleaning, inputs: cleaning.inputs.map((i) => (i.id === "bedrooms" ? { ...i, labels: { fr: "Chambres" } } : i)) };
-    expect(route("PUT", "/pricing/aquafix", { model, expected_updated_at: null })).toEqual({ status: 422, body: { path: "inputs[1].labels.en", code: "labelMissing", error: "labelMissing (stub)" } });
-  });
-
-  it("lets an operator read and preview, not write", () => {
-    expect(route("PUT", "/pricing/aquafix", { model: cleaning, expected_updated_at: null }, "operator")?.status).toBe(403);
-    expect(route("POST", "/pricing/aquafix/preview", { model: cleaning, need: "windows", inputs: {} }, "operator")).toMatchObject({ status: 200, body: { cents: 8900 } });
-    expect(route("POST", "/pricing/aquafix/preview", { model: cleaning, need: "standard", inputs: {} }, "operator")).toMatchObject({ status: 200, body: { cents: null } });
   });
 });

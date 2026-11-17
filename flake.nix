@@ -339,7 +339,6 @@
 
             env = {
               PANEL_BIND = "127.0.0.1:${toString SA_PORTS}";
-              STUB_PORT = toString (SA_PORTS + 3); # frontend/'s `npm run dev`
               RUST_BACKTRACE = 1;
               RUST_LIB_BACKTRACE = 0;
             };

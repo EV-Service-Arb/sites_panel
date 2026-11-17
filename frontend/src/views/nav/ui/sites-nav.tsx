@@ -35,7 +35,7 @@ export function SitesNav({ element }: { element: HTMLElement }) {
   useEffect(() => {
     const bound = new AbortController();
     for (const [route, label, href] of JSON.parse(viewsShape) as typeof views)
-      dispatchKeymap(element, { on: { key: KEYS[route] }, run: { label, run: () => goTo(href) } }, bound.signal);
+      dispatchKeymap(element, { on: { key: KEYS[route] }, id: route, run: { label, run: () => goTo(href) } }, bound.signal);
     return () => bound.abort();
   }, [element, viewsShape]);
 
