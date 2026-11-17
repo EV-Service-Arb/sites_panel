@@ -82,8 +82,8 @@ pub(crate) fn new_change_id(now: Timestamp) -> Uuid {
 
 pub(crate) fn by(editor: &Editor) -> By<'_> {
 	By {
-		label: editor.label(),
-		user: editor.user_id(),
+		label: editor.label.as_str(),
+		user: editor.id,
 	}
 }
 
@@ -140,17 +140,17 @@ impl Panel {
 				id: new_change_id(now),
 				at: now,
 				kind: ChangeKind::Register,
-				by: editor.label().to_owned(),
+				by: editor.label.as_str().to_owned(),
 				before: PlaceSettings::default(),
 				after: PlaceSettings::default(),
 				reverts: None,
 			};
-			places::insert_change(&mut tx, brand, slug, &change, editor.user_id()).await?;
+			places::insert_change(&mut tx, brand, slug, &change, editor.id).await?;
 		}
 		let stored = places::place(&mut tx, brand, slug).await?;
 		tx.commit().await.wrap_err("committing a place's registration")?;
 		if added {
-			tracing::info!(by = editor.label(), %brand, %slug, "place registered");
+			tracing::info!(by = editor.label.as_str(), %brand, %slug, "place registered");
 		}
 		Ok((view(brand, slug, stored), added))
 	}
@@ -276,15 +276,15 @@ impl Panel {
 			id: new_change_id(now),
 			at: now,
 			kind,
-			by: editor.label().to_owned(),
+			by: editor.label.as_str().to_owned(),
 			before: current.settings,
 			after,
 			reverts,
 		};
-		places::insert_change(&mut tx, brand, slug, &change, editor.user_id()).await?;
+		places::insert_change(&mut tx, brand, slug, &change, editor.id).await?;
 		let stored = places::place(&mut tx, brand, slug).await?;
 		tx.commit().await.wrap_err("committing a place's change")?;
-		tracing::info!(by = editor.label(), %brand, %slug, kind = kind.as_str(), "place changed");
+		tracing::info!(by = editor.label.as_str(), %brand, %slug, kind = kind.as_str(), "place changed");
 		Ok(view(brand, slug, stored))
 	}
 }

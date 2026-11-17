@@ -23,7 +23,7 @@ fn brand() -> BrandId {
 }
 
 fn admin() -> Editor {
-	Editor::User {
+	Editor {
 		id: Uuid::now_v7(),
 		label: "admin@evinvest.ltd".into(),
 	}

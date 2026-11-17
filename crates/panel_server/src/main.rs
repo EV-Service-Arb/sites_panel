@@ -12,13 +12,11 @@ use clap::{Parser, Subcommand};
 use ev_lib::error_monitoring;
 use eyre::WrapErr;
 use panel::{Panel, seal::DataKey, store::Store};
-use panel_core::{ids::LocationId, place::Editor};
 use panel_server::{
 	capture::{self, CaptureApi},
 	conductor, google_calendar, http,
 	scope_ledger::{self, ScopeLedger},
 };
-use sa_core::ids::BrandId;
 
 use crate::settings::Settings;
 
@@ -47,18 +45,8 @@ enum Cmd {
 	/// Rebuild leads, calls and payments from the journal, judging every event against the
 	/// registry as it is now.
 	RebuildProjections,
-	/// A place's live settings, what the sites lay over their baked config.
-	#[command(subcommand)]
-	Place(PlaceCmd),
 	/// Print a fresh PANEL_DATA_KEY.
 	GenDataKey,
-}
-
-#[derive(Subcommand)]
-enum PlaceCmd {
-	/// Make a place known to the panel, as adding it on the Locations screen does; nothing
-	/// changes for one it knows. Journaled as `by = cli`.
-	Register { brand: String, slug: String },
 }
 
 // Sentry must be initialised before the async runtime starts, hence no #[tokio::main].
@@ -140,22 +128,11 @@ async fn run(cli: Cli, settings: Settings) -> eyre::Result<()> {
 			);
 			Ok(())
 		}
-		Cmd::Place(cmd) => place(&connect().await?, cmd).await,
 		Cmd::GenDataKey => {
 			println!("{}", DataKey::generate_hex()?);
 			Ok(())
 		}
 	}
-}
-
-async fn place(panel: &Panel, cmd: PlaceCmd) -> eyre::Result<()> {
-	let PlaceCmd::Register { brand, slug } = cmd;
-	let (brand, slug) = (BrandId::parse(&brand)?, LocationId::parse(&slug)?);
-	let (_, added) = panel.register_place(&Editor::Cli, &brand, &slug, jiff::Timestamp::now()).await?;
-	if !added {
-		eprintln!("{brand}/{slug} was known already: nothing changed");
-	}
-	Ok(())
 }
 
 /// The Google Calendar adapter, how often it pulls, and the owners' consents, when configured.

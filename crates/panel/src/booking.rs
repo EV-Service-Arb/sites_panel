@@ -499,11 +499,11 @@ impl Panel {
 			refresh_sealed: self.key.seal(&aad, consent.refresh_token.as_bytes())?,
 			data_key_fp: self.key.fingerprint().to_vec(),
 			connected_at: now,
-			connected_by: by.label().to_owned(),
+			connected_by: by.label.as_str().to_owned(),
 		};
 		let mut conn = self.store.pool().acquire().await.wrap_err("a connection for a Google Calendar")?;
 		crate::store::google::put(&mut conn, &stored).await?;
-		tracing::info!(by = by.label(), brand = %consent.brand, "google calendar connected");
+		tracing::info!(by = by.label.as_str(), brand = %consent.brand, "google calendar connected");
 		Ok(())
 	}
 

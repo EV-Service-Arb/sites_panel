@@ -734,29 +734,11 @@ impl ChangeKind {
 	}
 }
 
-/// Who changed a place: a signed-in user (concierge id, and the email the history shows), or
-/// the CLI on the pod.
+/// Who changed a place: the signed-in user's concierge id, and what the history shows as `by`.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Editor {
-	User { id: Uuid, label: String },
-	Cli,
-}
-
-impl Editor {
-	/// What the history shows as `by`.
-	pub fn label(&self) -> &str {
-		match self {
-			Self::User { label, .. } => label,
-			Self::Cli => "cli",
-		}
-	}
-
-	pub fn user_id(&self) -> Option<Uuid> {
-		match self {
-			Self::User { id, .. } => Some(*id),
-			Self::Cli => None,
-		}
-	}
+pub struct Editor {
+	pub id: Uuid,
+	pub label: String,
 }
 
 /// One entry of a place's history: what its settings were before and after, who, when.

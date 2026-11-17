@@ -77,9 +77,6 @@ panel serve
 
 # leads, calls and payments again from the journal, against the registry as it is now
 panel rebuild-projections
-
-# A place known to the panel, nothing set; a no-op when known. Its settings are the editor's
-panel place register aquafix royat
 ```
 
 ## Sending events
@@ -126,7 +123,7 @@ devops from the contracts: `provides.internal` here, `consumes` on the landing) 
 
 `/api/internal` has no session and is not published: the public IngressRoute must exclude it,
 and the NetworkPolicy lets the landings' pods in. Admins edit in the panel (operators read);
-every change, from the panel or the CLI (`by = cli`), is journaled with what was before and
+every change is journaled with what was before and
 after, and can be reverted. The settings are checked field by field by the rules a site reads
 them with (`@evinvest/sites-contract`), refused (`422`) where a site would quietly drop them. The session API is in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#place-settings).

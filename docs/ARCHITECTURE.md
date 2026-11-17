@@ -509,7 +509,7 @@ and restore, a hand registration, its GMB link, and `GET /gmbs`.
   speaks, which the panel does not know.
 - **A change is one write transaction**: the current settings read under the write lock,
   `expected_updated_at` compared, the new ones written, the change journaled
-  (`place_changes`: before, after, who — the user's email and id, or `cli` — and
+  (`place_changes`: before, after, who — the user's email and id — and
   when). `updated_at` only grows, a microsecond at least per change, so two edits never share
   a token. A change that changes nothing writes nothing.
 - **History is append-only, places never deleted**: triggers refuse any UPDATE or DELETE of

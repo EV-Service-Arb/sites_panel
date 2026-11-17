@@ -59,15 +59,19 @@ async fn a_write_tells_the_tables_it_wrote_and_a_refused_one_nothing() {
 	assert!(moved.is_superset(&tables(&["events", "leads"])), "an operator's move goes through the same journal: {moved:?}");
 
 	let slug = LocationId::parse("royat").unwrap();
-	panel.register_place(&Editor::Cli, &aquafix, &slug, now).await.unwrap();
+	let editor = Editor {
+		id: Uuid::now_v7(),
+		label: "admin@evinvest.ltd".into(),
+	};
+	panel.register_place(&editor, &aquafix, &slug, now).await.unwrap();
 	told(&mut rx).await;
 	let phone = PlaceSettings::parse(&json!({"phone": "+33423500640"})).unwrap();
-	panel.set_place(&Editor::Cli, &aquafix, &slug, phone, Expected::Any, now).await.unwrap();
+	panel.set_place(&editor, &aquafix, &slug, phone, Expected::Any, now).await.unwrap();
 	let placed = told(&mut rx).await;
-	assert!(placed.is_superset(&tables(&["places", "place_changes"])), "{placed:?}");
+	assert!(placed.is_superset(&tables(&["place_settings", "place_changes"])), "{placed:?}");
 	assert!(!placed.contains("sites.leads"), "a place's change is not a lead's: {placed:?}");
 
 	let stale = Expected::At(Some("2020-01-01T00:00:00Z".parse().unwrap()));
-	assert!(panel.set_place(&Editor::Cli, &aquafix, &slug, PlaceSettings::default(), stale, now).await.is_err());
+	assert!(panel.set_place(&editor, &aquafix, &slug, PlaceSettings::default(), stale, now).await.is_err());
 	assert_eq!(told(&mut rx).await, tables(&[]), "a conflict rolls back, and tells nothing");
 }

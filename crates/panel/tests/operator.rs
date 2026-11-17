@@ -302,8 +302,12 @@ async fn slices_places_payments_and_counts() {
 
 	// The conductor's selection: the places linked to its GMBs; a place linked to none is outside it.
 	let paris = LocationId::parse("paris-11").unwrap();
-	panel.register_place(&Editor::Cli, &brand(), &paris, at(10)).await.unwrap();
-	panel.register_place(&Editor::Cli, &brand(), &LocationId::parse("lyon-2").unwrap(), at(10)).await.unwrap();
+	let editor = Editor {
+		id: Uuid::now_v7(),
+		label: "admin@evinvest.ltd".into(),
+	};
+	panel.register_place(&editor, &brand(), &paris, at(10)).await.unwrap();
+	panel.register_place(&editor, &brand(), &LocationId::parse("lyon-2").unwrap(), at(10)).await.unwrap();
 	panel.link_gmb(&brand(), &paris, Some(7)).await.unwrap();
 	let listed = |gmbs: &[i64]| {
 		let q = LeadQuery {

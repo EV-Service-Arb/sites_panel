@@ -24,17 +24,4 @@ panel serve
 
 # leads, calls and payments again from the journal, against the registry as it is now
 panel rebuild-projections
-
-# A place's live settings (see "Place settings"): set some fields, clear others, the rest stay
-panel place register aquafix royat             # known to the panel, nothing set; a no-op when known
-panel place set aquafix royat --phone +33423500640 --whatsapp +33612345678 \
-  --hours 'Mo-Fr 08:00-19:00,Sa 09:00-12:00' --service-area 'Royat,Chamalières'
-panel place set aquafix royat --clear whatsapp
-panel place set aquafix royat --telegram aquafix_devis_bot --messengers whatsapp=on,telegram=off
-panel place set aquafix royat --clear telegram --clear messengers
-panel place show aquafix royat
-panel place history aquafix royat              # every change, newest first, with its id
-panel place revert aquafix royat <change id>   # the settings that change found, back
-panel place withdraw aquafix royat             # the sites answer it as gone (404)
-panel place restore aquafix royat
 ```

@@ -24,7 +24,7 @@ fn ids() -> (BrandId, LocationId) {
 }
 
 fn admin() -> Editor {
-	Editor::User {
+	Editor {
 		id: Uuid::now_v7(),
 		label: "admin@evinvest.ltd".into(),
 	}
@@ -75,11 +75,11 @@ async fn edits_are_journaled_and_checked_against_what_was_read() {
 	assert_eq!(history[1].before, PlaceSettings::default());
 
 	let later = now() + SignedDuration::from_mins(1);
-	let reverted = panel.revert_place(&Editor::Cli, &brand, &slug, history[0].id, Expected::Any, later).await.unwrap();
+	let reverted = panel.revert_place(&admin(), &brand, &slug, history[0].id, Expected::Any, later).await.unwrap();
 	assert_eq!(reverted.settings, first, "the before of that change is current");
-	assert_eq!(reverted.updated_by.as_deref(), Some("cli"));
+	assert_eq!(reverted.updated_by.as_deref(), Some("admin@evinvest.ltd"));
 	let top = &panel.place_history(&brand, &slug).await.unwrap()[0];
-	assert_eq!((top.kind, top.reverts, top.by.as_str()), (ChangeKind::Revert, Some(history[0].id), "cli"));
+	assert_eq!((top.kind, top.reverts, top.by.as_str()), (ChangeKind::Revert, Some(history[0].id), "admin@evinvest.ltd"));
 	assert!(matches!(
 		panel.revert_place(&by, &brand, &slug, Uuid::now_v7(), Expected::Any, later).await,
 		Err(PlaceError::NotFound)
@@ -92,7 +92,7 @@ async fn edits_are_journaled_and_checked_against_what_was_read() {
 
 	let patched = panel
 		.patch_place(
-			&Editor::Cli,
+			&admin(),
 			&brand,
 			&slug,
 			Map::from_iter([("whatsapp".to_owned(), json!("+33612345678"))]),
@@ -102,9 +102,7 @@ async fn edits_are_journaled_and_checked_against_what_was_read() {
 		.await
 		.unwrap();
 	assert_eq!(patched.settings, settings(json!({"phone": "+33423500640", "whatsapp": "+33612345678"})));
-	let refused = panel
-		.patch_place(&Editor::Cli, &brand, &slug, Map::from_iter([("phone".to_owned(), json!("06"))]), &[], later)
-		.await;
+	let refused = panel.patch_place(&admin(), &brand, &slug, Map::from_iter([("phone".to_owned(), json!("06"))]), &[], later).await;
 	assert!(matches!(refused, Err(PlaceError::Invalid(f)) if f.contains_key("phone")));
 
 	let withdrawn = panel.withdraw_place(&by, &brand, &slug, true, later).await.unwrap();
@@ -226,7 +224,7 @@ async fn a_places_messengers_reach_the_sites() {
 		("messengers".to_owned(), panel_core::place::messengers_from_spec("whatsapp=on,telegram=off").unwrap()),
 		("whatsapp".to_owned(), json!("+33612345678")),
 	]);
-	panel.patch_place(&Editor::Cli, &brand, &slug, set, &[], now()).await.unwrap();
+	panel.patch_place(&admin(), &brand, &slug, set, &[], now()).await.unwrap();
 	assert_eq!(
 		panel.live_place(&brand, &slug).await.unwrap(),
 		Live::Settings(settings(
@@ -235,14 +233,14 @@ async fn a_places_messengers_reach_the_sites() {
 	);
 
 	let bad = Map::from_iter([("telegram".to_owned(), json!("@aquafix")), ("messengers".to_owned(), json!({"sms": true}))]);
-	let Err(PlaceError::Invalid(fields)) = panel.patch_place(&Editor::Cli, &brand, &slug, bad, &[], now()).await else {
+	let Err(PlaceError::Invalid(fields)) = panel.patch_place(&admin(), &brand, &slug, bad, &[], now()).await else {
 		panic!("a bad bot and an unknown messenger passed")
 	};
 	assert_eq!(fields.keys().collect::<Vec<_>>(), ["messengers.sms", "telegram"]);
 
 	let later = now() + SignedDuration::from_mins(1);
 	panel
-		.patch_place(&Editor::Cli, &brand, &slug, Map::new(), &["telegram".to_owned(), "messengers".to_owned()], later)
+		.patch_place(&admin(), &brand, &slug, Map::new(), &["telegram".to_owned(), "messengers".to_owned()], later)
 		.await
 		.unwrap();
 	assert_eq!(panel.live_place(&brand, &slug).await.unwrap(), Live::Settings(settings(json!({"whatsapp": "+33612345678"}))));

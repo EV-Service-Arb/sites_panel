@@ -126,11 +126,11 @@ impl Panel {
 	}
 
 	/// An admin's change to one experiment: journaled as `experiment.configured` when it changes
-	/// what is set — named by the editor's label, from the editor's id (or `cli`) — then
+	/// what is set — named by the editor's label, from the editor's id — then
 	/// answered as the screens show it.
 	pub async fn configure_experiment(&self, by: &Editor, brand: &BrandId, patch: Patch, now: Timestamp) -> Result<ExperimentView, ExperimentError> {
-		let name = label(by.label()).map_err(|e| ExperimentError::Invalid(Invalid::new(e.0.trim_start_matches("properties.").to_owned())))?;
-		let source_id = by.user_id().map_or_else(|| "cli".to_owned(), |u| u.to_string());
+		let name = label(&by.label).map_err(|e| ExperimentError::Invalid(Invalid::new(e.0.trim_start_matches("properties.").to_owned())))?;
+		let source_id = by.id.to_string();
 		let current = self.experiment(brand, patch.key.as_str()).await?.filter(|s| !s.retired).ok_or(ExperimentError::NotFound)?;
 		current.check_patch(&patch).map_err(ExperimentError::Invalid)?;
 		if !current.changes(&patch) {

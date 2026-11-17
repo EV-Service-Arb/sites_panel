@@ -113,7 +113,7 @@ fn invalid(fields: &FieldErrors) -> Refusal<Code> {
 /// place's, a price list's and an experiment's changes.
 pub(crate) fn editor(caller: &Caller) -> Editor {
 	let label = if caller.email.trim().is_empty() { caller.user_id.to_string() } else { caller.email.clone() };
-	Editor::User { id: caller.user_id, label }
+	Editor { id: caller.user_id, label }
 }
 
 /// `{brand}/{slug}`.

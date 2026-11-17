@@ -35,7 +35,7 @@ pub struct StoredSettings {
 #[derive(Clone, Copy, Debug)]
 pub struct By<'a> {
 	pub label: &'a str,
-	pub user: Option<Uuid>,
+	pub user: Uuid,
 }
 
 fn settings_of(raw: Value, what: &str) -> eyre::Result<PlaceSettings> {
@@ -159,7 +159,7 @@ pub async fn gmbs(conn: &mut SqliteConnection, since: Timestamp, waiting_since_b
 		.collect()
 }
 
-pub async fn insert_change(conn: &mut SqliteConnection, brand: &BrandId, slug: &LocationId, change: &Change, by_user: Option<Uuid>) -> eyre::Result<()> {
+pub async fn insert_change(conn: &mut SqliteConnection, brand: &BrandId, slug: &LocationId, change: &Change, by_user: Uuid) -> eyre::Result<()> {
 	sqlx::query(
 		"INSERT INTO place_changes (id, brand_id, location_id, at, kind, changed_by, changed_by_user, before, after, reverts) \
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",

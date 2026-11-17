@@ -209,14 +209,14 @@ impl Panel {
 			id: new_change_id(now),
 			at,
 			kind: kind.as_str().to_owned(),
-			by: editor.label().to_owned(),
+			by: editor.label.as_str().to_owned(),
 			before: current.model,
 			after,
 		};
-		stored::insert_change(&mut tx, brand, &change, editor.user_id()).await?;
+		stored::insert_change(&mut tx, brand, &change, editor.id).await?;
 		let saved = view(brand, stored::pricing(&mut tx, brand).await?);
 		tx.commit().await.wrap_err("committing a brand's pricing")?;
-		tracing::info!(by = editor.label(), %brand, kind = kind.as_str(), "pricing changed");
+		tracing::info!(by = editor.label.as_str(), %brand, kind = kind.as_str(), "pricing changed");
 		Ok(saved)
 	}
 
@@ -233,7 +233,7 @@ impl Panel {
 		stored::set_locales(&mut tx, brand, locales, now, by(editor)).await?;
 		let saved = view(brand, stored::pricing(&mut tx, brand).await?);
 		tx.commit().await.wrap_err("committing a brand's locales")?;
-		tracing::info!(by = editor.label(), %brand, locales = locales.join(","), "brand locales changed");
+		tracing::info!(by = editor.label.as_str(), %brand, locales = locales.join(","), "brand locales changed");
 		Ok(saved)
 	}
 }
