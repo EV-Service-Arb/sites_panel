@@ -15,9 +15,11 @@
     "gen:api": "openapi-typescript src/shared/api/openapi.json -o src/shared/api/schema.ts --enum-values --root-types --root-types-no-schema-prefix --default-non-nullable=false"
   },
   "dependencies": {
+    "@evinvest/api": "^0.1.0",
     "@evinvest/experiments": "^0.6.1",
     "@evinvest/mfe": "^0.6.0",
     "@evinvest/uikit": "^0.35.1",
+    "@evinvest/views": "^0.1.0",
     "ajv": "^8.20.0",
     "lucide-react": "^0.453.0",
     "openapi-fetch": "^0.17.0",
