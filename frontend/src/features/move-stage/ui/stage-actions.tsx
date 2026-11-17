@@ -15,13 +15,7 @@ import { QuoteForm } from "./quote-form";
  * One button per next step. A step that needs nothing more is saved on the tap;
  * a quote and a loss open their short form in place.
  */
-export function StageActions({
-  lead,
-  onMoved,
-}: {
-  lead: Lead;
-  onMoved: () => void;
-}) {
+export function StageActions({ lead, onMoved }: { lead: Lead; onMoved: () => void }) {
   const t = useT();
   const button = useButtonSize();
   const [open, setOpen] = useState<"quoted" | "lost" | null>(null);
@@ -31,10 +25,7 @@ export function StageActions({
 
   const save = async (move: StageMove) => {
     setBusy(true);
-    const { error } = await api().POST("/leads/{brand}/{lead}/stage", {
-      params: { path: refOf(lead) },
-      body: move,
-    });
+    const { error } = await api().POST("/leads/{brand}/{lead}/stage", { params: { path: refOf(lead) }, body: move });
     setBusy(false);
     if (error !== undefined) return notifyFailure(error, t);
     toast.positive(t("move.saved"));
@@ -44,33 +35,16 @@ export function StageActions({
 
   const tap = (kind: MoveKind) => {
     if (kind === "quoted" || kind === "lost") setOpen(kind);
-    else
-      void save(
-        kind === "contacted"
-          ? { stage: "contacted", channel: "phone" }
-          : { stage: kind },
-      );
+    else void save(kind === "contacted" ? { stage: "contacted", channel: "phone" } : { stage: kind });
   };
 
-  if (open === "quoted")
-    return (
-      <QuoteForm busy={busy} onSubmit={save} onCancel={() => setOpen(null)} />
-    );
-  if (open === "lost")
-    return (
-      <LostForm busy={busy} onSubmit={save} onCancel={() => setOpen(null)} />
-    );
+  if (open === "quoted") return <QuoteForm busy={busy} onSubmit={save} onCancel={() => setOpen(null)} />;
+  if (open === "lost") return <LostForm busy={busy} onSubmit={save} onCancel={() => setOpen(null)} />;
 
   return (
     <div className="flex flex-wrap gap-2">
       {moves.map((kind) => (
-        <Button
-          key={kind}
-          size={button()}
-          variant={kind === "lost" ? "ghost" : "outline"}
-          disabled={busy}
-          onClick={() => tap(kind)}
-        >
+        <Button key={kind} size={button()} variant={kind === "lost" ? "ghost" : "outline"} disabled={busy} onClick={() => tap(kind)}>
           {t(`move.${kind}`)}
         </Button>
       ))}
