@@ -30,7 +30,7 @@ base64 = "0.22"
 chacha20poly1305 = "0.10"
 clap = { version = "4", features = ["derive", "env"] }
 color-eyre = "0.6"
-ev_lib = { version = "0.34.0", default-features = false }
+ev_lib = { version = "0.34.1", default-features = false }
 eyre = "0.6"
 futures = "0.3"
 getrandom = "0.3"
@@ -45,7 +45,9 @@ prost = "0.14"
 prost-build = "0.14"
 prost-types = "0.14"
 protox = "0.9"
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+regex = "1"
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] } # ring, not aws-lc: aws-lc-sys rebuilds a bundled C library per target dir
 schemars = { version = "1", features = ["uuid1", "jiff02"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -54,7 +56,7 @@ sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio",
 strum = { version = "0.28", features = ["derive"] }
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
-tonic = { version = "0.14", features = ["tls-aws-lc"] }
+tonic = { version = "0.14", features = ["tls-ring"] }
 tonic-prost = "0.14"
 tonic-prost-build = "0.14"
 tower = "0.5"
