@@ -39,6 +39,7 @@ impl std::fmt::Debug for CaptureApi {
 impl CaptureApi {
 	/// `host`: the capture origin, e.g. `https://us.i.posthog.com`, or a test's mock.
 	pub fn new(host: &str, key: &str) -> eyre::Result<Self> {
+		let _ = rustls::crypto::ring::default_provider().install_default(); //IGNORED_ERROR: Err is "a provider is already installed", which is all reqwest needs
 		let http = reqwest::Client::builder()
 			.connect_timeout(Duration::from_secs(5))
 			.timeout(Duration::from_secs(20))
