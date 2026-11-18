@@ -154,6 +154,7 @@ async fn only_the_conductors_assertion_for_this_request_gets_in() {
 					email_verified: true,
 					name: "Olga".into(),
 					permissions: operator.iter().filter(|p| p.starts_with("sa:sites:")).collect(),
+					actor: None,
 				}),
 				"GET",
 				"/api/v1/leads",

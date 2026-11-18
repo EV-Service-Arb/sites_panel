@@ -203,9 +203,11 @@ impl Refuses<ActionError> for Code {
 #[derive(Clone, Debug)]
 pub(crate) struct Caller {
 	pub user_id: Uuid,
-	pub email: String,
 	/// Their `sa:sites:*` permissions, and no others.
 	pub permissions: PermissionSet,
+	/// Who acts: someone acting in their account, else they.
+	pub by: Actor,
+	pub by_email: String,
 }
 
 impl<S: Send + Sync> FromRequestParts<S> for Caller {
@@ -213,11 +215,17 @@ impl<S: Send + Sync> FromRequestParts<S> for Caller {
 
 	async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Refusal<Denied>> {
 		let Ok(user) = User::from_request_parts(parts, state).await;
-		let user_id = Uuid::parse_str(&user.sub).map_err(|_| Refusal::new(Denied::Unauthenticated, format!("the assertion's sub {:?} is not a user id", user.sub)))?;
+		let id = |sub: &str| Uuid::parse_str(sub).map_err(|_| Refusal::new(Denied::Unauthenticated, format!("the assertion's sub {sub:?} is not a user id")));
+		let user_id = id(&user.sub)?;
+		let (by, by_email) = match &user.actor {
+			Some(actor) => (id(&actor.sub)?, actor.email.clone()),
+			None => (user_id, user.email),
+		};
 		Ok(Self {
 			user_id,
-			email: user.email,
 			permissions: user.permissions,
+			by: Actor(by),
+			by_email,
 		})
 	}
 }
@@ -730,7 +738,7 @@ async fn create_lead(State(panel): State<Panel>, caller: Caller, IdempotencyKey(
 		channel: b.channel.unwrap_or(ManualChannel::PhoneInbound),
 	};
 	let brand = new.brand.clone();
-	let done = panel.create_lead_once(Actor(caller.user_id), new, Timestamp::now(), key.as_deref()).await?;
+	let done = panel.create_lead_once(caller.by, new, Timestamp::now(), key.as_deref()).await?;
 	Ok(recorded(done, |(lead_id, event)| NewLeadDto {
 		brand,
 		lead_id,
@@ -785,7 +793,7 @@ pub(crate) async fn move_lead(
 		StageBody::Lost { reason, note } => StageMove::Lost { reason, note },
 		StageBody::Completed => StageMove::Completed,
 	};
-	let done = panel.move_lead_once(Actor(caller.user_id), &brand, &lead, to, Timestamp::now(), key.as_deref()).await?;
+	let done = panel.move_lead_once(caller.by, &brand, &lead, to, Timestamp::now(), key.as_deref()).await?;
 	Ok(recorded(done, |e| Journaled { event_id: e.raw() }))
 }
 
@@ -804,9 +812,7 @@ async fn mark_messaged(
 	IdempotencyKey(key): IdempotencyKey,
 	Body(b): Body<MessagedBody>,
 ) -> ApiResult<Upserted<Journaled>> {
-	let done = panel
-		.mark_messaged_once(Actor(caller.user_id), &brand, &lead, b.channel, Timestamp::now(), key.as_deref())
-		.await?;
+	let done = panel.mark_messaged_once(caller.by, &brand, &lead, b.channel, Timestamp::now(), key.as_deref()).await?;
 	Ok(recorded(done, |e| Journaled { event_id: e.raw() }))
 }
 
@@ -819,7 +825,7 @@ pub(crate) async fn no_answer(
 	Ids(LeadPath { brand, lead }): Ids<LeadPath>,
 	RequiredIdempotencyKey(key): RequiredIdempotencyKey,
 ) -> ApiResult<Upserted<Journaled>> {
-	let done = panel.no_answer_once(Actor(caller.user_id), &brand, &lead, Timestamp::now(), &key).await?;
+	let done = panel.no_answer_once(caller.by, &brand, &lead, Timestamp::now(), &key).await?;
 	Ok(recorded(done, |e| Journaled { event_id: e.raw() }))
 }
 
@@ -831,7 +837,7 @@ struct AttemptDto {
 
 /// Starts a call to the customer (`call.attempted`); its outcome is logged against the attempt.
 async fn attempt_call(State(panel): State<Panel>, caller: Caller, Ids(LeadPath { brand, lead }): Ids<LeadPath>) -> ApiResult<Created<AttemptDto>> {
-	let attempt = panel.attempt_call(Actor(caller.user_id), &brand, &lead, Timestamp::now()).await?;
+	let attempt = panel.attempt_call(caller.by, &brand, &lead, Timestamp::now()).await?;
 	Ok(Created(AttemptDto { attempt_id: attempt.raw() }))
 }
 
@@ -853,7 +859,7 @@ struct OutcomeBody {
 /// How an attempted call went (`call.logged`).
 async fn call_outcome(State(panel): State<Panel>, caller: Caller, Ids(AttemptPath { brand, lead, attempt }): Ids<AttemptPath>, Body(b): Body<OutcomeBody>) -> ApiResult<Created<Journaled>> {
 	let call = CallOutcome { attempt, outcome: b.outcome };
-	let event = panel.log_call(Actor(caller.user_id), &brand, &lead, call, Timestamp::now()).await?;
+	let event = panel.log_call(caller.by, &brand, &lead, call, Timestamp::now()).await?;
 	Ok(Created(Journaled { event_id: event.raw() }))
 }
 
@@ -881,7 +887,7 @@ async fn record_payment(
 		commission: amount("commission", b.commission)?,
 		currency: <&str>::from(b.currency).to_owned(),
 	};
-	let done = panel.record_payment_once(Actor(caller.user_id), &brand, &lead, p, Timestamp::now(), key.as_deref()).await?;
+	let done = panel.record_payment_once(caller.by, &brand, &lead, p, Timestamp::now(), key.as_deref()).await?;
 	Ok(recorded(done, |e| Journaled { event_id: e.raw() }))
 }
 

@@ -112,8 +112,12 @@ fn invalid(fields: &FieldErrors) -> Refusal<Code> {
 /// Who a history names: the user's email, their id when concierge gave none. One rule for a
 /// place's, a price list's and an experiment's changes.
 pub(crate) fn editor(caller: &Caller) -> Editor {
-	let label = if caller.email.trim().is_empty() { caller.user_id.to_string() } else { caller.email.clone() };
-	Editor { id: caller.user_id, label }
+	let label = if caller.by_email.trim().is_empty() {
+		caller.by.0.to_string()
+	} else {
+		caller.by_email.clone()
+	};
+	Editor { id: caller.by.0, label }
 }
 
 /// `{brand}/{slug}`.

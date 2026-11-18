@@ -23,7 +23,6 @@ use jiff::Timestamp;
 use panel::{
 	Panel,
 	booking::{BookingView, Provider, PushError, PushRequest, PushSources, SlotAction},
-	operator::Actor,
 };
 use panel_core::{
 	booking::{BookingMatch, Closed},
@@ -240,7 +239,7 @@ async fn book_lead(
 		SlotBody::Set { start_at, end_at } => SlotAction::Set { start_at, end_at },
 		SlotBody::Clear => SlotAction::Clear,
 	};
-	let done = panel.book_once(Actor(caller.user_id), &brand, &lead, action, Timestamp::now(), key.as_deref()).await?;
+	let done = panel.book_once(caller.by, &brand, &lead, action, Timestamp::now(), key.as_deref()).await?;
 	Ok(recorded(done, |e| Journaled { event_id: e.raw() }))
 }
 
@@ -261,7 +260,7 @@ async fn close_booking(
 	IdempotencyKey(key): IdempotencyKey,
 	Body(b): Body<CloseBody>,
 ) -> ApiResult<Upserted<Journaled>> {
-	let done = panel.close_booking_once(Actor(caller.user_id), &brand, &lead, b.status, Timestamp::now(), key.as_deref()).await?;
+	let done = panel.close_booking_once(caller.by, &brand, &lead, b.status, Timestamp::now(), key.as_deref()).await?;
 	Ok(recorded(done, |e| Journaled { event_id: e.raw() }))
 }
 
@@ -369,6 +368,6 @@ struct AttachBody {
 /// 404 for a booking not known, or no such lead of its brand; 409 when it was joined by hand
 /// already.
 async fn attach_booking(State(panel): State<Panel>, caller: Caller, Ids(BookingPath { id }): Ids<BookingPath>, Body(b): Body<AttachBody>) -> ApiResult<Created<Journaled>> {
-	let event = panel.attach_booking(Actor(caller.user_id), id, &b.lead, Timestamp::now()).await?;
+	let event = panel.attach_booking(caller.by, id, &b.lead, Timestamp::now()).await?;
 	Ok(Created(Journaled { event_id: event.raw() }))
 }

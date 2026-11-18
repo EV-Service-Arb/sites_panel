@@ -144,6 +144,7 @@ impl Conductor {
 			email_verified: true,
 			name: "Olga".to_owned(),
 			permissions: permissions.iter().filter(|p| p.starts_with(Service::Sites.prefix())).collect(),
+			actor: None,
 		};
 		self.sign(Service::Sites, Principal::User(user), method, path)
 	}
