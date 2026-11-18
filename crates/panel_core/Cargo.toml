@@ -22,7 +22,7 @@ ts-rs.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
-regex = "1"
+regex = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }
 
 [lints]
