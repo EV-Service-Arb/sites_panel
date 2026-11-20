@@ -14,11 +14,17 @@ export type ViewParams<N extends ViewName> = Extract<ViewAt, { view: N }>["param
 export type Place = { kind: "view"; at: ViewAt } | { kind: "unknown" } | { kind: "outside" };
 
 const under = (pathname: string, base: string) => pathname === base || pathname.startsWith(`${base}/`);
+// the URL is the host's too: a key none of these names is the host's to keep (its own carried ones), not a view of ours
+const OWN = new Set<string>([...Object.values(VIEWS.views).flatMap((v) => Object.keys(v.query.properties)), ...Object.keys(VIEWS.carried.properties)]);
+const ours = (search: string) => {
+  const kept = search.replace(/^\?/, "").split("&").filter((p) => p !== "" && OWN.has(decodeURIComponent(p.split("=")[0]!)));
+  return kept.length > 0 ? `?${kept.join("&")}` : "";
+};
 
 export function placeOf(pathname: string, search: string, base: string): Place {
   if (!under(pathname, base)) return { kind: "outside" };
   try {
-    return { kind: "view", at: parse(VIEWS, `${pathname.slice(base.length) || "/"}${search}`).at };
+    return { kind: "view", at: parse(VIEWS, `${pathname.slice(base.length) || "/"}${ours(search)}`).at };
   } catch (e) {
     // An href that is no view is "nothing here", not a failure; anything else is.
     if (e instanceof ViewError) return { kind: "unknown" };

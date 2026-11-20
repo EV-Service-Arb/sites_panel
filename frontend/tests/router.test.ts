@@ -29,6 +29,11 @@ describe("where an href is under the host's base", () => {
       expect(viewOf(href), href).toBe("unknown");
   });
 
+  it("is the view whatever keys the host keeps beside its own", () => {
+    expect(viewOf("/sites/leads?assistant=sidebar&stage=created")).toEqual({ view: "leads", params: { stage: "created" } });
+    expect(viewOf("/sites?assistant=floating")).toEqual({ view: "start", params: {} });
+  });
+
   it("is outside for a path that only starts like the base", () => {
     for (const href of ["/sitesx/leads", "/review_archive", "/"]) expect(viewOf(href), href).toBe("outside");
   });
